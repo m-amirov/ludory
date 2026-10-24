@@ -346,3 +346,35 @@ test('rollback removes nested directories from their pinned parent, not a replac
   assert.equal(swapped, true);
   assert.equal(fs.existsSync(path.join(outside, 'nested')), true);
 });
+
+test('rollback never silently deletes a replacement installed between identity check and removal', t => {
+  const project = empty(t);
+  const plan = planCreate(project, params);
+  const originalOpen = fs.openSync;
+  const originalUnlink = fs.unlinkSync;
+  const originalRename = fs.renameSync;
+  let swapped = false;
+  function substitute() {
+    if (swapped) return;
+    swapped = true;
+    originalRename.call(fs, 'ludory.project.json', 'user-parked-original.json');
+    fs.writeFileSync('ludory.project.json', 'USER DATA');
+  }
+  fs.openSync = function (filename, flags, ...args) {
+    if (filename === 'index.html' && (flags & fs.constants.O_CREAT)) throw new Error('forced apply failure');
+    return originalOpen.call(this, filename, flags, ...args);
+  };
+  fs.unlinkSync = function (filename, ...args) {
+    if (filename === 'ludory.project.json') substitute();
+    return originalUnlink.call(this, filename, ...args);
+  };
+  fs.renameSync = function (source, target, ...args) {
+    if (source === 'ludory.project.json') substitute();
+    return originalRename.call(this, source, target, ...args);
+  };
+  try { assert.throws(() => applyCreatePlan(plan), /failure|rollback|replacement/i); }
+  finally { fs.openSync = originalOpen; fs.unlinkSync = originalUnlink; fs.renameSync = originalRename; }
+  assert.equal(swapped, true);
+  assert.equal(fs.readFileSync(path.join(project, 'ludory.project.json'), 'utf8'), 'USER DATA');
+  assert.equal(fs.existsSync(path.join(project, 'user-parked-original.json')), true);
+});

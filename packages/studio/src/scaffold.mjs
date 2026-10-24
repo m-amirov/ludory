@@ -156,7 +156,28 @@ function rollbackCreated(files, directories, project, rootIdentity) {
         failures.push(`modified output retained: ${name}`);
         continue;
       }
-      fs.unlinkSync(basename);
+      // A second writer can replace the basename after the check above.
+      // Move the current entry into a private same-directory quarantine,
+      // *then* verify what was actually moved before deleting anything.
+      // If a replacement won the race, link it back exclusively and report
+      // the incomplete rollback rather than deleting user-owned bytes.
+      const quarantine = `.ludory-rollback-${crypto.randomBytes(24).toString('hex')}`;
+      fs.renameSync(basename, quarantine);
+      const moved = fs.lstatSync(quarantine);
+      const movedBytes = moved.isFile() && !moved.isSymbolicLink() ? fs.readFileSync(quarantine) : null;
+      if (!movedBytes || moved.dev !== ownership.dev || moved.ino !== ownership.ino ||
+          (complete ? !movedBytes.equals(bytes) : movedBytes.length > bytes.length ||
+            !movedBytes.equals(bytes.subarray(0, movedBytes.length)))) {
+        try {
+          fs.linkSync(quarantine, basename);
+          fs.unlinkSync(quarantine);
+          failures.push(`concurrent replacement restored: ${name}`);
+        } catch (restoreError) {
+          failures.push(`concurrent replacement retained at ${quarantine} (${name}): ${restoreError.message}`);
+        }
+        continue;
+      }
+      fs.unlinkSync(quarantine);
     } catch (error) { failures.push(`${name}: ${error.message}`); }
   }
   for (const { name, dev, ino } of directories.reverse()) {
