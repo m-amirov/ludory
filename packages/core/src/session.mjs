@@ -1,0 +1,55 @@
+import { defineGame } from './definition.mjs';
+import { createStateStore } from './state.mjs';
+
+/** Host-driven, synchronous and platform-neutral game session. */
+export function createGameSession({ definition, initialState = {}, onUpdate = () => {} } = {}) {
+  const game = defineGame(definition);
+  if (typeof onUpdate !== 'function') throw new TypeError('onUpdate must be a function');
+  const store = createStateStore(initialState);
+  let status = 'idle';
+
+  function transition(expected, next) {
+    if (!expected.includes(status)) {
+      throw new Error(`Invalid lifecycle transition: ${status} → ${next}`);
+    }
+    status = next;
+  }
+
+  return Object.freeze({
+    getStatus: () => status,
+    initialize: () => transition(['idle'], 'ready'),
+    start: () => transition(['ready'], 'running'),
+    pause: () => transition(['running'], 'paused'),
+    resume: () => transition(['paused'], 'running'),
+    stop: () => transition(['ready', 'running', 'paused'], 'stopped'),
+    tick(deltaMs) {
+      if (status !== 'running') throw new Error(`Cannot tick unless running (status: ${status})`);
+      if (typeof deltaMs !== 'number' || !Number.isFinite(deltaMs) || deltaMs < 0) {
+        throw new TypeError('deltaMs must be a finite non-negative number');
+      }
+      onUpdate({ deltaMs, state: store.getState(), setState: store.setState });
+    },
+    getState: store.getState,
+    setState: store.setState,
+    snapshot() {
+      return {
+        schemaVersion: 1,
+        gameId: game.id,
+        gameVersion: game.version,
+        revision: store.getRevision(),
+        state: store.getState(),
+      };
+    },
+    restore(snapshot) {
+      if (!['idle', 'ready'].includes(status)) {
+        throw new Error(`Cannot restore after gameplay starts (status: ${status})`);
+      }
+      if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot) ||
+          snapshot.schemaVersion !== 1 || snapshot.gameId !== game.id ||
+          snapshot.gameVersion !== game.version) {
+        throw new TypeError('snapshot schema, game ID or game version mismatch');
+      }
+      store.restore({ revision: snapshot.revision, state: snapshot.state });
+    },
+  });
+}

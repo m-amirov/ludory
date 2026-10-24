@@ -1,0 +1,12 @@
+{
+  "name": "ludory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test packages/core/test/*.test.mjs",
+    "check": "node --check packages/core/src/definition.mjs && node --check packages/core/src/state.mjs && node --check packages/core/src/session.mjs && node --check packages/core/src/index.mjs && node --check examples/core-session.mjs"
+  }
+}
