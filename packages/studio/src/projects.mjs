@@ -7,13 +7,13 @@ import { readLegacyGameSpec, readSourceFile } from './legacy.mjs';
 
 const manifestName = 'ludory.project.json';
 
-function directoryIdentity(dir) {
+export function directoryIdentity(dir) {
   const stat = fs.lstatSync(dir, { bigint: true });
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Project directory is no longer a real directory');
   return `${stat.dev}:${stat.ino}`;
 }
 
-function isOriginalDirectory(project, identity) {
+export function isOriginalDirectory(project, identity) {
   try {
     const canonical = fs.realpathSync.native(project);
     const pathMatches = process.platform === 'win32'
@@ -24,7 +24,7 @@ function isOriginalDirectory(project, identity) {
   }
 }
 
-function projectRoot(projectDir) {
+export function projectRoot(projectDir) {
   const project = path.resolve(projectDir);
   const stat = fs.lstatSync(project);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Project must be an existing, real directory');

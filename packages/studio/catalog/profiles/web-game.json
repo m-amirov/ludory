@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "web-game",
+  "version": "1.0.0",
+  "description": "Minimal browser game without platform SDK dependencies",
+  "engine": "web",
+  "targets": ["yandex-games", "vk-games"],
+  "templates": ["web-basic"]
+}
