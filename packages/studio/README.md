@@ -1,4 +1,4 @@
-# `@ludory/studio` — project metadata, templates and safe profile adoption
+# `@ludory/studio` — metadata, templates, profiles and CEOS workflow adapter
 
 Node.js 22+. Run `node packages/studio/bin/ludory.mjs help` from this repository.
 
@@ -140,3 +140,42 @@ is historical provenance, **not** evidence of safe ownership for editing
 old template files. Applying a profile does not enable its validators or
 establish VK/Yandex runtime or release compliance. Replacing the Starter Kit
 and CEOS updater remains a later stage requiring behavioral parity tests.
+
+## CEOS workflows through the unified CLI
+
+Studio has a bounded adapter to the **existing CEOS 0.5.40 CLI**. It is not a native CEOS port: the installed CEOS owns workflows, recovery, `.ceos-runs`, `.codex-os` and evidence gates. The adapter requires an already valid `ludory.project.json`; this file and all existing game files remain unchanged by Ludory workflow commands. CEOS itself may modify its run/evidence files when you authorize a mutating operation.
+
+Every command accepts `--project DIR`, optional `--json`, and `--ceos-entry /absolute/path/to/bin/ceos.mjs`. If the entry flag is missing, Studio uses `LUDORY_CEOS_ENTRY`, then the npm-global CEOS package. It verifies the package name, `VERSION` and exact `0.5.40` pin. A missing entry, old version or stale Windows npm junction blocks execution; Studio never reinstalls or repairs CEOS automatically.
+
+| Studio command | CEOS action | Execution semantics |
+| --- | --- | --- |
+| `workflow doctor` | `doctor` | Immediate, read-only |
+| `workflow status [--run ID]` | `run-status ID\|latest` | Immediate, read-only |
+| `workflow next [--run ID]` | `continue ID\|latest --mode inspect` | Immediate, read-only |
+| `workflow start` | `run audit-repair-loop\|production-art` | Plan only; requires `--apply` to run |
+| `workflow continue [--run ID]` | `continue --mode inspect` (preview), `--mode guided` (apply) | Guided mode requires `--apply`; no `auto` mode |
+| `workflow checkpoint --stage STAGE [--run ID]` | `checkpoint` | Plan only; requires `--apply` to run |
+
+```sh
+# Inspect CEOS health, run state and next safe action.
+node packages/studio/bin/ludory.mjs workflow doctor --project /path/to/game --json
+node packages/studio/bin/ludory.mjs workflow status --project /path/to/game --run latest --json
+node packages/studio/bin/ludory.mjs workflow next --project /path/to/game --run latest --json
+
+# Bounded run: first preview; then only after explicit human decision add --apply.
+node packages/studio/bin/ludory.mjs workflow start --project /path/to/game \
+  --pipeline audit-repair-loop --target 'EP3 QA' \
+  --in-scope 'S24;S25' --out-of-scope 'S19;S20' \
+  --acceptance 'QA scope accepted' --mutation-boundary 'Evidence for S24 and S25' --json
+
+# Continue only inspects unless --apply enables guided CEOS continuation.
+node packages/studio/bin/ludory.mjs workflow continue --project /path/to/game --run latest --json
+
+# Checkpoint preview then append --apply only with verified artifacts and outcome.
+node packages/studio/bin/ludory.mjs workflow checkpoint --project /path/to/game \
+  --run latest --stage QA_REVIEW --artifact 'reports/qa.json' --outcome CONTINUE --json
+```
+
+The `--pipeline` value is restricted to `audit-repair-loop` and `production-art`; `--stage`, run IDs, artifact paths and flag names are validated. Text fields are passed as literal arguments, not shell commands. Unknown flags, duplicates and `--apply` on read-only operations are rejected. CEOS produces JSON; Studio includes it unmodified under `ceos`, alongside `ceosExitCode` and `status` (`OK`, `READY`, `APPLIED`, `BLOCKED`, `ESCALATE` or `FAILED`). Exit codes: `0` for successful inspection/preview/CEOS success; `1` for invalid CLI/CEOS transport or CEOS failure; `2` for CEOS blocked; `3` for CEOS escalation. A preview `READY` is not a run or PASS. No automatic retries of potentially mutating CEOS actions.
+
+The adapter's executable input is **trusted locally installed CEOS code**. Real CEOS still needs its own valid configuration (`.codex-os/project.yml`), which CEOS validates independently. `ludory.project.json` and that CEOS file describe different aspects of a project; no game-ID equality is inferred. Windows-host compatibility, live pinned-CEOS behavior, platform runtime and release gates still need independent real-host verification. If CEOS is unavailable, use the original CLI and do not claim the Ludory integration passed its host smoke.
