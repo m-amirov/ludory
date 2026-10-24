@@ -16,5 +16,6 @@ LUDORY is a modular game-development toolkit. `@ludory/core` must remain platfor
 
 - Use Node.js 22+ ESM, avoid unnecessary runtime dependencies, and write failing behavior tests before new Core behavior.
 - Keep packages isolated and expose public interfaces through package `exports`. Prefer small, versioned contracts.
-- For Core changes run `npm test`, `npm run check` and `node examples/core-session.mjs`.
+- For Core or Studio changes run `npm test`, `npm run check` and `node examples/core-session.mjs`.
+- Studio's current migration is metadata-only; do not extend it to game runtime, source rewrites, legacy config rewrites or release claims without a separate parity gate.
 - Preserve failing and blocked outcomes; never convert missing browser/device/platform evidence into PASS.

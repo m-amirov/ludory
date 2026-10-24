@@ -15,4 +15,4 @@ Source repositories were inspected through their GitHub default branches, read-o
 4. Record the old→new path and interface mapping, associated test, and parity verdict for each migrated behavior.
 5. Continue supporting original repositories until migration pilots and release gates pass.
 
-**Open inventory work:** source-level feature parity table and comprehensive edge-case tests are not yet complete; this checkpoint is structural, not a full audit.
+**Inventory closure:** [the capability matrix](migration/CAPABILITIES.md) assigns 29 functional groups to future owners and [the machine-readable source closure](migration/source-closure.json) records all 398 tracked files with repository, source path, blob hash and intended owner. This completes the pinned structural/function-group inventory, **not** behavioral parity. Upstream run-level edge-case characterization and old→new parity evidence remain required per capability before retirement.
