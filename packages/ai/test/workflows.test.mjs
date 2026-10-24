@@ -254,3 +254,136 @@ test('a valid same-run checkpoint event cannot be substituted for a Codex reques
   assert.equal(checks, 0);
   assert.equal(readNativeRun(project, id).events.length, 0);
 });
+
+test('cycle preview is read-only and a successful check stops at unverified manual checkpoint', t => {
+  const project = nativeProject(t);
+  markNewStudioGame(project);
+  const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
+  const plan = planWorkflow(project, 'cycle', { run: id, test: 'src/main.test.js', repairs: '2' });
+  assert.equal(plan.status, 'READY');
+  assert.equal(plan.requiredCommand, 'node --test src/main.test.js');
+  assert.equal(readNativeRun(project, id).events.length, 0);
+  let invoked = 0;
+  const executor = { check: () => ({ ok: true }), run: attempt => {
+    invoked++;
+    assert.equal(attempt.requiredCommand, 'node --test src/main.test.js');
+    return { ok: true, code: 'EXECUTED_UNVERIFIED', exitCode: 0,
+      transcriptSha256: 'a'.repeat(64), eventCount: 3, completed: true };
+  } };
+  assert.equal(executeWorkflow(plan, { executor }).status, 'READY');
+  assert.equal(invoked, 0);
+  const result = executeWorkflow(plan, { apply: true, executor });
+  assert.equal(result.status, 'EXECUTED_UNVERIFIED');
+  assert.equal(result.attempts, 1);
+  assert.equal(result.nextAction.kind, 'AWAIT_EVIDENCE');
+  assert.equal(readNativeRun(project, id).events.length, 2);
+  assert.equal(readNativeRun(project, id).nextStage, 'EVIDENCE_COLLECTED');
+});
+
+test('cycle performs bounded repairs on failed test telemetry and stops after 3 attempts', t => {
+  for (const passingAttempt of [2, Infinity]) {
+    const project = nativeProject(t);
+    markNewStudioGame(project);
+    const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
+    let invoked = 0;
+    const executor = { check: () => ({ ok: true }), run: executionPlan => {
+      invoked++;
+      if (invoked > 1) assert.match(executionPlan.input, /previous attempt.*failed or missing/i);
+      else assert.doesNotMatch(executionPlan.input, /previous attempt.*failed or missing/i);
+      const ok = invoked === passingAttempt;
+      return { ok, code: ok ? 'EXECUTED_UNVERIFIED' : 'EXECUTOR_CHECKS_FAILED', exitCode: 0,
+        transcriptSha256: 'f'.repeat(64), eventCount: 4, completed: true };
+    } };
+    const result = executeWorkflow(planWorkflow(project, 'cycle', { run: id,
+      test: 'src/main.test.js', repairs: 2 }), { apply: true, executor });
+    assert.equal(result.attempts, passingAttempt === Infinity ? 3 : 2);
+    assert.equal(invoked, result.attempts);
+    assert.equal(result.status, passingAttempt === Infinity ? 'FAILED_CHECKS' : 'EXECUTED_UNVERIFIED');
+    assert.equal(readNativeRun(project, id).events.length, result.attempts * 2);
+    assert.equal(readNativeRun(project, id).nextStage, 'EVIDENCE_COLLECTED');
+    assert.equal(readNativeRun(project, id).status,
+      passingAttempt === Infinity ? 'EXECUTION_FAILED' : 'EXECUTED_UNVERIFIED');
+  }
+});
+
+test('cycle stops on infrastructure failures without hidden retries', t => {
+  const project = nativeProject(t);
+  markNewStudioGame(project);
+  const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
+  let invoked = 0;
+  const result = executeWorkflow(planWorkflow(project, 'cycle', {
+    run: id, test: 'src/main.test.js', repairs: 2,
+  }), { apply: true, executor: { check: () => ({ ok: true }), run: () => {
+    invoked++;
+    return { ok: false, code: 'EXECUTOR_TIMEOUT', exitCode: null,
+      transcriptSha256: 'e'.repeat(64), eventCount: 0, completed: false };
+  } } });
+  assert.equal(result.status, 'FAILED');
+  assert.equal(result.attempts, 1);
+  assert.equal(invoked, 1);
+  assert.equal(readNativeRun(project, id).events.length, 2);
+});
+
+test('cycle rejects frozen games, unsafe tests, invalid budgets, pending runs and stale previews', t => {
+  const project = nativeProject(t);
+  const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
+  const args = { run: id, test: 'src/main.test.js' };
+  assert.equal(planWorkflow(project, 'cycle', args).status, 'BLOCKED');
+  markNewStudioGame(project);
+  for (const testPath of ['../outside.test.js', '/tmp/a.test.js', 'src/evil;rm.test.js',
+    '.ludory/ai/evil.test.js', 'src/main.js', 'src\\main.test.js']) {
+    const result = planWorkflow(project, 'cycle', { ...args, test: testPath });
+    assert.equal(result.status, 'BLOCKED', testPath);
+  }
+  for (const repairs of [-1, 3, '2.5', 'abc']) {
+    assert.equal(planWorkflow(project, 'cycle', { ...args, repairs }).status, 'BLOCKED');
+  }
+  assert.throws(() => planWorkflow(project, 'cycle', { ...args, executor: 'codex' }), /Unknown workflow option/);
+  const preview = planWorkflow(project, 'cycle', args);
+  const other = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true });
+  preview.runId = other.runId;
+  assert.throws(() => executeWorkflow(preview, { apply: true }), /TAMPERED|STALE/);
+  const pending = planWorkflow(project, 'continue', { run: id, executor: 'codex' });
+  commitNativeEvent(pending.nativePlan);
+  assert.equal(planWorkflow(project, 'cycle', args).status, 'BLOCKED');
+});
+
+test('cycle rejects symlinked test ancestors and stops before writes if Codex is unavailable', t => {
+  const project = nativeProject(t);
+  markNewStudioGame(project);
+  const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
+  fs.symlinkSync(path.join(project, 'src'), path.join(project, 'linked'));
+  assert.equal(planWorkflow(project, 'cycle', { run: id, test: 'linked/main.test.js' }).status, 'BLOCKED');
+  const good = planWorkflow(project, 'cycle', { run: id, test: 'src/main.test.js', repairs: 0 });
+  let ran = false;
+  const result = executeWorkflow(good, { apply: true, executor: {
+    check: () => ({ ok: false, code: 'EXECUTOR_UNAVAILABLE' }),
+    run: () => { ran = true; throw Error('unexpected'); },
+  } });
+  assert.equal(result.status, 'BLOCKED');
+  assert.equal(result.attempts, 0);
+  assert.equal(ran, false);
+  assert.equal(readNativeRun(project, id).events.length, 0);
+});
+
+test('cycle rechecks test paths between repairs and stops if Codex replaced a test with a symlink', t => {
+  const project = nativeProject(t);
+  markNewStudioGame(project);
+  const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
+  let invoked = 0;
+  const result = executeWorkflow(planWorkflow(project, 'cycle', { run: id,
+    test: 'src/main.test.js', repairs: 2 }), { apply: true, executor: {
+    check: () => ({ ok: true }),
+    run: () => {
+      invoked++;
+      fs.symlinkSync(path.join(project, 'src', 'main.js'), path.join(project, 'src', 'main.test.js'));
+      return { ok: false, code: 'EXECUTOR_CHECKS_FAILED', exitCode: 0,
+        transcriptSha256: 'f'.repeat(64), eventCount: 2, completed: true };
+    },
+  } });
+  assert.equal(result.status, 'BLOCKED');
+  assert.equal(result.attempts, 1);
+  assert.equal(invoked, 1);
+  assert.match(result.conflicts[0], /UNSAFE_TEST_PATH/);
+  assert.equal(readNativeRun(project, id).events.length, 2);
+});

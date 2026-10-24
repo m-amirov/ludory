@@ -22,10 +22,16 @@ export function hasStudioCreationReceipt(project) {
 }
 
 /** One bounded Codex subprocess, not a provider broker or a release verifier. */
-export function prepareCodexExecution(project, scope, stage, { gitRoot = null } = {}) {
+export function prepareCodexExecution(project, scope, stage,
+  { gitRoot = null, requiredCommand = null, repairAttempt = 0 } = {}) {
   if (!project || !stage || !scope?.target || !Array.isArray(scope.inScope)) {
     throw new Error('EXECUTOR_INVALID_SCOPE');
   }
+  if (requiredCommand !== null &&
+      (typeof requiredCommand !== 'string' || !/^node --test [A-Za-z0-9_.\/-]+\.test\.[cm]?js$/.test(requiredCommand) ||
+        requiredCommand.includes('..'))) throw new Error('EXECUTOR_INVALID_CHECK_COMMAND');
+  if (!Number.isInteger(repairAttempt) || repairAttempt < 0 || repairAttempt > 2 ||
+      (repairAttempt > 0 && !requiredCommand)) throw new Error('EXECUTOR_INVALID_REPAIR_ATTEMPT');
   const args = ['exec', '--json', '--ephemeral', '--sandbox', 'workspace-write'];
   if (!gitRoot) args.push('--skip-git-repo-check');
   args.push('-');
@@ -39,9 +45,17 @@ export function prepareCodexExecution(project, scope, stage, { gitRoot = null } 
     `Allowed mutation boundary: ${scope.mutationBoundary}`,
     'Do not edit ludory.project.json, ludory.studio.json, .ludory/ai, .git, .ceos-runs or .codex-os.',
     'Keep changes within the named scope. Report what actually changed and which checks ran.',
+    ...(repairAttempt > 0 ? [
+      `Repair attempt ${repairAttempt} of 2. The previous attempt produced a failed or missing test check.`,
+      'Inspect the existing project files and test failure, then fix the root cause before rerunning the test.',
+      'The previous Codex session is not preserved; rely on the current workspace state, not guessed prior output.',
+    ] : []),
+    ...(requiredCommand ? [`Run this exact test command inside your Codex workspace sandbox: ${requiredCommand}`,
+      'The command must complete with exit code 0; do not alter or merely quote the command.'] : []),
     'A successful answer is not independent verification or release PASS.',
   ].join('\n');
-  return { project, stage, args, input, sandbox: 'workspace-write' };
+  return { project, stage, args, input, sandbox: 'workspace-write',
+    ...(requiredCommand && { requiredCommand }) };
 }
 
 function resolveInvocation(executable, prefixArgs) {
@@ -120,6 +134,7 @@ export function runCodexExecution(plan, { executable = 'codex', prefixArgs = [],
   if (result?.status !== 0) return { ...receipt, code: 'EXECUTOR_NONZERO_EXIT' };
 
   let failed = false;
+  let observedCheckPassed = false;
   for (const line of stdout.split(/\r?\n/).filter(Boolean)) {
     let event;
     try { event = JSON.parse(line); }
@@ -129,6 +144,12 @@ export function runCodexExecution(plan, { executable = 'codex', prefixArgs = [],
     }
     receipt.eventCount++;
     if (event.type === 'turn.completed') receipt.completed = true;
+    if (plan.requiredCommand && event.type === 'item.completed') {
+      if (receipt.completed) return { ...receipt, code: 'EXECUTOR_MALFORMED_JSONL' };
+      if (event.item?.type === 'command_execution') {
+        observedCheckPassed = event.item.command === plan.requiredCommand && event.item.exit_code === 0;
+      } else if (event.item?.type === 'file_change') observedCheckPassed = false;
+    }
     // Codex can emit recoverable tool/API errors before a later completed turn.
     // Only a terminal turn.failed (or the process/JSONL guards above) fails the
     // execution; a completed turn remains EXECUTED_UNVERIFIED.
@@ -136,5 +157,6 @@ export function runCodexExecution(plan, { executable = 'codex', prefixArgs = [],
   }
   if (failed) return { ...receipt, code: 'EXECUTOR_TURN_FAILED' };
   if (!receipt.completed) return receipt;
+  if (plan.requiredCommand && !observedCheckPassed) return { ...receipt, code: 'EXECUTOR_CHECKS_FAILED' };
   return { ...receipt, ok: true, code: 'EXECUTED_UNVERIFIED' };
 }

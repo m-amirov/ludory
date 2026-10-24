@@ -2,7 +2,7 @@
 
 LUDORY is a modular toolkit for building and shipping browser games to Yandex Games, VK Games, and future platforms.
 
-> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports manifests, templates, profiles and **native Ludory AI workflows**. An opt-in, bounded Codex executor is available for newly created games; general autonomous development, full CEOS/Starter Kit replacement and platform release certification remain future gates. Existing games are frozen; historical CEOS runs will **not** be imported.
+> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports manifests, templates, profiles and **native Ludory AI workflows**. An opt-in, bounded Codex executor and controlled test/repair cycle are available for newly created games; general autonomous development, full CEOS/Starter Kit replacement and platform release certification remain future gates. Existing games are frozen; historical CEOS runs will **not** be imported.
 
 ## Modules
 
@@ -125,6 +125,8 @@ node packages/studio/bin/ludory.mjs workflow continue --project /path/to/game --
 # Opt-in Codex executor for a NEW game created by Studio: preview, then explicitly apply.
 node packages/studio/bin/ludory.mjs workflow continue --project /path/to/new-game --run latest --executor codex --json
 node packages/studio/bin/ludory.mjs workflow continue --project /path/to/new-game --run latest --executor codex --apply --json
+node packages/studio/bin/ludory.mjs workflow cycle --project /path/to/new-game --run latest --test src/main.test.js --repairs 2 --json
+node packages/studio/bin/ludory.mjs workflow cycle --project /path/to/new-game --run latest --test src/main.test.js --repairs 2 --apply --json
 # If the parent process was interrupted after ACTION_REQUESTED, preview recovery first.
 node packages/studio/bin/ludory.mjs workflow recover --project /path/to/new-game --run latest --json
 node packages/studio/bin/ludory.mjs workflow recover --project /path/to/new-game --run latest --confirm-no-executor --apply --json
@@ -133,6 +135,8 @@ node packages/studio/bin/ludory.mjs workflow checkpoint --project /path/to/game 
 ```
 
 `--apply` is mandatory for mutating `start`, `continue`, `recover` and `checkpoint`; `doctor`, `status` and `next` are read-only. By default, `continue --apply` records an **action request**, not an executed task. With `--executor codex`, it invokes the installed Codex CLI inside its `workspace-write` sandbox and stores only bounded execution metadata in the hash-chain ledger. The agent may modify files within the new game; `in-scope` is an instruction, **not a hard file allowlist**. A pending Codex request blocks checkpointing until its result is recorded. If the parent is interrupted, `recover` first previews an append-only failed result and requires `--confirm-no-executor`; it never assumes that missing output means completion. Codex completion yields `EXECUTED_UNVERIFIED`, never an independent quality or Release PASS. Direct Codex execution through Studio was verified on Windows/NTFS; descendant cleanup after forced parent termination remains unverified. When several runs are active, `status` lists their IDs; supply an explicit `--run`. No historic CEOS checkpoints are imported. See [Studio's workflow reference](packages/studio/README.md#native-workflows-through-the-unified-cli).
+
+`workflow cycle` is opt-in and preview-only without `--apply`. It executes the current stage in a new Studio-created game, requests a sandboxed `node --test` command, and repeats on missing/failing test telemetry at most twice (`--repairs 0|1|2`). Each attempt is recorded by existing native request/result events. A passing test command is **observed through Codex JSONL**, not independently verified, so success remains `EXECUTED_UNVERIFIED` and an explicit evidence checkpoint is still required. No automatic stage advancement or Release PASS occurs. Real Windows Codex command telemetry is still to be checked; synthetic regression tests do not establish production readiness.
 
 ## Frozen legacy repositories
 

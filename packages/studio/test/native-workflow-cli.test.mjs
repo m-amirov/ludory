@@ -191,6 +191,86 @@ test('CLI recovery previews, requires confirmation, then records an interrupted 
   assert.equal(readNativeRun(project, runId).events.length, 2);
 });
 
+test('CLI cycle previews without writes then retries an observed failing test once', t => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-cli-cycle-'));
+  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+  assert.equal(cli('create', '--project', project, '--id', 'cycle-test-game', '--title', 'Cycle',
+    '--lang', 'en', '--profile', 'web-game', '--template', 'web-basic',
+    '--targets', 'vk-games', '--apply', '--json').status, 0);
+  const start = cli('workflow', 'start', '--project', project, '--pipeline', 'audit-repair-loop',
+    '--target', 'Fix new game code', '--in-scope', 'src', '--acceptance', 'node test succeeds',
+    '--mutation-boundary', 'src only', '--apply', '--json');
+  const run = JSON.parse(start.stdout).runId;
+  let count = 0;
+  const executor = { check: () => ({ ok: true }), run: plan => {
+    count++;
+    assert.match(plan.input, /node --test src\/main\.test\.js/);
+    return { ok: count === 2, code: count === 2 ? 'EXECUTED_UNVERIFIED' : 'EXECUTOR_CHECKS_FAILED',
+      exitCode: 0, transcriptSha256: 'b'.repeat(64), eventCount: 4, completed: true };
+  } };
+  const invoke = (...extra) => {
+    let stdout = '', stderr = '';
+    const code = runCli(['workflow', 'cycle', '--project', project, '--run', run,
+      '--test', 'src/main.test.js', '--repairs', '1', '--json', ...extra],
+    { executor, out: text => { stdout += text; }, err: text => { stderr += text; } });
+    return { code, result: JSON.parse(stdout), stderr };
+  };
+  assert.equal(invoke().result.status, 'READY');
+  assert.equal(readNativeRun(project, run).events.length, 0);
+  assert.equal(count, 0);
+  const applied = invoke('--apply');
+  assert.equal(applied.code, 0, applied.stderr);
+  assert.equal(applied.result.attempts, 2);
+  assert.equal(applied.result.status, 'EXECUTED_UNVERIFIED');
+  assert.equal(readNativeRun(project, run).events.length, 4);
+  assert.equal(readNativeRun(project, run).nextStage, 'EVIDENCE_COLLECTED');
+  assert.equal(cli('workflow', 'cycle', '--project', project, '--run', run,
+    '--test', '../unsafe.test.js', '--json').status, 2);
+});
+
+test('CLI cycle integrates actual child-process JSONL observations without preserving transcript', t => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-cycle-subprocess-'));
+  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+  assert.equal(cli('create', '--project', project, '--id', 'process-cycle-game', '--title', 'Cycle',
+    '--lang', 'en', '--profile', 'web-game', '--template', 'web-basic',
+    '--targets', 'yandex-games', '--apply', '--json').status, 0);
+  const start = cli('workflow', 'start', '--project', project, '--pipeline', 'audit-repair-loop',
+    '--target', 'Repair title display', '--in-scope', 'src', '--acceptance', 'tested',
+    '--mutation-boundary', 'src only', '--apply', '--json');
+  const id = JSON.parse(start.stdout).runId;
+  const fixture = path.join(project, 'fake-cycle-codex.mjs');
+  const countFile = path.join(project, 'attempt-count');
+  fs.writeFileSync(fixture, [
+    "import fs from 'node:fs';",
+    "if (process.argv.includes('--version')) { process.stdout.write('codex mock\\n'); process.exit(0); }",
+    "const prompt = fs.readFileSync(0, 'utf8');",
+    "if (!prompt.includes('node --test src/main.test.js')) process.exit(4);",
+    "const marker = 'attempt-count';",
+    "const count = fs.existsSync(marker) ? Number(fs.readFileSync(marker, 'utf8')) + 1 : 1;",
+    "fs.writeFileSync(marker, String(count));",
+    "if (count > 1 && !prompt.includes('previous attempt')) process.exit(5);",
+    "process.stdout.write(JSON.stringify({type:'item.completed',item:{type:'command_execution',command:'node --test src/main.test.js',exit_code:count === 2 ? 0 : 1}})+'\\n');",
+    "process.stdout.write(JSON.stringify({type:'turn.completed'})+'\\n');",
+  ].join('\n'));
+  const executor = {
+    check: plan => checkCodexAvailable(plan, { executable: process.execPath, prefixArgs: [fixture] }),
+    run: plan => runCodexExecution(plan, { executable: process.execPath, prefixArgs: [fixture] }),
+  };
+  let stdout = '';
+  const code = runCli(['workflow', 'cycle', '--project', project, '--run', id,
+    '--test', 'src/main.test.js', '--repairs', '1', '--apply', '--json'],
+  { executor, out: text => { stdout += text; } });
+  assert.equal(code, 0, stdout);
+  assert.equal(JSON.parse(stdout).status, 'EXECUTED_UNVERIFIED');
+  assert.equal(JSON.parse(stdout).attempts, 2);
+  assert.equal(fs.readFileSync(countFile, 'utf8'), '2');
+  const current = readNativeRun(project, id);
+  assert.deepEqual(current.events.filter(item => item.kind === 'EXECUTION_RESULT')
+    .map(item => item.result.code), ['EXECUTOR_CHECKS_FAILED', 'EXECUTED_UNVERIFIED']);
+  assert.equal(JSON.stringify(current.events).includes('Repair title display'), false);
+  assert.equal(current.nextStage, 'EVIDENCE_COLLECTED');
+});
+
 function planWorkflowForTest(project, runId) {
   return planWorkflow(project, 'continue', { run: runId, executor: 'codex' }).nativePlan;
 }
