@@ -3,9 +3,10 @@
 ## Guiding rules
 
 - One monorepo and one product CLI, but independently testable packages. Do not combine unrelated systems into one enormous module.
-- One authoritative configuration per new project; introduce a migration layer for `game-spec.yaml` and CEOS manifests instead of silently changing their meaning.
+- One authoritative configuration per new project. Existing games are frozen; no old CEOS history or project migration is planned during Ludory development.
 - Keep game code, SDK adapters, AI orchestration and release certification separate.
-- Existing games, especially mature Phaser and visual-novel projects, remain **project-owned**. No silent overwrites.
+- Existing games, especially mature Phaser and visual-novel projects, remain **frozen and project-owned**. No development, automatic overwrites, CEOS checkpoint import or host testing in them.
+- Development checks must tolerate a dirty or unversioned working tree and normal source edits. Keep strict hash/host compliance evidence for Release only; never recreate nested CEOS session or worktree binding.
 - Adopt capability flags and target-specific outputs. VK Games and Yandex Games builds, SDKs, save payloads and publication gates must remain independent.
 - No platform acceptance without observed evidence, actual device/browser checks and the required platform-specific gates.
 
@@ -18,9 +19,9 @@
 | **2. Studio (profiles/templates in progress)** | Unified `ludory` CLI, manifest, safe metadata adoption and versioned profiles/templates for new projects; later ownership-aware updater | Preview/manifest creation and new-project scaffold covered by tests; mature-project update/rollback parity still pending |
 | 3. Runtime | Engine-agnostic host contract and optional Phaser integration, lifecycle, persistence, responsive UI, audio | Desktop/mobile behavior, persistence round trip, zero regressions in existing games |
 | 4. Connect | `@ludory/connect-yandex`, `@ludory/connect-vk`, feature/capability detection and per-platform entrypoints | SDK integration tests; isolated builds; real platform runtime observations |
-| 5. AI | Port CEOS state machine, scoped plans, evidence, agents/skills, capability routing and art pipeline | CEOS behavioral parity tests, recovery and safety gates; no false PASS |
+| 5. AI (native foundation in progress) | Portable native run/event store and CLI, then actual agent execution with one clear next action | Native tests without installed CEOS; dirty development/relocation supported, no false Release PASS |
 | 6. Release | Consolidate updater/build validation, compliance, artifact/signature checks and publication workflows | Independent Yandex and VK gates, real uploaded builds, publish requires owner authorization |
-| 7. Migration | Side-by-side project pilots then legacy sunset | Two production game pilots, reproducible migrations, no lost state/assets/rights/evidence, documented rollback |
+| 7. Optional fresh adoption (later) | Owner-selected attachment of an old game to a new Ludory run, **without importing CEOS history** | Explicit consent, read-only preview, frozen old source intact, rollback; no adoption while games are frozen |
 
 ## Source mapping
 
@@ -37,10 +38,10 @@
 
 ## Major risks and mitigations
 
-1. **Behavioral parity:** snapshot-source commit hashes and run contract tests before migration; compare old and new on shared fixtures.
-2. **Conflict between `game-spec.yaml` and CEOS profiles:** define a single versioned future project manifest with explicit translators and fail-closed conflicts.
+1. **Useful parity, not bureaucracy:** reproduce proven game-development behavior in new Ludory-owned test games, but never import old CEOS sessions or require nested parent/capability/worktree identity for daily development.
+2. **Legacy configuration:** treat `game-spec.yaml` and CEOS profiles as read-only historical references; do not force a translator into frozen games.
 3. **Platform leakage:** forbid VK/Yandex imports in `@ludory/core`; injection only from Connect and Runtime.
-4. **Existing project corruption:** initially read-only migration preview; no automatic overwrite of owned assets or `AGENTS.md`.
+4. **Existing project corruption:** frozen games receive no writes; any future voluntary adoption requires separate authorization, preview and ownership checks.
 5. **Premature release claims:** tests/builds do not replace live platform and human QA; retain independent gates and evidence.
 
 ## Not included in Phase 1
