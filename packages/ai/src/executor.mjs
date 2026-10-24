@@ -111,6 +111,15 @@ function spawnErrorCode(result) {
   return null;
 }
 
+function matchesRequiredCommand(observed, required) {
+  if (observed === required) return true;
+  if (process.platform !== 'win32' || typeof observed !== 'string') return false;
+  const wrapper = observed.match(/^"([^"]+)"\s+-Command\s+'([^']*)'$/i);
+  if (!wrapper || !path.win32.isAbsolute(wrapper[1]) ||
+      !['pwsh.exe', 'powershell.exe'].includes(path.win32.basename(wrapper[1]).toLowerCase())) return false;
+  return wrapper[2] === required;
+}
+
 export function checkCodexAvailable(plan, { executable = 'codex', prefixArgs = [], spawn = spawnSync,
   timeoutMs = MAX_DURATION_MS } = {}) {
   const result = invoke(executable, ['--version'], plan, spawn, undefined, timeoutMs, prefixArgs);
@@ -143,11 +152,18 @@ export function runCodexExecution(plan, { executable = 'codex', prefixArgs = [],
       return { ...receipt, code: 'EXECUTOR_MALFORMED_JSONL' };
     }
     receipt.eventCount++;
+    if (plan.requiredCommand && receipt.completed && event.type !== 'turn.completed') {
+      return { ...receipt, code: 'EXECUTOR_MALFORMED_JSONL' };
+    }
     if (event.type === 'turn.completed') receipt.completed = true;
+    if (plan.requiredCommand && event.type === 'item.started' &&
+        ['command_execution', 'file_change'].includes(event.item?.type)) {
+      observedCheckPassed = false;
+    }
     if (plan.requiredCommand && event.type === 'item.completed') {
       if (receipt.completed) return { ...receipt, code: 'EXECUTOR_MALFORMED_JSONL' };
       if (event.item?.type === 'command_execution') {
-        observedCheckPassed = event.item.command === plan.requiredCommand && event.item.exit_code === 0;
+        observedCheckPassed = matchesRequiredCommand(event.item.command, plan.requiredCommand) && event.item.exit_code === 0;
       } else if (event.item?.type === 'file_change') observedCheckPassed = false;
     }
     // Codex can emit recoverable tool/API errors before a later completed turn.

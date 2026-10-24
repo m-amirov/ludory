@@ -132,6 +132,20 @@ test('cycle requires an exact, machine-observed passing test command in Codex JS
   assert.equal(result.ok, true);
 });
 
+test('Windows PowerShell command wrappers preserve the exact machine-observed test', { skip: process.platform !== 'win32' }, () => {
+  const command = 'node --test src/main.test.js';
+  const wrapped = String.raw`"C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.exe" -Command '${command}'`;
+  const plan = prepareCodexExecution('/games/new', scope, 'EVIDENCE_COLLECTED', { requiredCommand: command });
+  const stdout = [
+    { type: 'item.started', item: { type: 'command_execution', command: wrapped, exit_code: null, status: 'in_progress' } },
+    { type: 'item.completed', item: { type: 'command_execution', command: wrapped, exit_code: 0, status: 'completed' } },
+    { type: 'turn.completed' },
+  ].map(event => JSON.stringify(event)).join('\n');
+  const result = runCodexExecution(plan, { spawn: () => ({ status: 0, stdout, stderr: '' }) });
+  assert.equal(result.code, 'EXECUTED_UNVERIFIED');
+  assert.equal(result.ok, true);
+});
+
 test('missing, failed, echoed, or merely started commands cannot pass cycle verification', () => {
   const command = 'node --test src/main.test.js';
   const plan = prepareCodexExecution('/games/new', scope, 'EVIDENCE_COLLECTED', { requiredCommand: command });
@@ -174,6 +188,9 @@ test('changes or commands after a passing check invalidate that check until it p
   assert.equal(run([...events.slice(0, 2), events[0], events[2]]).code, 'EXECUTED_UNVERIFIED');
   assert.equal(run([events[0], { type: 'item.completed', item: {
     type: 'command_execution', command: 'node -v', exit_code: 0 } }, events[2]]).code,
+  'EXECUTOR_CHECKS_FAILED');
+  assert.equal(run([events[0], { type: 'item.started', item: {
+    type: 'command_execution', command: 'node -v', exit_code: null } }, events[2]]).code,
   'EXECUTOR_CHECKS_FAILED');
   assert.equal(run([events[2], events[0]]).code, 'EXECUTOR_MALFORMED_JSONL');
 });
