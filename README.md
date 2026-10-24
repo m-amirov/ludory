@@ -2,13 +2,13 @@
 
 LUDORY is a modular toolkit for building and shipping browser games to Yandex Games, VK Games, and future platforms.
 
-> **Status:** foundation in progress. `@ludory/core` is the first independently tested module. This repository does not yet replace CEOS or Starter Kit, nor does it certify any platform release.
+> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` now begins with read-only planning and metadata-only adoption. This repository does not yet replace CEOS or Starter Kit, nor does it certify any platform release.
 
 ## Modules
 
 | Module | Responsibility | Stage |
 | --- | --- | --- |
-| Ludory Studio | Projects, templates, development workflows and project updates | Planned |
+| Ludory Studio | Projects, templates, development workflows and project updates | Metadata-only foundation |
 | Ludory Core | Framework-independent game definition, state and lifecycle | Foundation |
 | Ludory AI | CEOS orchestration, agents, workflows and evidence | Planned migration |
 | Ludory Runtime | Host UI, browser lifecycle, input, persistence, sound | Planned |
@@ -16,7 +16,7 @@ LUDORY is a modular toolkit for building and shipping browser games to Yandex Ga
 | Ludory Release | Validation, builds, evidence and distribution gates | Planned migration |
 
 The module map and migration stages are described in [the consolidation roadmap](docs/ROADMAP.md). Design decisions and compatibility limits are documented in [the architecture spec](docs/superpowers/specs/2026-10-24-ludory-foundation-design.md).
-The pinned source baseline is listed in [the source inventory](docs/SOURCE_INVENTORY.md).
+The pinned source baseline is listed in [the source inventory](docs/SOURCE_INVENTORY.md); a [29-group capability matrix](docs/migration/CAPABILITIES.md) and [398-file source closure](docs/migration/source-closure.json) record planned ownership without claiming feature parity.
 
 ## Start with Core
 
@@ -49,6 +49,29 @@ const snapshot = game.snapshot();
 ```
 
 The Core is optional for existing games. It does **not** import platform SDKs or choose renderers. Platform services are added through separate Runtime/Connect adapters in later stages.
+
+## Ludory Studio: first safe CLI slice
+
+The common manifest is `ludory.project.json`, validated by Core. It holds only identity, version, localized title, engine ID and target IDs; it does not replace platform configurations, CEOS run history or the legacy `game-spec.yaml`.
+
+```sh
+# Print commands; after npm install, use npm exec -- ludory ... if desired.
+node packages/studio/bin/ludory.mjs help
+
+# Inspect a mature game (read only).
+node packages/studio/bin/ludory.mjs inspect --project /path/to/game --json
+
+# Preview adoption from legacy Starter Kit game-spec.yaml schema 2 (read only).
+node packages/studio/bin/ludory.mjs migrate --project /path/to/game --json
+
+# Explicit, metadata-only adoption once status is READY and Git is clean.
+node packages/studio/bin/ludory.mjs migrate --project /path/to/game --apply --json
+
+# New game metadata in an *existing, empty* directory: dry-run by default.
+node packages/studio/bin/ludory.mjs init --project /path/to/empty --id my-game --title 'Моя игра' --lang ru --engine phaser --targets yandex-games,vk-games --json
+```
+
+`--apply` exclusively creates one file (`ludory.project.json`); it never modifies existing game code, assets, saves, `AGENTS.md` or platform settings. Mature games require a committed, clean Git worktree and unambiguous metadata. `BLOCKED` and `CONFLICT` require owner intervention. Read [Studio's first-slice contract](docs/superpowers/specs/2026-10-24-studio-foundation-design.md) for limitations; no template/updater/CEOS orchestration has been ported yet.
 
 ## Source-of-truth repositories during migration
 

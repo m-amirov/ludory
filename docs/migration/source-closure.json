@@ -1,0 +1,3202 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Exhaustive tracked-blob closure with intended module ownership; no functionality was copied or accepted as parity",
+  "generatedFrom": [
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "commit": "c8cc13bd3852409be93097ee823e9cd35e512b73",
+      "trackedBlobs": 219
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "commit": "7595fefe4e125c37c57a830d9bce60deda083489",
+      "trackedBlobs": 179
+    }
+  ],
+  "files": [
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": ".gitattributes",
+      "blobSha": "43c15a4d6008b1a64b806078b5e6164ee945ab30",
+      "kind": "other",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": ".github/workflows/release-0.5.7.yml",
+      "blobSha": "ededc9777e3412129c1e43f2932256cd6573fb29",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": ".gitignore",
+      "blobSha": "61fbc2e57bc7b9f210ab4118df0299308ea3b264",
+      "kind": "other",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": ".loop/phase03-autonomous-continuation-20261023.md",
+      "blobSha": "cdc5458df0e8c7da807547213d286e33a664779a",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "AGENTS.md",
+      "blobSha": "439cce8485151f4cd4a76e201c31615d1ad68674",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "agents/ceos-art-director-web.toml",
+      "blobSha": "c3c34e07c4c7ebeceeaf91c84872e8c32e452282",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "agents/ceos-asset-generator.toml",
+      "blobSha": "df612d4441c4f74661741f2c57b4d79ca3c5cc2d",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "agents/ceos-bulk-checker-web.toml",
+      "blobSha": "447ce41c5a14f1ef685073f6b9f8fd6861c223e9",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "agents/ceos-bulk-checker.toml",
+      "blobSha": "7b36ac354647b619d76e03a586518dc971b8af62",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "agents/ceos-debugger.toml",
+      "blobSha": "4be9fefa0f33c056f5b0eb827deb1ed93c3a9564",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "agents/ceos-explorer.toml",
+      "blobSha": "8e578291be02c4ee3069c0a4283eb291848bf10c",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "agents/ceos-implementer.toml",
+      "blobSha": "144f36ae522e8f66090a777e82df51198a67a7e8",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "agents/ceos-reasoner-web.toml",
+      "blobSha": "2a97130a7f6983c9dfcd179dbf4ce75d9d9681ff",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "agents/ceos-reviewer.toml",
+      "blobSha": "f0680dc3a6ba23cdee80811b3561d1697ee96bf4",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "agents/ceos-verifier.toml",
+      "blobSha": "93a31bd94e695bac06c6020b583a5d917bc5ecc9",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "bin/art-review-queue.mjs",
+      "blobSha": "51a2ead7bf253622665131e08067a025511161af",
+      "kind": "code",
+      "destination": "ai",
+      "family": "installation-cli"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "bin/art-rework-budget.mjs",
+      "blobSha": "a6859c565bece11b3aaec2dde77eca1d4b7d0ce2",
+      "kind": "code",
+      "destination": "ai",
+      "family": "installation-cli"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "bin/ceos.mjs",
+      "blobSha": "728da4c0ab302d70424d73c27da3dbd73f2cb032",
+      "kind": "code",
+      "destination": "ai",
+      "family": "installation-cli"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "bin/web-high-review-packets.mjs",
+      "blobSha": "78a881475ecd69acf3035f7ef4032846ad7e7b2d",
+      "kind": "code",
+      "destination": "ai",
+      "family": "installation-cli"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "CHANGELOG.md",
+      "blobSha": "33c54b5a41b1ed28f99acb1d11f4c19a309db1b0",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/architecture/dev-web-high.md",
+      "blobSha": "eccd049cc5bd9ff6f47aa37e536c192521cdcd88",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/architecture/hybrid-routing.md",
+      "blobSha": "48f3f4ac5d5fc85510dc7e09be8b2d838278bba7",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/architecture/model-routing.md",
+      "blobSha": "3c889b2c6795e2f69dc31978ed775efd24e637c6",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/architecture/openai-alignment.md",
+      "blobSha": "e7f242a4a0974a26c03afcda3fdd959a6a7e304f",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/architecture/overview.md",
+      "blobSha": "3a9ee49f4f0318fa2469d3c6b7db06cd506ea6b8",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/ART_OUTPUT_GATE_HARDENING_0.5.12.md",
+      "blobSha": "d3206ec195a454964edceddb9197c7af36eaad3d",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/art-review-queue.md",
+      "blobSha": "2e6766798509953aae2b3adf34200a897ffdca2a",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/art-rework-budget.md",
+      "blobSha": "47c61db9da058af53c37bd9a4e6f4a0d43920ede",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/audit-repair-loop-0.3.2.md",
+      "blobSha": "3e2bd394d1f3d815b7160bf118af599f0d22001b",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/CEOS_CONTINUE_V1.md",
+      "blobSha": "ab8fe4c3ce73dbf63251b4b11b5064516a34ddf9",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/CEOS_CONTINUE_V2.md",
+      "blobSha": "3219f1a57fe0ce001f5217e565e14d6af563b0cf",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/CEOS_PHASE01_04_CONSOLIDATION.md",
+      "blobSha": "5bde728d72cc25748b272a2732700c5be889c197",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/CEOS_PHASE04_EXECUTION.md",
+      "blobSha": "25475b09b523c995f32be5b2a853ac5968f700f9",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/CEOS_SIMPLE_WORKFLOW.md",
+      "blobSha": "b9f7bf97b3743d1f2cb7447e1c14d36c727963b6",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/decisions/0001-zero-runtime-dependencies.md",
+      "blobSha": "2ebd15aead321638a5205654cbaf9af77bf6dfc7",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/DIRECT_DEVELOPMENT_MODE.md",
+      "blobSha": "80932531abca9364801df57fb23c7952c819baee",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/engineering-principles/token-efficiency.md",
+      "blobSha": "fd95d6f97b8e99d1d14c8ae5c4211115b480bc9f",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/EPISODE_ART_FINALIZATION_V1.md",
+      "blobSha": "2929acffc7575dd7bf5aaf46b71f2cac57f3b724",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/exec-plans/schema.md",
+      "blobSha": "3930893ae00ba150e473188ec51628c6a7419708",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/execution-engine-0.5.0.md",
+      "blobSha": "6dd2fa6fef250e0749665daa46435ed62e031e95",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/execution-engine-0.5.15.md",
+      "blobSha": "6996db2cdd41c05b904bdb03f4abf9cf6765140a",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/execution-engine-0.5.16.md",
+      "blobSha": "6492921fe048bbd360fe83fd063b7ef61d72ef94",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/NARRATIVE_ART_ACCEPTANCE_V2.md",
+      "blobSha": "7d66ae4c16406cdfef3943549a7be2d15e48cf9b",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/NARRATIVE_ART_ACCEPTANCE_V3.md",
+      "blobSha": "61ae1db6e44e84ac6cc92589f11c315dcde89407",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/NARRATIVE_DEVELOPMENT_WORKFLOW.md",
+      "blobSha": "c7380fbd2123ff48cd184ad2c78ff59a4c9bcd0d",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/NARRATIVE_DUAL_FORMAT_ART.md",
+      "blobSha": "c3e197970236e3636dad029a341459f05d6bd67b",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/NARRATIVE_EDITORIAL_SKILLS.md",
+      "blobSha": "fd1417a6e952259ad0f38fb40c923bcc6e546d5f",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/NATIVE_TERRA_ROUTING.md",
+      "blobSha": "77fce47b10ec1b6ed5e44792933036fd35155b26",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/PHASE01_BLOCKER_RECOVERY.md",
+      "blobSha": "3ecfef86eaa78c347626b3f009dbac9cd0440770",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/production-art-0.4.0.md",
+      "blobSha": "c99ac7705cf7d1512f16265c3004724c4c4ab578",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/SOURCE_BOUND_REVALIDATION_V1.md",
+      "blobSha": "8a76d2e00439099fec1b0d648079ab0a4b196216",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/superpowers/plans/2026-10-23-ceos-phase01-04-consolidation.md",
+      "blobSha": "6d233ac85050701e3dcf4931a7eca4855951ad5d",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/superpowers/plans/2026-10-23-phase04-execution-ci.md",
+      "blobSha": "d9decd79c2a20836fbcb4f0528b9e09ca651e46d",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/superpowers/specs/2026-10-23-ceos-phase01-04-consolidation-design.md",
+      "blobSha": "6f0f48f26f829299356d7d3b28d9744098ded8e0",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/superpowers/specs/2026-10-23-phase04-execution-ci-design.md",
+      "blobSha": "f736c09c29f4763e69d3917aec6201cea83288f0",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/web-high-quota-review-packets.md",
+      "blobSha": "09df1c6b1cc659582053f76cee802dc828230c30",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/workflows/integration.md",
+      "blobSha": "926030b8dc82a606f52555cd4f55115938a521a3",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "docs/WORKTREE_HYGIENE.md",
+      "blobSha": "195341d9cc1eb5194d69124727ecdb50f342b268",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "architecture-policy"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "evidence/schemas/evidence-summary.schema.json",
+      "blobSha": "6aacb7f33b1830b05bd1c98e5a3be29faebf5559",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "examples/generic/project.yml",
+      "blobSha": "dc79f97a4b50a0231b9dd894cfe5fe67825f6f18",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "examples/node-web/project.yml",
+      "blobSha": "b8b1cd5dec0f6d1ece2ca116604be91b7d2af821",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "examples/platibridge/project.yml",
+      "blobSha": "b92b82a745a530d3ab2f8edd24afd0625e9493d6",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "examples/twork-desktop/project.yml",
+      "blobSha": "b0225db2e192689ad15f5dbad36f0d673ba1a5db",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "examples/yandex-games/project.yml",
+      "blobSha": "bb0d2cdd550c281bca5e077c5a225bd7ff015ddd",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "gates/definitions/core.md",
+      "blobSha": "42f89549a9d75ff7b48260fd61fc364816cba7ba",
+      "kind": "documentation",
+      "destination": "release",
+      "family": "evidence-verification"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "gates/schemas/project-manifest.schema.json",
+      "blobSha": "ea60b833030bf1688b249e208413e5d63e1a128d",
+      "kind": "configuration",
+      "destination": "release",
+      "family": "evidence-verification"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "global/AGENTS.md",
+      "blobSha": "fd1fbbef9ed308f0732e12502c337c084d2e5ca8",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "installation-cli"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "hooks/ceos-runtime-context.mjs",
+      "blobSha": "d86193278d9db08004e634d731ad402fd8394d80",
+      "kind": "code",
+      "destination": "ai",
+      "family": "installation-cli"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "INSTALL.md",
+      "blobSha": "b61fa585cda13200023b0b2b6f8e905d459f19a6",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "package.json",
+      "blobSha": "b14aba87ec6aabe921000d22bde673fed2f879fe",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "policies/art-producer.md",
+      "blobSha": "98e4e012977402f178e7efa5863aff9576dfa523",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "policies/evidence.md",
+      "blobSha": "565280bcf90f4989b0fcd5f6d262d1e96b19bbb9",
+      "kind": "documentation",
+      "destination": "release",
+      "family": "evidence-verification"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "policies/failure-catalog.json",
+      "blobSha": "22bcd918033699094238ff6acedcf9fee834422e",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "policies/git.md",
+      "blobSha": "cc37e5adafe8161c0936577c205f93326dcad8f8",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "repository-safety"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "policies/model-routing.md",
+      "blobSha": "bdbb56262277d12786cf4e162d8109a7d52c7476",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "policies/native-delegation.md",
+      "blobSha": "7cd8d3f528691dde5fc29cc88bbc174bc1b4bf12",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "policies/production.md",
+      "blobSha": "553afa48411c3386f765a34d7a3c4418ff856ec4",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "policies/safety.md",
+      "blobSha": "f850f5372d061158f40398ad1cf85f9b7ad0f8de",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "policies/stop-conditions.md",
+      "blobSha": "5dea7deb5610467d7a9918f6ca8f0392d428f103",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "policies/testing.md",
+      "blobSha": "d237c84e6f30dbd7c434dcc388060f8eff12dde8",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "policies/web-delegation.md",
+      "blobSha": "71e92e465d665ea6b25f8220657408fd1168cf50",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "policies/web-transport.md",
+      "blobSha": "4209d56cb5e3afb3f77f5d658617096ea298626d",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "profiles/generic/PROFILE.md",
+      "blobSha": "317c01cc8a8bb93db185424f857b8e33979c6682",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "project-profiles"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "profiles/node-web/PROFILE.md",
+      "blobSha": "6511b3483490bc05824598f4b100df2e176f07c5",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "project-profiles"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "profiles/platibridge/PROFILE.md",
+      "blobSha": "eb1ffca2df21cb3697e33de4451830f08277b4ee",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "project-profiles"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "profiles/twork-desktop/PROFILE.md",
+      "blobSha": "cc3053e6e870118a5a24bf62927b86ca02d62f74",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "project-profiles"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "profiles/yandex-games/PROFILE.md",
+      "blobSha": "278989a85a9492c8b7f51c8620539be99d7e2097",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "project-profiles"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "README.md",
+      "blobSha": "89ba42ee88513e701c7133c0fa1f9fdeedd06506",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "RELEASE_REPORT.md",
+      "blobSha": "3309342a3feb126e885e0cde6644b1d0505ea494",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "scripts/install-global.ps1",
+      "blobSha": "8e450a95cc6cb3a1d9555ed72fbae2d4bd8619ce",
+      "kind": "code",
+      "destination": "ai",
+      "family": "installation-cli"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "scripts/install-hybrid.ps1",
+      "blobSha": "49ecb42c562274a9a8c7b4e955d2b670b21a9fc7",
+      "kind": "code",
+      "destination": "ai",
+      "family": "installation-cli"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/audit-repair-loop/agents/openai.yaml",
+      "blobSha": "3694fbb55d49d5b361a10e7502586be583321b7d",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/audit-repair-loop/SKILL.md",
+      "blobSha": "b5ea82a38b357b1fba31a064c30bc8093060d6aa",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/audit/agents/openai.yaml",
+      "blobSha": "6e913f4ec3d72fabc782113e43fcb7a794fa8140",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/audit/SKILL.md",
+      "blobSha": "4315cc22707ba9adc7f0e04c2a47eeaf8b31d411",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/ceos-continue/SKILL.md",
+      "blobSha": "d6e3fca2bebd9ea71f210ecdee6b0eb79234e7b9",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/fix/agents/openai.yaml",
+      "blobSha": "c0fa9dd7f70d61416f48d1b08db5ea8c0b5b7369",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/fix/SKILL.md",
+      "blobSha": "3de0ff2e489f1500ff3aec61daa47dc4e4432c1e",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/incident-analysis/agents/openai.yaml",
+      "blobSha": "7b14c5848a506884ec745ca6a9712ed98e2b6b8c",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/incident-analysis/SKILL.md",
+      "blobSha": "784ddc2f6bccccae2c3a3128acf89c9431b6d9be",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/narrative-continuity-engine/SKILL.md",
+      "blobSha": "84b4f36fc90b858e088a354312ab047d34a2716e",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/narrative-dialogue-editor/SKILL.md",
+      "blobSha": "a0b2d2fda0eab462823148826b3d9891426e9a60",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/prod-check/agents/openai.yaml",
+      "blobSha": "46adfe09c95453c4ebe31c33038ca46b4aa8e424",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/prod-check/SKILL.md",
+      "blobSha": "06db97abb37547dd859e3bedacc08bc324f83e4b",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/production-art/agents/openai.yaml",
+      "blobSha": "0cb8f32618ca8d1246ec4d9f674bbeb3c4d45813",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/production-art/SKILL.md",
+      "blobSha": "55d4e9396ed7fd2e9405b5b3eed701e16dd7df75",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/reader-experience-review/SKILL.md",
+      "blobSha": "3d452aad58000a75697babdb9876212d1751dca8",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/release/agents/openai.yaml",
+      "blobSha": "c7147c6c355487fe582716674120fb4f2b58bc1e",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/release/SKILL.md",
+      "blobSha": "5671654e40b35f048e214c665c967771d03d9a7c",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/romance-narrative/SKILL.md",
+      "blobSha": "e2d81731242874c453591f30c03638d308359f23",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/verification/agents/openai.yaml",
+      "blobSha": "5fcb553fdbf765d31ba4f0a49706b8ef256a6e08",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/verification/SKILL.md",
+      "blobSha": "f74a7644b106efb2d77e2074635cc5e11df26c83",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/video-production/SKILL.md",
+      "blobSha": "100cb68921236ed9497d62df0acfd6bd6351cc28",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/visual-qa/agents/openai.yaml",
+      "blobSha": "c0b3ec4307011213f54ce182c4f85d74fa69268c",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "skills/visual-qa/SKILL.md",
+      "blobSha": "1f97e3ca44664850312d35bdcfce89f6080913e1",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-skills"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/adoption.mjs",
+      "blobSha": "2befe14d64ef884ceca0282a8cf2056627943c43",
+      "kind": "code",
+      "destination": "studio",
+      "family": "repository-safety"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/art-candidate-ledger.mjs",
+      "blobSha": "ccb7aa5f249f507cacc7c76d123fbaeab65d8b0b",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/art-change-impact.mjs",
+      "blobSha": "1e3240859e6247383bb97262607221bb112210c5",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/art-output-gate.mjs",
+      "blobSha": "5f9543fd05b7df072b26d1d350fd2ecaa3d17436",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/art-output-recovery.mjs",
+      "blobSha": "c04bb03893d7b93ec3e81770efd3ab18dc72ac6a",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/art-output-transport.mjs",
+      "blobSha": "06592b06dbbcf7d429096679738a6b582210261d",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/art-producer-brief.mjs",
+      "blobSha": "8b5fdee411aac3cfab637f71faf998f6aa2f96b8",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/art-progress.mjs",
+      "blobSha": "39be43db0c186eda3c6f3d53f76329a0155646c6",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/art-review-queue.mjs",
+      "blobSha": "12fb144a5c5caa0090c36c1b9f93208855f6fb00",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/art-rework-budget.mjs",
+      "blobSha": "e37e720dd7a10b9babed1e6acd3288519d99b4a0",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/capabilities.mjs",
+      "blobSha": "0ab7a87cd56ef705d515b756368810c3413704ac",
+      "kind": "code",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/capability-attestation.mjs",
+      "blobSha": "6560bdb367c47da895becc8856fe5a83d4d5c237",
+      "kind": "code",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/capability-broker.mjs",
+      "blobSha": "907fc39f5b061625d48867df5e47c4f962a465b6",
+      "kind": "code",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/ceos.mjs",
+      "blobSha": "7fae4f4c30577de841973dd85076616acf9a0525",
+      "kind": "code",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/checkpointed-art-dirt.mjs",
+      "blobSha": "4d4d749457c3f6e83e467ebb5ec6b8c285a38be6",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/continuation-controller.mjs",
+      "blobSha": "00e54f9087608f80138f83a68b394cf797ca89a9",
+      "kind": "code",
+      "destination": "ai",
+      "family": "execution-continuation"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/continuation-recovery.mjs",
+      "blobSha": "d0e9d9243f255a4e0f3cfe5a6ceb9e7906a75983",
+      "kind": "code",
+      "destination": "ai",
+      "family": "execution-continuation"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/dev-web-high-transport.mjs",
+      "blobSha": "fc9ca07c41391b0355689df5dfd7d7c15596efdb",
+      "kind": "code",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/direct-workflow.mjs",
+      "blobSha": "f1e885bf09af88cf693f5361969e9f5ccbc385c7",
+      "kind": "code",
+      "destination": "ai",
+      "family": "execution-continuation"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/episode-art-finalization.mjs",
+      "blobSha": "302a6c37af6ae602d412c524e4d1b80e28c27052",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/evidence-contract.mjs",
+      "blobSha": "53d0305a5f6a0058fa4e1e7bd4be3143bf1262ea",
+      "kind": "code",
+      "destination": "release",
+      "family": "evidence-verification"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/execution-engine.mjs",
+      "blobSha": "d99b925de0bb7f3641f5bfa4722310946d08f375",
+      "kind": "code",
+      "destination": "ai",
+      "family": "execution-continuation"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/existing-art-reuse.mjs",
+      "blobSha": "27ec1e5a8410a28ad92b17220efbb82335710ab6",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/git-preflight.mjs",
+      "blobSha": "39ed03b687fec3d58940ee2a524c217b1853f33e",
+      "kind": "code",
+      "destination": "studio",
+      "family": "repository-safety"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/narrative-art-acceptance-v3.mjs",
+      "blobSha": "037144de80274a09b350d8601ae577f19366d9a0",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/narrative-art-acceptance.mjs",
+      "blobSha": "bcc0d3db2111805281e12b133979a09d625adc12",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/narrative-dual-format-art.mjs",
+      "blobSha": "e4b4e634dd08d29d7f5116dab56fdd44578e6ddc",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/narrative-source-resolver.mjs",
+      "blobSha": "b28f6f67723d229a654a4808da91d486a4f2a2fb",
+      "kind": "code",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/native-producer-routing.mjs",
+      "blobSha": "94ce829dc0739fe9a1643142754ceba86ede1447",
+      "kind": "code",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/process-tree.mjs",
+      "blobSha": "9de2795f7c6ee8b81c3bd40772134b46a23b7d13",
+      "kind": "code",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/project-continuation.mjs",
+      "blobSha": "28058e20a4cbd0569c06f81507f8b62bfec9f348",
+      "kind": "code",
+      "destination": "ai",
+      "family": "execution-continuation"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/resolution-receipt.mjs",
+      "blobSha": "8532b915c7944ef649e1fda9394fa6bcc16ef8aa",
+      "kind": "code",
+      "destination": "ai",
+      "family": "execution-continuation"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/run-relocation.mjs",
+      "blobSha": "6f873fe29b279c827487b7cf037ee84618ff3bfd",
+      "kind": "code",
+      "destination": "studio",
+      "family": "repository-safety"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/runtime-context.mjs",
+      "blobSha": "4555228cf0b5d056b68616392528fcd20668f732",
+      "kind": "code",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/source-bound-revalidation.mjs",
+      "blobSha": "dd2c10e42567bfe1fdfe5350e31c03e57100b793",
+      "kind": "code",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/source-fingerprint.mjs",
+      "blobSha": "308a3f9f354cfd67d1e35f4d6cdbf4f6153bf344",
+      "kind": "code",
+      "destination": "release",
+      "family": "evidence-verification"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/temporary-blocker-recovery.mjs",
+      "blobSha": "f5f6f79018253b5271e8bfd3f1534b8ff6152a8d",
+      "kind": "code",
+      "destination": "ai",
+      "family": "execution-continuation"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/verification-process.mjs",
+      "blobSha": "a5f6e5ce15fd67f57f9bf024516057d7eb8fb681",
+      "kind": "code",
+      "destination": "release",
+      "family": "evidence-verification"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/verification-replay.mjs",
+      "blobSha": "2715ce97d90013313bc0559017b763d9d1d7c11e",
+      "kind": "code",
+      "destination": "release",
+      "family": "evidence-verification"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/web-delegation.mjs",
+      "blobSha": "1cd98845e5524c150da4f435784acc011b6adf97",
+      "kind": "code",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/web-high-review-packets.mjs",
+      "blobSha": "2234646e97c3757ed73e8ac97277521a46a074ee",
+      "kind": "code",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/web-preflight.mjs",
+      "blobSha": "2232ccfb51f98ee6e531aa7160d11cea58bbc73a",
+      "kind": "code",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/web-transport-failure.mjs",
+      "blobSha": "f7ade7ebb5807fa628ab83ba5bd5d31c28353092",
+      "kind": "code",
+      "destination": "ai",
+      "family": "capability-routing"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/worktree-hygiene.mjs",
+      "blobSha": "5a0152d2fdb2fee30faebd53c157e3983fcbbee8",
+      "kind": "code",
+      "destination": "studio",
+      "family": "repository-safety"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "src/yaml-lite.mjs",
+      "blobSha": "51b46d0c337683bc4ea30b3b86ed4200ba2c8328",
+      "kind": "code",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "templates/narrative/STORY_PROMISE_LEDGER.md",
+      "blobSha": "396ef0de0f34dbb47aeaff89d0d3648f3288adfd",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "production-art-narrative"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/adoption.test.mjs",
+      "blobSha": "0269ce9caf56990e09cbf22333f431fdd88515af",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/art-change-impact.test.mjs",
+      "blobSha": "35e8bb3f8c212ff3ddc05f00f658482e01eb37f7",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/art-output-gate.test.mjs",
+      "blobSha": "a7d9ddb2877d36031ea711166af989619a54313c",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/art-output-recovery.test.mjs",
+      "blobSha": "5907d7f92bf07d27f76866ca0cc71405d915ab0e",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/art-output-transport.test.mjs",
+      "blobSha": "0aa5c949fdcfd299afcf58463d85eafe24a635f9",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/art-producer-brief.test.mjs",
+      "blobSha": "b0cd890f69891774ec5eaeb1cc5f2277c758f6db",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/art-progress.test.mjs",
+      "blobSha": "0654ad0cb69ae55966ff27af169713e76b76e68e",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/art-review-policies.test.mjs",
+      "blobSha": "95aef8ecf403b71683f19e431eafd26e8e721acb",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/art-review-queue.test.mjs",
+      "blobSha": "716a7f99787d3a4d985a87bfcb78432bdf0e83d8",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/art-rework-budget.test.mjs",
+      "blobSha": "a93c1e1acfcfc998dd84a621c5b00f5414da88ad",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/art-rework-integration.test.mjs",
+      "blobSha": "f207fe2d58b61d70aad29f21d2b48e63b7311337",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/audit-repair-loop-regression.test.mjs",
+      "blobSha": "a9f344bc40a2a836a0918e3fe5a60a4ccb9d396f",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/capability-attestation.test.mjs",
+      "blobSha": "fe7702db58d802f268ef0e428ba77bb7d350da17",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/cli-execution-engine.test.mjs",
+      "blobSha": "0dc598a9c351994b43cd1022061073e0844beb37",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/cli-help-safety.test.mjs",
+      "blobSha": "a729cdfe028d1a3998955cddb3d39f4c30e42ad0",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/cli-web-preflight.test.mjs",
+      "blobSha": "87ecfbfc360496120b063cce86c7ee80556e98e2",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/continuation-controller.test.mjs",
+      "blobSha": "096120a55b6dac820b845a7e6dc9aa7bc2abc782",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/core.test.mjs",
+      "blobSha": "db924e1e747ae29250b7ba5e664b68dafc6dae69",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/dev-web-high-transport.test.mjs",
+      "blobSha": "e4997928261c2bf910a8b047c32afa4001e24199",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/direct-workflow.test.mjs",
+      "blobSha": "3ed907afa661657bf93f382caa064776c94cdceb",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/episode-art-finalization.test.mjs",
+      "blobSha": "427494438d799cfe7641ec5455d8c62408fe8d8d",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/evidence-contract.test.mjs",
+      "blobSha": "929fba333c70261fde449fb6df8dbac7533a3f2e",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/execution-engine.test.mjs",
+      "blobSha": "9ab5f2df50934b0b47aa96a1831b49f9a170fb8a",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/fixtures/art-output/s26-damir-doorway-neutral.png",
+      "blobSha": "7f6bb789cfadc7c4b7795b24256929c9e3130e64",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/fixtures/phase04-browser-helper.cjs",
+      "blobSha": "0f4034e4dfc519a2761391b22a021feaa6aaf1e8",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/git-preflight.test.mjs",
+      "blobSha": "ef5e8cbb9742d0c21c4fee232d4715fce486c531",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/global-install.test.mjs",
+      "blobSha": "58dd5f135dc1ffaf221fa451b9e0922a4545f3a4",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/hybrid-routing-files.test.mjs",
+      "blobSha": "2797cc4e18bd771655ce889fead631b6739d4e28",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/install-isolation-regression.test.mjs",
+      "blobSha": "07eaaf41bb738407cd2ebd692335196941dcd82d",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/narrative-art-acceptance-v2.test.mjs",
+      "blobSha": "f4c204b3567f7fef06fc50307e7fc34db75827fb",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/narrative-art-acceptance-v3.test.mjs",
+      "blobSha": "09f69104599bbe9cb5cddaad0cb460032e88df3c",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/narrative-creative-workflow.test.mjs",
+      "blobSha": "2735dc445179ac31d01ee651b2d2477c275c4a81",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/narrative-dual-format-art.test.mjs",
+      "blobSha": "c34bd7ddbd6821fe1a1f6fc6b8a7590be6e03cb7",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/narrative-editorial-skills.test.mjs",
+      "blobSha": "2c829a6cb7dee6731eda0b0c2112a170306dbb7f",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/native-delegation.test.mjs",
+      "blobSha": "30a4d86d05e18b100a0d56634ebc9dabaf7bf9a7",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/native-producer-routing.test.mjs",
+      "blobSha": "20acf18e427aabb992cb7a9724994534b69f0342",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/phase01-blocker-recovery.test.mjs",
+      "blobSha": "00ef899747823b0585d83833aa0cdc54415582d0",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/phase03-autonomous-continuation.test.mjs",
+      "blobSha": "b9bb6e73dcd7a815d4154916dff5950d21dcd0d9",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/phase04-provider-lifecycle.test.mjs",
+      "blobSha": "3d177955d1c3864b56e40154dfab1b0d41c60822",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/phase04-replay.test.mjs",
+      "blobSha": "a84a15763c21471774ff3ccbfcd2a56274f76f06",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/phase04-verification-process.test.mjs",
+      "blobSha": "1ee9140c18fcc775fc346b1cb0fb97fee50e3973",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/phase04-worktree-hygiene.test.mjs",
+      "blobSha": "4c28e09e6bd2c982745ae3e62afc64c05970f7e2",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/production-art-agent-contract.test.mjs",
+      "blobSha": "c7c184da2a13ef5bb846f7152b7edf856c6b194f",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/production-art-regression.test.mjs",
+      "blobSha": "11ae4e003975f588e4339d1af286f6f964bda7ea",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/project-continuation.test.mjs",
+      "blobSha": "e347b9763725338128bb836406f963b0221362c9",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/repository-shape.test.mjs",
+      "blobSha": "ca77956d44d456a141f66834e2cf85260dbf39d0",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/resolution-receipt.test.mjs",
+      "blobSha": "4dfdb2bc2c847004b1309a238aa6cd89ab987aad",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/run-relocation.test.mjs",
+      "blobSha": "3bdc0dee86fbfb9b8d2c2a105cda3c60fe5cc5af",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/runtime-hook.test.mjs",
+      "blobSha": "de128ff7f7fb65babdc27ad0f0c5d87c2f8a5745",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/skills-format.test.mjs",
+      "blobSha": "346b6d17a5f2a7a21e4aac8b6cde1c1eabb90961",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/source-bound-revalidation.test.mjs",
+      "blobSha": "c154639d1264bc4b3ff51689768ef37255248a02",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/web-attachment-quota.test.mjs",
+      "blobSha": "2b70b2f9bded6716eae5b31941934b018d05acd8",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/web-delegation.test.mjs",
+      "blobSha": "28c6f7da699af48e0538f2743c2759b2b2ae4d8b",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/web-high-review-packets.test.mjs",
+      "blobSha": "7f4aa7277937a1f8b92da2ef32bccc470bc207fa",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/web-high-routing.test.mjs",
+      "blobSha": "026a34a070951ac9a6607342ffffe21a79888fc9",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/web-preflight.test.mjs",
+      "blobSha": "daab6850a4105e194730b2dbed1da1cd121e46c2",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "tests/yaml-lite.test.mjs",
+      "blobSha": "39c6a54714ab15bc5a1e8ab5c6a4196bf9bb02e1",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/codex-engineering-system",
+      "path": "VERSION",
+      "blobSha": "f60ca0ff3508357abe89a6ebb4d9af35bc673a71",
+      "kind": "other",
+      "destination": "ai",
+      "family": "workflow"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/asset-provenance-and-rights/SKILL.md",
+      "blobSha": "a8932652e18e5fa7eb95a3fdfbcdefd313979364",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/codex-engineering-system/SKILL.md",
+      "blobSha": "ad39664e0c69cb08c5eec1ebcd0eaadf12518d7d",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/game-accessibility/SKILL.md",
+      "blobSha": "150e3371c5698df3d77685fd73a0943added39d9",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/game-audio-quality/ORIGIN.md",
+      "blobSha": "ed9dcb963c9af41942753f2d5d9dc8521717daab",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/game-audio-quality/SKILL.md",
+      "blobSha": "6aabdcc75faf29aaa83d94c45a98a92be237864f",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/game-feel-polish/SKILL.md",
+      "blobSha": "b4815ecf12b654552c4997e67046bbb60c60c2b3",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/game-performance-budget/SKILL.md",
+      "blobSha": "15144a014675cbd507d0cab0b0fd9585da9e5788",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/implementation-cycle/SKILL.md",
+      "blobSha": "8dc32cf3f19aa166f02c8387ddfa8612a1352e61",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/level-design-quality/SKILL.md",
+      "blobSha": "e0bda912f15a7cd16da1d73d8c1e5b734b3f5e2b",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/mobile-game-ux/ORIGIN.md",
+      "blobSha": "27e92baca39b9055d2615ed9d5266b090df3373c",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/mobile-game-ux/SKILL.md",
+      "blobSha": "95e0290c6a88387a19baea638049b8da2c0a6eb2",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/product-quality-review/ORIGIN.md",
+      "blobSha": "82145b2c982d59bd474a412a3f88dd4fc9485a2a",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/product-quality-review/SKILL.md",
+      "blobSha": "349887f264ff8423a926ff1ec2eddf5f50677967",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/project-termination/SKILL.md",
+      "blobSha": "2ccc560b6b717dacc650d50b8ae64eed24194093",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/release-audit/SKILL.md",
+      "blobSha": "5a2b073966f1ef394e0f64dca7829235638031af",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/visual-quality-gate/ORIGIN.md",
+      "blobSha": "ce38765d36feec1e3e3936bc30830daebbba1f81",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/visual-quality-gate/SKILL.md",
+      "blobSha": "802080ef2ee89f9809c396d6b6d09116f2bd5174",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/web-game-playtest/ORIGIN.md",
+      "blobSha": "35ec7da03ea694da3c4314e7fcc811a520c04cbc",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/web-game-playtest/SKILL.md",
+      "blobSha": "7e53cc325a3f184b83f0d7ee4fc11251bb9f9b4d",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".codex/skills/yandex-release-validation/SKILL.md",
+      "blobSha": "4099434b7fada78ad19dd39d2a7069d7e5cd023b",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".gitattributes",
+      "blobSha": "6313b56c57848efce05faa7aa7e901ccfc2886ea",
+      "kind": "other",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".github/workflows/starter-kit-ci.yml",
+      "blobSha": "68383bc7d45f86394952678bb24227c2afc90c09",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".gitignore",
+      "blobSha": "3bec1eb8c08e325aeb033bc5d1a03642d3b9cce3",
+      "kind": "other",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".starter-kit/core/AGENTS_CORE.md",
+      "blobSha": "18787d669041fa286d43e42e7d464dafd81203f0",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".starter-kit/core/CODEX_ENGINEERING_SYSTEM.md",
+      "blobSha": "c9f45d45e02520a0fe454907e95c613063af1dd8",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".starter-kit/core/CONCEPT_PROOF_GATE.md",
+      "blobSha": "d72e08615882d371a93cea6bd7f3b9741bf5cdae",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": ".starter-kit/core/TEST_HARNESS_ADJUDICATION.md",
+      "blobSha": "279d3d51144c91444983d017be710d1352af21e3",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "AGENTS.md",
+      "blobSha": "186705f719e1b26dd93f771a9962e7b556fa67b4",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "artifacts/evidence/final-gameplay-videos.json",
+      "blobSha": "f8f11c4c2a3055bc20c47f7672b7b3e9f44a5535",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "autonomy/backlog.json",
+      "blobSha": "3061c0b42b476681cfb569b17e4df3f031565e38",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "autonomy/state.json",
+      "blobSha": "369fb1d39f4ac2716c09f79e8052f7a8735623e2",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "agent-instructions"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "CHANGELOG.md",
+      "blobSha": "52a4bcfb3ac6e65a4a4f451948b56cbae9621d8f",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/final-gameplay-videos.schema.json",
+      "blobSha": "32293ef1aecace8900706e8acf740b8ef3712335",
+      "kind": "configuration",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/game-spec.schema.json",
+      "blobSha": "93f262f55f893ece90c5c85238743b4187162e48",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "game-profile"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/manifest-entries.json",
+      "blobSha": "1b3f4b247c0863e100b0bb85e2ef702241ff5c87",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/optional-profiles/narrative-game.json",
+      "blobSha": "42dc555d2e1f62bed1615aa71e888e0dd9871936",
+      "kind": "configuration",
+      "destination": "ai",
+      "family": "narrative-art-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/optional-profiles/vk-games.json",
+      "blobSha": "9f4287ac7142b92879ea468c2fb268da8fc59361",
+      "kind": "configuration",
+      "destination": "connect",
+      "family": "vk-adapter-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/skill-policy.json",
+      "blobSha": "edd8779e986d5b516dd9a4429bf2c31c01195c7c",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "game-profile"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/starter-kit-manifest.schema.json",
+      "blobSha": "214f056e871777cc8f75a2f03a268793683ad707",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/target-profile.schema.json",
+      "blobSha": "da088545e6378518c420744acdffacee144c5ec2",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/targets/mature-yandex-phaser.json",
+      "blobSha": "36510e55216691cdda5c40fd3d5874bad1deb975",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/targets/new-project.json",
+      "blobSha": "c7261a8defa1b415303427241f15e9d3f78d3e7d",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/yandex-console-requirements.yaml",
+      "blobSha": "a86608b6b959d9c0c5991fe4e4c0b5692fba74b4",
+      "kind": "configuration",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/yandex-doc-snapshot.json",
+      "blobSha": "10bed35c790e245ef612b2c3397111c987e4248b",
+      "kind": "configuration",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/yandex-doc-sources.yaml",
+      "blobSha": "be4304feb6f55f947d0acc836fece4b05127bb43",
+      "kind": "configuration",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/yandex-external-evidence-providers.yaml",
+      "blobSha": "0f2c51f9dae73193801a286435619718b819ad61",
+      "kind": "configuration",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/yandex-external-evidence.schema.json",
+      "blobSha": "31d522075c2799c59227eeafa14db71aeaaa609b",
+      "kind": "configuration",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/yandex-release-evidence.schema.json",
+      "blobSha": "ab8ef4625d21724e8f7125bace2f34cca7bd418f",
+      "kind": "configuration",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "config/yandex-requirements.yaml",
+      "blobSha": "7f63080e9b498a9a671a1f8b12f6d295bc7c3a17",
+      "kind": "configuration",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/DEVELOPMENT_POSTMORTEM_2026-09.md",
+      "blobSha": "16f184eaf329606f077fff249fee052b662cfd43",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/EXTERNAL_SKILL_SOURCES.md",
+      "blobSha": "5ba4ceef515f2f9b7a161f7cc691454bc5effed5",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/HEAD_BOUND_RELEASE_EVIDENCE.md",
+      "blobSha": "e05cbe4703039dc734604340122f3d3a25baffff",
+      "kind": "documentation",
+      "destination": "release",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/MANIFEST_SCHEMA.md",
+      "blobSha": "d05737174e52ffe2bf0c881582818a1014d0d83f",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/NARRATIVE_GAME_PROFILE.md",
+      "blobSha": "c0c0fbac9c3c04ac6da4c9e17e6906650f2d64ba",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/NARRATIVE_SCENE_VISUAL_CONTRACT.md",
+      "blobSha": "06238093ff615111fecaad224f3bfb9f3096bb1f",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/PRODUCTION_INCIDENT_HARDENING.md",
+      "blobSha": "71b21895a3059313e4bf4ae280048008836b0960",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/QUALITY_CONSTITUTION.md",
+      "blobSha": "9255912a2607c87847eb3320b8549ca35e3a35a2",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/SKILL_PRECEDENCE.md",
+      "blobSha": "07c370d9266eb031d0e7d2a13c3f0c54239fa33b",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/STARTER_KIT_CONSISTENCY_AUDIT.md",
+      "blobSha": "392bfc09af316c4e0db799372a971a5864ae1efa",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/STARTER_KIT_UPDATES.md",
+      "blobSha": "e932e0ffc1a49e16210be67bdcf8549d0034da20",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/VK_GAMES_PROFILE.md",
+      "blobSha": "c27d2afce0ee2f48aef50bab6e20ea88c968c02d",
+      "kind": "documentation",
+      "destination": "release",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/WARDROBE_VISUAL_ACCEPTANCE.md",
+      "blobSha": "238bd94512b5e6444fff96c998cca717f8f6b419",
+      "kind": "documentation",
+      "destination": "ai",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/YANDEX_EXTERNAL_RUNTIME_EVIDENCE.md",
+      "blobSha": "8b233832bd38acf9dfca3c88a4b2ac65cbd3df08",
+      "kind": "documentation",
+      "destination": "release",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/YANDEX_REQUIREMENTS_CHECKLIST.md",
+      "blobSha": "5e38a8d3d5c73fcec477f742b70372034f706a2e",
+      "kind": "documentation",
+      "destination": "release",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "docs/YANDEX_REQUIREMENTS_DIFF_2026-07-01_TO_2026-08-18.md",
+      "blobSha": "ac97127a780ab482b9029e7844c540b48e75d1ee",
+      "kind": "documentation",
+      "destination": "release",
+      "family": "documentation-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "game-spec.yaml",
+      "blobSha": "f8f41f40f8f2f5841ff7fcb38945f026abb4be71",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "new-project-seed"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "index.html",
+      "blobSha": "fb2816a1b950c70d4cba8937913cc089a14a2abd",
+      "kind": "other",
+      "destination": "studio",
+      "family": "new-project-seed"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "lessons/known-failures.yaml",
+      "blobSha": "2da51936c4b182764729b340753bfce00b2a19bc",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "MASTER_PROMPT.md",
+      "blobSha": "97360f5442dfa80949f877616c26a32b4e7185e1",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "new-project-seed"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.3.0-yandex-requirements.md",
+      "blobSha": "45855c2a5d77573252407e8c9974476a75c18b35",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.4.0-production-skills.md",
+      "blobSha": "8f0644529e3b9484899feca7ff55c6b2903db08e",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.4.1-target-aware-updater.md",
+      "blobSha": "a3c55c5f74584ba361cd054631aca6d51658977b",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.4.2-codex-engineering-system.md",
+      "blobSha": "eddd0944d180ba87d249f7310dc31faf2f33a659",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.5.0-concept-proof-lifecycle.md",
+      "blobSha": "327bfd01e1c03dfab866c66f9392053a1984648a",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.5.1-screenshot-visual-gate.md",
+      "blobSha": "6b82341400334359b333bd673ce85c9cf0e48235",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.5.11-to-0.5.12.md",
+      "blobSha": "89a78acaca004c9495a63bd5514e4e5dc7a09828",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.5.13-to-0.5.14.md",
+      "blobSha": "b8b008aa64fd89d63c72970d3fb3dc29cfe537d0",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.5.14-to-0.5.15.md",
+      "blobSha": "359aa6824400a21e7fcb2a1247ea28ad94c7d9c9",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.5.3-profile-aware-quality-constitution.md",
+      "blobSha": "9780d6be4ea09dcd524184fd1317e6ef79543c40",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.5.4-to-0.5.5.md",
+      "blobSha": "83acfefe9bdd27dd8992e7eeea49521288b4f17d",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.5.5-to-0.5.6.md",
+      "blobSha": "591de7280d160d1766f58f5a08632c5ae852eab1",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "migrations/0.5.6-to-0.5.7.md",
+      "blobSha": "a6dacf812c3a0edca596389bfa997a30dd5ac5e8",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "package.json",
+      "blobSha": "b7b56a2d97f9b5a92692f7fb1e2214de54729cde",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "PROJECT_RULES.md",
+      "blobSha": "070f2be2894773151f1a04014d951ac1f991c12b",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "new-project-seed"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "README.md",
+      "blobSha": "ac799ff21f7e88dbe0bdd627432f4724da3c1322",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "starter-kit.manifest.json",
+      "blobSha": "1b99cef5a60f2211f93412aae21fe3e0b40d69d5",
+      "kind": "configuration",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "templates/media/HORIZONTAL_GAMEPLAY_VIDEO.md",
+      "blobSha": "adee5f3d89010fcb7331da6e62f05c63dd62abfc",
+      "kind": "documentation",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "templates/platform/vk-bridge-adapter.mjs",
+      "blobSha": "fcfad06adecf6dcbb8f89288def66cb454e7d0f0",
+      "kind": "code",
+      "destination": "connect",
+      "family": "vk-adapter-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "templates/platform/vk-games.contract.example.json",
+      "blobSha": "6860a9da0e100166b086bdde0e6f6714741ae1e1",
+      "kind": "configuration",
+      "destination": "connect",
+      "family": "vk-adapter-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "templates/product-validation/BLIND_PLAYTEST.md",
+      "blobSha": "2694593f83a50fd6c6813af800343fa1242d4d4b",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "templates/product-validation/DECISION.md",
+      "blobSha": "f0835c0b4b64a5fc8e048d074cb28e73fa0206fb",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "templates/product-validation/OBSERVATIONS.md",
+      "blobSha": "62ea4166ef63254c203dc8e7a12aa13e3dceb0af",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "templates/visual-review/SCREENSHOT_VISUAL_GATE.md",
+      "blobSha": "992c2befbd568e7fefd69418696dab527157f634",
+      "kind": "documentation",
+      "destination": "studio",
+      "family": "project-updater"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/e2e/yandex-moderation.spec.ts",
+      "blobSha": "dfbba2b02fbd487c5eaeb890a8d19accb59a54a5",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/empty-new-project/.gitkeep",
+      "blobSha": "8b137891791fe96927ad78e64b0aad7bded08bdc",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-agents-root/.agents/skills/project-specific/SKILL.md",
+      "blobSha": "8881a34bbe634cee85e1baa1f03f5f71b7c844a4",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-agents-root/AGENTS.md",
+      "blobSha": "fba5b2ead70f4d23ea2ea3e81fc8df647cd41995",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-agents-root/game-spec.yaml",
+      "blobSha": "84d84906acd931ebe575e750a63d2c617aff671d",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-agents-root/index.html",
+      "blobSha": "49cecb8c63c1eccc60f9cb853be58fa5555dcca2",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-agents-root/package.json",
+      "blobSha": "e67152644b34713ff1063a1d6fd7eca7ec6016e4",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-agents-root/project.profile.yaml",
+      "blobSha": "12be65a6a6a50805323c91161fd41b77e7800cac",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-agents-root/public/sentinel.txt",
+      "blobSha": "6930b1311d4684ab36ed53673a86100cc98cffae",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-agents-root/src/sentinel.ts",
+      "blobSha": "70d5305167f0ee7e6c50cab125ec4f25a30a4db5",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-codex-root/.codex/skills/project-specific/SKILL.md",
+      "blobSha": "b7dcc891cfc896341fb263ecc6aaa819dffb63fa",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-codex-root/AGENTS.md",
+      "blobSha": "3c45c244e46d6be01f87d26dbe52a74564bb5125",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-codex-root/index.html",
+      "blobSha": "5b62fcd0938bc77a6a126b75220ca06a7f3521a8",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-codex-root/package.json",
+      "blobSha": "8085aa4ee2770aa5fb6085aceac5d31e5a0c717f",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-conflicting-agents/.agents/skills/implementation-cycle/SKILL.md",
+      "blobSha": "c27b34b4d9e7b2d35a2d65a7322bcdcf83c69d10",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-conflicting-agents/AGENTS.md",
+      "blobSha": "209d0446bca7b4488ddbfb534641fef70d92ba72",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-conflicting-agents/index.html",
+      "blobSha": "e5d9950f69b9ce2aab875e82cf1fa7e8d10f9d8a",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/mature-project-conflicting-agents/package.json",
+      "blobSha": "65ad68c78a1c85a797ba9190e15e0fdf54a52822",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/project-with-spaces/marker.txt",
+      "blobSha": "e78a0eb0caa6511a56e4d5ce0454a36c1a00a573",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/windows-path-project/marker.txt",
+      "blobSha": "77a6f31bdd0d1d550f225666ac479006d0d2173d",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/yandex-docs/detail-1-1.md",
+      "blobSha": "ad301cc674cd76a05ddef3f6d450aaf517bda05d",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/yandex-docs/draft.md",
+      "blobSha": "2eaac52f090ae48a978462b82340a74348f09be3",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/yandex-docs/moderation.md",
+      "blobSha": "87c162035e8a3a76745f28aea61be2099cec6fb9",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/fixtures/yandex-docs/requirements.md",
+      "blobSha": "56536c57787bcba7f4559300a682eeeb5b25c815",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/codex-engineering-system.test.mjs",
+      "blobSha": "42468739bb8a411353c42630f09e2bfa0ba229f3",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/consistency-audit.test.mjs",
+      "blobSha": "39af5e34de0273b7dd29c195320b8372b1e76eac",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/git-workflow-contract.test.mjs",
+      "blobSha": "f221f11767af965085bb527f9248d5be32f0cf5d",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/narrative-art-rules.test.mjs",
+      "blobSha": "4c89dcfc02b246663c2b5befdc3bf275aa0ace22",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/narrative-game-delivery.test.mjs",
+      "blobSha": "97a4ebf7ca3634651fb58ee691b64f43096e6123",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/narrative-game-profile.test.mjs",
+      "blobSha": "c4c140105c25e2f522087fac6f119bed92c9012d",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/narrative-game-validator.test.mjs",
+      "blobSha": "ec838a58fe292442f5f4a088a132dfa70cff035b",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/narrative-scene-contract.test.mjs",
+      "blobSha": "174f6b7a4005cef5329faa2791df90ea02a1b27d",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/narrative-scene-delivery.test.mjs",
+      "blobSha": "15c40c3e8e9058e3fc582a261cf0a158d668e105",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/release-evidence-contract.test.mjs",
+      "blobSha": "9ebdcb9f9e08d9455ee6806dee75f26addb9278d",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/semantic-acceptance.test.mjs",
+      "blobSha": "daa3f0320f30b20ef708e30fa01649c14c6b1449",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/story-promise-validator.test.mjs",
+      "blobSha": "b4b8b1ec9452c5c61a01f676a09516cb56800edc",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/target-aware-updater.test.mjs",
+      "blobSha": "fb56ae7b9eb02b21a319080468271e75795ffc33",
+      "kind": "test",
+      "destination": "studio",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/vk-games-profile.test.mjs",
+      "blobSha": "7e7a9b627cfed4da7cfc3e3e22e702802cf34359",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/wardrobe-visual-gate.test.mjs",
+      "blobSha": "aef253ab8243f8dd4d526ead17cf659b94170ff7",
+      "kind": "test",
+      "destination": "ai",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/yandex-docs-watch.test.mjs",
+      "blobSha": "b539e7b2f212c7c10f8284dc0ce2f27f739220be",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/yandex-external-evidence.test.mjs",
+      "blobSha": "2c2b6e7e94aa3eceee2d29e444347d5699709487",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/yandex-project-contract-validation.test.mjs",
+      "blobSha": "9725c75f7ca05517bace802f681fe14b8b018886",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/yandex-release-evidence-gate.test.mjs",
+      "blobSha": "c64bc792a65a08a618442b51477787037e895a79",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/yandex-release-validation.test.mjs",
+      "blobSha": "c7d03cd6ec1ebe7abc6c648d1eca83cc95ebbb69",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tests/starter-kit/yandex-sdk-validation.test.mjs",
+      "blobSha": "5b9a995d0b7d1758b57334e17e2cdd78733c3b01",
+      "kind": "test",
+      "destination": "release",
+      "family": "regression-fixtures"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/narrative/narrative-game-check.mjs",
+      "blobSha": "bfea4078f2814f2c70064082d12afd4ec7f4ae92",
+      "kind": "code",
+      "destination": "ai",
+      "family": "narrative-art-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/narrative/narrative-game-validator.mjs",
+      "blobSha": "b3b14fc295977dcdde4dafd1fdc6dabc79ca40cd",
+      "kind": "code",
+      "destination": "ai",
+      "family": "narrative-art-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/narrative/story-promise-validator.mjs",
+      "blobSha": "b5ada53a9e254554a1c03655e8967c0430ab7eca",
+      "kind": "code",
+      "destination": "ai",
+      "family": "narrative-art-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/production-art/wardrobe-visual-gate.mjs",
+      "blobSha": "1e167d065aeec43d11e6074930088585ff240fd6",
+      "kind": "code",
+      "destination": "ai",
+      "family": "narrative-art-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/apply-update.mjs",
+      "blobSha": "23d99065bff54bb58eef7041ac6c5a0e28895cc1",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/build-manifest.mjs",
+      "blobSha": "210c17b5c0f84c19efcdffd80ef1c7f36a40e010",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/consistency-audit.mjs",
+      "blobSha": "9e7601e7f494b5cac833a5ac12dcea727db7213a",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/init-project.mjs",
+      "blobSha": "b8ae422a69fea6657598f4e1efdee6e21bed0e85",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/lib.mjs",
+      "blobSha": "1e4ea45459f4962e8779412552c9cbea2bef7797",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/manifest.mjs",
+      "blobSha": "ee93ca2e48ad71987600dd5cbbdbeab83bec44b0",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/package-kit.mjs",
+      "blobSha": "8491ad4ba4eb5b5dcd8606b06e2413bfaaff1799",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/package-merge.mjs",
+      "blobSha": "7c9658674cade682f0dbb8183c3baf20ec1e57cf",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/profile.mjs",
+      "blobSha": "280f3ea72ff3ee6c7e77444cdb92759b88ed5d79",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/self-test.mjs",
+      "blobSha": "e06623ee2280fd4c91af2095d8d15d2197785616",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/semantic-acceptance.mjs",
+      "blobSha": "e67966de5285afb36e39fcd0fd54f616aede26dd",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/status-core.mjs",
+      "blobSha": "ea33dc8dabc71ac64d5247aa3f65943a8ca267a7",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/status.mjs",
+      "blobSha": "be3a203909224f969e17d9d2976db1aee7cc9f5a",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/update-engine.mjs",
+      "blobSha": "7e1df2e4434bc093526b388735aa5e12c585d6cb",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/starter-kit/update-self-test.mjs",
+      "blobSha": "5d4bef9aeae1679b1aed2351f0085d5dfee48b91",
+      "kind": "code",
+      "destination": "studio",
+      "family": "updater-ownership"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/visual/narrative-scene-contract.mjs",
+      "blobSha": "1af5806b307a71df79401c816caf21923d813b2e",
+      "kind": "code",
+      "destination": "ai",
+      "family": "narrative-art-contracts"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/vk/vk-games-check.mjs",
+      "blobSha": "477e8665344263c031d5a045ac0039c35280215a",
+      "kind": "code",
+      "destination": "connect",
+      "family": "vk-adapter-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/docs-watch.mjs",
+      "blobSha": "db548e9f054cd40d26dcb62543441510324808f1",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/external-evidence.mjs",
+      "blobSha": "ff5863030888ca7cea77c7505eb20ec49deea432",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/external-runtime-provider/.gitattributes",
+      "blobSha": "7848186cdcfec9d6957ca1739627a4fa3d2368fa",
+      "kind": "other",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/external-runtime-provider/.gitignore",
+      "blobSha": "da189e50c12b0b1d9570428641c28d76a367e857",
+      "kind": "other",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/external-runtime-provider/hardened-harness.mjs",
+      "blobSha": "8cc947120f3de7e164e2aab01db962d911299fc2",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/external-runtime-provider/hardened-live-observer.js",
+      "blobSha": "23cad7744a2849edf96bb5a80764dd054c0c55ce",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/external-runtime-provider/integrity-manifest.json",
+      "blobSha": "45221bc796957fac3b4ab53447e606814d63b782",
+      "kind": "configuration",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/external-runtime-provider/integrity-manifest.schema.json",
+      "blobSha": "3c3fa1fd0d74e14981e430c90671f7022c7ec38f",
+      "kind": "configuration",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/external-runtime-provider/lib/cdp-runtime.mjs",
+      "blobSha": "ef644ee0def40bb1a4a6ae4aac71627cc39928c9",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/external-runtime-provider/lib/game-session.mjs",
+      "blobSha": "fb631d80cbfecb0a6d568a7305b8e8bbad77f520",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/external-runtime-provider/lib/reporting.mjs",
+      "blobSha": "8ef833539255eddc00c00b2135e3fd4b44dd82ea",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/external-runtime-provider/lib/security.mjs",
+      "blobSha": "22753d7759e295c060cd899aff49522f14ca4358",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/external-runtime-provider/validation-record.json",
+      "blobSha": "d34d43433fbb0aeffea7a6a85808596f93cdcbae",
+      "kind": "configuration",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/media-validation.mjs",
+      "blobSha": "f2a60605e41b8c5f59230eef243ced6985638723",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/project-contract-validation.mjs",
+      "blobSha": "1e3e33a1b4b92e44a52c1e2a73c04e4bebfe864c",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/registry-hash.mjs",
+      "blobSha": "770623d6c9b836bfe22af767473f42d7ba65eddb",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/release-evidence-gate.mjs",
+      "blobSha": "d424e149d3a6efbb3af5207bc3605d29139d1a7e",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/requirements-audit.mjs",
+      "blobSha": "235d25e77e0d12c1dba24edec89cfe3e166879ff",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "tools/yandex/sdk-validation.mjs",
+      "blobSha": "e1803c26d5554d002802a1a64fbe1c205ddd972d",
+      "kind": "code",
+      "destination": "release",
+      "family": "yandex-release-validation"
+    },
+    {
+      "repo": "m-amirov/starter-kit-yandex-games",
+      "path": "VERSION",
+      "blobSha": "c5f3c9c45ee4f58ce2270e84402985021f06f9bf",
+      "kind": "other",
+      "destination": "studio",
+      "family": "project-updater"
+    }
+  ]
+}

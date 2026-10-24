@@ -13,9 +13,9 @@
 
 | Phase | Delivery | Required acceptance |
 | --- | --- | --- |
-| 0. Inventory | Pin source SHAs, map CEOS/Starter Kit ownership, enumerate features and conflicts | Audited component inventory and migration matrix |
+| **0. Inventory (structural closure complete)** | Pin source SHAs, map CEOS/Starter Kit ownership, enumerate features and conflicts | 398 tracked files and 29 capability groups mapped; runtime parity not yet verified |
 | **1. Core foundation (now)** | `@ludory/core`: validated definition, state snapshot, lifecycle, tests, basic example | Node tests and syntax checks green; no SDK/DOM/storage coupling |
-| 2. Studio | Unified `ludory` CLI, init/adopt/update, profiles, project manifest migrations, safe updater | New-project and mature-project fixtures; dry-run, rollback and ownership tests |
+| **2. Studio (metadata foundation started)** | Unified `ludory` CLI and manifest first; later profiles, template scaffolding and ownership-aware updater | First slice: read-only preview and exclusive manifest creation tested; rollback/update parity still pending |
 | 3. Runtime | Engine-agnostic host contract and optional Phaser integration, lifecycle, persistence, responsive UI, audio | Desktop/mobile behavior, persistence round trip, zero regressions in existing games |
 | 4. Connect | `@ludory/connect-yandex`, `@ludory/connect-vk`, feature/capability detection and per-platform entrypoints | SDK integration tests; isolated builds; real platform runtime observations |
 | 5. AI | Port CEOS state machine, scoped plans, evidence, agents/skills, capability routing and art pipeline | CEOS behavioral parity tests, recovery and safety gates; no false PASS |

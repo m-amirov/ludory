@@ -1,0 +1,11 @@
+{
+  "name": "@ludory/studio",
+  "version": "0.1.0",
+  "description": "Safe project metadata adoption CLI for Ludory",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "bin": { "ludory": "./bin/ludory.mjs" },
+  "dependencies": { "@ludory/core": "0.1.0" },
+  "license": "UNLICENSED"
+}
