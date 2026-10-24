@@ -48,13 +48,27 @@ function parseProjectSpec(source) {
   const lines = source.replace(/^\uFEFF/, '').split(/\r?\n/);
   const rootVersions = [];
   const projects = [];
+  let rootKey = null;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (/^(?:["'](?:schemaVersion|project)["']\s*:|(?:schemaVersion|project)\s+:|(?:schemaVersion|project):\S|project:\s*[^#\s])/.test(line)) {
-      throw new Error('Ambiguous YAML root project/schemaVersion key');
+    if (/^\s*(?:#.*)?$/.test(line)) continue;
+    if (/^\s/.test(line)) {
+      if (rootKey === 'schemaVersion') throw new Error('Unsupported YAML schemaVersion continuation');
+      continue;
     }
-    if (/^schemaVersion:/.test(line)) rootVersions.push(scalar(line.slice(line.indexOf(':') + 1), 'schemaVersion'));
-    if (/^project:\s*(?:#.*)?$/.test(line)) projects.push(i);
+    // A restricted root envelope disallows quoted/escaped keys, explicit
+    // mapping keys and YAML document markers. Those constructs may redefine
+    // project/schemaVersion in a way a line-oriented subset cannot observe.
+    const field = line.match(/^([A-Za-z_][A-Za-z0-9_-]*):(?:[ \t]+(.*))?$/);
+    if (!field) throw new Error('Unsupported YAML root key or document syntax');
+    rootKey = field[1];
+    if (rootKey === 'schemaVersion') rootVersions.push(scalar(field[2] ?? '', 'schemaVersion'));
+    if (rootKey === 'project') {
+      if (field[2]?.trim() && !field[2].trim().startsWith('#')) {
+        throw new Error('Unsupported YAML inline project declaration');
+      }
+      projects.push(i);
+    }
   }
   if (rootVersions.length !== 1 || rootVersions[0] !== '2') throw new Error('Legacy schemaVersion must be exactly 2');
   if (projects.length !== 1) throw new Error('Legacy project section must occur exactly once');
@@ -89,7 +103,11 @@ function parseProjectSpec(source) {
       if (!locale) throw new Error('Unsupported project.title indentation or locale');
       if (title.has(locale[1])) throw new Error(`Duplicate project.title locale: ${locale[1]}`);
       title.set(locale[1], scalar(locale[2], `project.title.${locale[1]}`));
+      continue;
     }
+    // Never ignore lines in project metadata: an indented plain scalar,
+    // an explicit/escaped key or a merge can change the YAML interpretation.
+    throw new Error('Unsupported or ambiguous project YAML syntax');
   }
   if (!fields.get('slug') || !fields.get('engine') || !fields.get('platform') || title.size === 0) {
     throw new Error('Missing project.slug, project.title, project.engine or project.platform');

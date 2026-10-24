@@ -41,12 +41,14 @@ function fixture(t, { git = true } = {}) {
 
 test('migration preview is read-only, apply creates one file and repeated plan is in sync', t => {
   const dir = fixture(t);
+  const callerCwd = process.cwd();
   const originals = ['game-spec.yaml', 'package.json', 'src/main.js'].map(f => fs.readFileSync(path.join(dir, f)));
   const plan = planMigration(dir);
   assert.equal(plan.status, 'READY');
   assert.deepEqual(plan.writes, ['ludory.project.json']);
   assert.equal(fs.existsSync(path.join(dir, 'ludory.project.json')), false);
   assert.equal(applyPlan(plan).status, 'APPLIED');
+  assert.equal(process.cwd(), callerCwd);
   const actual = JSON.parse(fs.readFileSync(path.join(dir, 'ludory.project.json'), 'utf8'));
   assert.equal(actual.id, 'winter-story');
   assert.deepEqual(actual.targets, ['yandex-games']);
@@ -204,4 +206,71 @@ test('race-created manifest between preview and apply remains untouched', t => {
   fs.writeFileSync(file, '{"user":"owns this file"}\n');
   assert.throws(() => applyPlan(plan), /stale|conflict|existing/i);
   assert.equal(fs.readFileSync(file, 'utf8'), '{"user":"owns this file"}\n');
+});
+
+test('directory symlink substitution at write boundary cannot redirect manifest creation', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-dir-race-'));
+  const parked = `${dir}-parked`;
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-redirect-'));
+  t.after(() => {
+    if (fs.existsSync(dir) && fs.lstatSync(dir).isSymbolicLink()) fs.unlinkSync(dir);
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(parked, { recursive: true, force: true });
+    fs.rmSync(other, { recursive: true, force: true });
+  });
+  const definition = { schemaVersion: 1, id: 'race-game', version: '0.1.0', title: { en: 'Race Game' }, engine: 'phaser', targets: ['vk-games'] };
+  const plan = planInit(dir, definition);
+  const callerCwd = process.cwd();
+  assert.equal(plan.status, 'READY');
+  const originalWrite = fs.writeFileSync;
+  let swapped = false;
+  fs.writeFileSync = function (file, ...args) {
+    if (!swapped && String(file).endsWith('ludory.project.json')) {
+      fs.renameSync(dir, parked);
+      fs.symlinkSync(other, dir, 'dir');
+      swapped = true;
+    }
+    return originalWrite.call(this, file, ...args);
+  };
+  try {
+    assert.throws(() => applyPlan(plan), /moved|stale|directory|symlink|conflict/i);
+  } finally {
+    fs.writeFileSync = originalWrite;
+  }
+  assert.equal(swapped, true);
+  assert.equal(process.cwd(), callerCwd);
+  assert.equal(fs.existsSync(path.join(other, 'ludory.project.json')), false);
+});
+
+test('directory replacement before chdir is detected without off-target writes', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-chdir-race-'));
+  const parked = `${dir}-parked`;
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-other-'));
+  t.after(() => {
+    if (fs.existsSync(dir) && fs.lstatSync(dir).isSymbolicLink()) fs.unlinkSync(dir);
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(parked, { recursive: true, force: true });
+    fs.rmSync(other, { recursive: true, force: true });
+  });
+  const definition = { schemaVersion: 1, id: 'race-2', version: '0.1.0', title: { en: 'Race' }, engine: 'phaser', targets: ['vk-games'] };
+  const plan = planInit(dir, definition);
+  const callerCwd = process.cwd();
+  const originalChdir = process.chdir;
+  let swapped = false;
+  process.chdir = function (target) {
+    if (!swapped && target === dir) {
+      fs.renameSync(dir, parked);
+      fs.symlinkSync(other, dir, 'dir');
+      swapped = true;
+    }
+    return originalChdir.call(process, target);
+  };
+  try {
+    assert.throws(() => applyPlan(plan), /changed|stale|directory/i);
+  } finally {
+    process.chdir = originalChdir;
+  }
+  assert.equal(swapped, true);
+  assert.equal(process.cwd(), callerCwd);
+  assert.equal(fs.existsSync(path.join(other, 'ludory.project.json')), false);
 });

@@ -7,6 +7,23 @@ import { readLegacyGameSpec, readSourceFile } from './legacy.mjs';
 
 const manifestName = 'ludory.project.json';
 
+function directoryIdentity(dir) {
+  const stat = fs.lstatSync(dir, { bigint: true });
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Project directory is no longer a real directory');
+  return `${stat.dev}:${stat.ino}`;
+}
+
+function isOriginalDirectory(project, identity) {
+  try {
+    const canonical = fs.realpathSync.native(project);
+    const pathMatches = process.platform === 'win32'
+      ? canonical.toLowerCase() === project.toLowerCase() : canonical === project;
+    return pathMatches && directoryIdentity(project) === identity;
+  } catch {
+    return false;
+  }
+}
+
 function projectRoot(projectDir) {
   const project = path.resolve(projectDir);
   const stat = fs.lstatSync(project);
@@ -87,7 +104,9 @@ export function planMigration(projectDir) {
   }
   try {
     const git = gitSafety(project);
-    return planResult('migrate', project, 'READY', legacy.manifest, { sources: legacy.sources, gitHead: git.head });
+    return planResult('migrate', project, 'READY', legacy.manifest, {
+      sources: legacy.sources, gitHead: git.head, rootIdentity: directoryIdentity(project),
+    });
   } catch (error) {
     return planResult('migrate', project, 'BLOCKED', legacy.manifest, { sources: legacy.sources, conflicts: [error.message] });
   }
@@ -100,7 +119,7 @@ export function planInit(projectDir, definition) {
   if (fs.readdirSync(project).length) {
     return planResult('init', project, 'BLOCKED', manifest, { conflicts: ['New project directory must be empty'] });
   }
-  return planResult('init', project, 'READY', manifest);
+  return planResult('init', project, 'READY', manifest, { rootIdentity: directoryIdentity(project) });
 }
 
 /** Inspect an adopted game or preview whether its legacy metadata can be adopted. */
@@ -132,14 +151,34 @@ export function applyPlan(plan) {
   if (!isDeepStrictEqual(fresh.manifest, plan.manifest)) {
     throw new Error('Stale plan: proposed manifest changed');
   }
+  if (!plan.rootIdentity || fresh.rootIdentity !== plan.rootIdentity ||
+      !isOriginalDirectory(fresh.project, plan.rootIdentity)) {
+    throw new Error('Stale plan: project directory identity changed');
+  }
   if (plan.mode === 'migrate') {
     if (plan.gitHead !== fresh.gitHead) throw new Error('Stale plan: Git HEAD changed');
     if (JSON.stringify(plan.sources) !== JSON.stringify(fresh.sources)) {
       throw new Error('Stale plan: source bytes changed');
     }
   }
-  // Exclusive creation is the final write guard. Existing project files are never updated.
-  const target = path.join(fresh.project, manifestName);
-  fs.writeFileSync(target, `${JSON.stringify(fresh.manifest, null, 2)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+  // Relative writes are anchored to the process CWD directory inode. On both
+  // POSIX and Windows, replacing the validated path with a symlink after
+  // chdir cannot redirect this write to the symlink target. CLI execution is
+  // synchronous; do not call applyPlan concurrently with unrelated chdir use.
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(fresh.project);
+    if (directoryIdentity('.') !== plan.rootIdentity) {
+      throw new Error('Stale plan: project directory changed during apply');
+    }
+    fs.writeFileSync(manifestName, `${JSON.stringify(fresh.manifest, null, 2)}\n`, {
+      encoding: 'utf8', flag: 'wx', mode: 0o600,
+    });
+    if (!isOriginalDirectory(fresh.project, plan.rootIdentity)) {
+      throw new Error('Project directory moved during apply; manifest remained in the validated directory');
+    }
+  } finally {
+    process.chdir(previousCwd);
+  }
   return { ...fresh, status: 'APPLIED', applied: true };
 }

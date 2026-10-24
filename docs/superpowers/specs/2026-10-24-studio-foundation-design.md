@@ -29,7 +29,7 @@ If a legacy spec cannot be safely mapped, return `BLOCKED` with exact reason and
 
 - The existing project and all legacy files remain byte-identical after dry-run, BLOCKED and apply; only `ludory.project.json` may be added on successful apply.
 - A second run returns `IN_SYNC`; different existing canonical metadata yields `CONFLICT` and no writes.
-- Reject reparse/race/symlink destinations and changed source checksum or Git HEAD between plan and apply.
+- Reject reparse/race/symlink destinations and changed source checksum or Git HEAD between plan and apply. For the synchronous CLI, bind the exclusive write to the validated directory inode using a temporary process CWD and verify its identity before/after writing; reject unexpected directory moves without redirecting writes to a replacement symlink.
 - No existing versioned project must adopt new code or rules just because its manifest was created.
 - Use Node.js >=22, ESM, built-ins and local `@ludory/core`; no third-party runtime dependency.
 

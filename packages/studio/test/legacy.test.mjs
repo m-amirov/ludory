@@ -67,6 +67,14 @@ test('fails closed on missing, ambiguous or unsupported legacy fields', t => {
     gameSpec.replace('  slug: winter-story', '  slug: winter-story\n  "slug": another'),
     gameSpec.replace('schemaVersion: 2', 'schemaVersion: 2\nschemaVersion : 1'),
     gameSpec.replace('project:\n', 'project:\n').replace('game:\n', 'project : {slug: hijack}\ngame:\n'),
+    gameSpec.replace('  engine: phaser', '  engine: phaser\n    extended'),
+    gameSpec.replace('  platform: yandex-games', '  platform: yandex-games\n  ? platform\n  : vk-games'),
+    gameSpec.replace('  platform: yandex-games', '  platform: yandex-games\n  "plat\\u0066orm": vk-games'),
+    `${gameSpec}\n"pro\\u006aect": {slug: other-game, title: {en: Other}, platform: vk-games, engine: pixi}\n`,
+    `${gameSpec}\n? project\n: {slug: other-game, title: {en: Other}, platform: vk-games, engine: pixi}\n`,
+    `${gameSpec}\n"schema\\u0056ersion": 1\n`,
+    gameSpec.replace('project:\n', '---\nproject:\n'),
+    gameSpec.replace('schemaVersion: 2', 'schemaVersion: 2\n  continued'),
   ]) {
     fs.writeFileSync(path.join(root, 'game-spec.yaml'), invalid);
     assert.throws(() => readLegacyGameSpec(root), /schemaVersion|project|duplicate|unsupported|platform|title|slug/i);
