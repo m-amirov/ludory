@@ -87,14 +87,20 @@ function ensureDirectories(relative, createdDirectories) {
     current = current ? `${current}/${segment}` : segment;
     let created = false;
     try {
-      fs.mkdirSync(current);
+      // The process CWD is the already validated parent inode. A swapped
+      // project-relative ancestor path cannot redirect this mkdir outside.
+      fs.mkdirSync(segment);
       created = true;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
       if (!createdDirectories.some(dir => dir.name === current)) throw new Error(`Existing output directory conflict: ${current}`);
     }
-    const st = fs.lstatSync(current);
+    const st = fs.lstatSync(segment);
     if (!st.isDirectory() || st.isSymbolicLink()) throw new Error(`Unsafe output directory: ${current}`);
+    process.chdir(segment);
+    if (directoryIdentity('.') !== `${BigInt(st.dev)}:${BigInt(st.ino)}`) {
+      throw new Error(`Output directory changed before entering: ${current}`);
+    }
     if (created) createdDirectories.push({ name: current, dev: st.dev, ino: st.ino });
     else {
       const expected = createdDirectories.find(dir => dir.name === current);
@@ -118,16 +124,31 @@ function safeOutputParents(name, directories) {
   return true;
 }
 
-function rollbackCreated(files, directories) {
+function enterOwnedParent(name, directories, project, rootIdentity) {
+  process.chdir(project);
+  if (directoryIdentity('.') !== rootIdentity) throw new Error('Rollback root directory identity changed');
+  const components = name.split('/');
+  const basename = components.pop();
+  let relative = '';
+  for (const component of components) {
+    relative = relative ? `${relative}/${component}` : component;
+    const expected = directories.find(dir => dir.name === relative);
+    if (!expected) throw new Error(`Rollback directory is not owned: ${relative}`);
+    process.chdir(component);
+    if (directoryIdentity('.') !== `${BigInt(expected.dev)}:${BigInt(expected.ino)}`) {
+      throw new Error(`Rollback directory identity changed: ${relative}`);
+    }
+  }
+  return basename;
+}
+
+function rollbackCreated(files, directories, project, rootIdentity) {
   const failures = [];
   for (const { name, bytes, ownership, complete } of files.reverse()) {
     try {
-      if (!safeOutputParents(name, directories)) {
-        failures.push(`moved output retained: ${name}`);
-        continue;
-      }
-      const st = fs.lstatSync(name);
-      const actual = st.isFile() && !st.isSymbolicLink() ? fs.readFileSync(name) : null;
+      const basename = enterOwnedParent(name, directories, project, rootIdentity);
+      const st = fs.lstatSync(basename);
+      const actual = st.isFile() && !st.isSymbolicLink() ? fs.readFileSync(basename) : null;
       // A failed *partial* write may leave a prefix; completed files require
       // byte-for-byte equality so user edits are never silently discarded.
       if (!actual || st.dev !== ownership.dev || st.ino !== ownership.ino ||
@@ -135,17 +156,18 @@ function rollbackCreated(files, directories) {
         failures.push(`modified output retained: ${name}`);
         continue;
       }
-      fs.unlinkSync(name);
+      fs.unlinkSync(basename);
     } catch (error) { failures.push(`${name}: ${error.message}`); }
   }
   for (const { name, dev, ino } of directories.reverse()) {
     try {
-      const st = fs.lstatSync(name);
+      const basename = enterOwnedParent(name, directories, project, rootIdentity);
+      const st = fs.lstatSync(basename);
       if (!st.isDirectory() || st.isSymbolicLink() || st.dev !== dev || st.ino !== ino) {
         failures.push(`moved directory retained: ${name}`);
         continue;
       }
-      fs.rmdirSync(name);
+      fs.rmdirSync(basename);
     } catch (error) { failures.push(`${name}: ${error.message}`); }
   }
   return failures;
@@ -177,23 +199,7 @@ export function applyCreatePlan(plan) {
       process.chdir(fresh.project);
       if (directoryIdentity('.') !== plan.rootIdentity) throw new Error('Project directory identity changed during apply');
       ensureDirectories(name, createdDirectories);
-      const pieces = name.split('/');
-      const basename = pieces.pop();
-      if (pieces.length) {
-        let parent = '';
-        // Traverse one level at a time, validating the inode recorded when
-        // *each* directory was created. Validating just the leaf would let
-        // an exchanged ancestor symlink redirect the entire nested path.
-        for (const part of pieces) {
-          parent = parent ? `${parent}/${part}` : part;
-          const expected = createdDirectories.find(dir => dir.name === parent);
-          if (!expected) throw new Error(`Untracked output directory: ${parent}`);
-          process.chdir(part);
-          if (directoryIdentity('.') !== `${BigInt(expected.dev)}:${BigInt(expected.ino)}`) {
-            throw new Error(`Output directory changed before file creation: ${parent}`);
-          }
-        }
-      }
+      const basename = name.split('/').at(-1);
       // The final basename is opened relative to the checked directory inode.
       // Intermediate symbolic substitutions cannot redirect it elsewhere.
       const flags = fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0);
@@ -222,7 +228,7 @@ export function applyCreatePlan(plan) {
       if (directoryIdentity('.') !== plan.rootIdentity) {
         throw new Error(`${error.message}; rollback skipped: project root directory changed`, { cause: error });
       }
-      const problems = rollbackCreated(createdFiles, createdDirectories);
+      const problems = rollbackCreated(createdFiles, createdDirectories, fresh.project, plan.rootIdentity);
       if (problems.length) throw new Error(`${error.message}; incomplete rollback: ${problems.join('; ')}`, { cause: error });
     }
     throw error;

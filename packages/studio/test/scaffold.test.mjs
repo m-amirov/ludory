@@ -280,3 +280,69 @@ test('rollback rechecks root inode after chdir to avoid deleting a matching outs
   assert.equal(swapped, true);
   assert.equal(fs.existsSync(path.join(outside, 'ludory.project.json')), true);
 });
+
+test('nested mkdir remains anchored when earlier output directory is swapped for a symlink', t => {
+  const project = empty(t);
+  const outside = empty(t);
+  const catalog = custom(t);
+  const templateRoot = path.join(catalog, 'templates', 'custom-basic');
+  fs.mkdirSync(path.join(templateRoot, 'src', 'nested'));
+  fs.writeFileSync(path.join(templateRoot, 'src', 'nested', 'main.js'), 'safe bytes');
+  const descriptorFile = path.join(templateRoot, 'template.json');
+  const descriptor = JSON.parse(fs.readFileSync(descriptorFile));
+  descriptor.files = ['src/nested/main.js'];
+  fs.writeFileSync(descriptorFile, JSON.stringify(descriptor));
+  const plan = planCreate(project, { ...params, profile: 'custom-game', template: 'custom-basic', targets: ['vk-games'], catalog });
+  const originalMkdir = fs.mkdirSync;
+  let swapped = false;
+  let createdOutside = false;
+  fs.mkdirSync = function (filename, ...args) {
+    if (!swapped && (filename === 'src/nested' || filename === 'nested')) {
+      fs.renameSync(path.join(project, 'src'), path.join(project, 'src-original'));
+      fs.symlinkSync(outside, path.join(project, 'src'), 'dir');
+      swapped = true;
+    }
+    const result = originalMkdir.call(this, filename, ...args);
+    if (swapped) createdOutside ||= fs.existsSync(path.join(outside, 'nested'));
+    return result;
+  };
+  try { assert.throws(() => applyCreatePlan(plan), /directory|changed|incomplete|moved/i); }
+  finally { fs.mkdirSync = originalMkdir; }
+  assert.equal(swapped, true);
+  assert.equal(createdOutside, false, 'directory must never be created outside the validated root, even transiently');
+  assert.equal(fs.existsSync(path.join(outside, 'nested')), false);
+});
+
+test('rollback removes nested directories from their pinned parent, not a replaced ancestor path', t => {
+  const project = empty(t);
+  const outside = empty(t);
+  const catalog = custom(t);
+  const templateRoot = path.join(catalog, 'templates', 'custom-basic');
+  fs.mkdirSync(path.join(templateRoot, 'src', 'nested'));
+  fs.writeFileSync(path.join(templateRoot, 'src', 'nested', 'main.js'), 'safe bytes');
+  const descriptorFile = path.join(templateRoot, 'template.json');
+  const descriptor = JSON.parse(fs.readFileSync(descriptorFile));
+  descriptor.files = ['src/nested/main.js'];
+  fs.writeFileSync(descriptorFile, JSON.stringify(descriptor));
+  fs.mkdirSync(path.join(outside, 'nested'));
+  const plan = planCreate(project, { ...params, profile: 'custom-game', template: 'custom-basic', targets: ['vk-games'], catalog });
+  const originalOpen = fs.openSync;
+  const originalRmdir = fs.rmdirSync;
+  let swapped = false;
+  fs.openSync = function (filename, flags, ...args) {
+    if (filename === 'ludory.studio.json' && (flags & fs.constants.O_CREAT)) throw new Error('simulated receipt failure');
+    return originalOpen.call(this, filename, flags, ...args);
+  };
+  fs.rmdirSync = function (filename, ...args) {
+    if (!swapped && (filename === 'src/nested' || filename === 'nested')) {
+      fs.renameSync(path.join(project, 'src'), path.join(project, 'src-original'));
+      fs.symlinkSync(outside, path.join(project, 'src'), 'dir');
+      swapped = true;
+    }
+    return originalRmdir.call(this, filename, ...args);
+  };
+  try { assert.throws(() => applyCreatePlan(plan), /receipt failure|rollback|directory/i); }
+  finally { fs.openSync = originalOpen; fs.rmdirSync = originalRmdir; }
+  assert.equal(swapped, true);
+  assert.equal(fs.existsSync(path.join(outside, 'nested')), true);
+});

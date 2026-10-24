@@ -105,3 +105,17 @@ test('catalog rejects parent output files used as directories and non-SemVer pre
   fs.writeFileSync(profile, JSON.stringify(data));
   assert.throws(() => loadCatalog(catalog), /version|semver/i);
 });
+
+test('reserved metadata filenames cannot be ancestors of generated template files', t => {
+  const catalog = external(t);
+  const templateRoot = path.join(catalog, 'templates', 'arcade-basic');
+  const manifest = path.join(templateRoot, 'template.json');
+  const value = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+  for (const reserved of ['ludory.project.json', 'ludory.studio.json']) {
+    fs.mkdirSync(path.join(templateRoot, reserved));
+    fs.writeFileSync(path.join(templateRoot, reserved, 'data.txt'), 'existing template asset');
+    value.files = [`${reserved}/data.txt`];
+    fs.writeFileSync(manifest, JSON.stringify(value));
+    assert.throws(() => loadCatalog(catalog), /reserved|metadata|path/i, reserved);
+  }
+});

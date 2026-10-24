@@ -73,7 +73,7 @@ function jsonSource(filename) {
 
 function safeFileName(value) {
   if (typeof value !== 'string' || !value || value.includes('\\') || value.includes('\0') ||
-      value.startsWith('/') || value.includes(':') || reserved.has(value)) {
+      value.startsWith('/') || value.includes(':') || reserved.has(value.split('/')[0])) {
     throw new Error(`Invalid or reserved template output path: ${value}`);
   }
   const pieces = value.split('/');
