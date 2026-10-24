@@ -20,6 +20,10 @@ export function defineGame(input) {
   if (typeof input.version !== 'string' || !semverPattern.test(input.version)) {
     throw new TypeError('version must be SemVer');
   }
+  const prerelease = input.version.match(/^\d+\.\d+\.\d+-([^+]+)/)?.[1];
+  if (prerelease?.split('.').some((part) => /^0\d+$/.test(part))) {
+    throw new TypeError('version must be SemVer (numeric prerelease identifiers cannot have leading zeros)');
+  }
   if (typeof input.engine !== 'string' || !slugPattern.test(input.engine)) {
     throw new TypeError('engine must be a lowercase kebab-case identifier');
   }

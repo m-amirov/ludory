@@ -53,3 +53,52 @@ test('restores explicit revision atomically, rejecting malformed snapshots', () 
   assert.equal(store.getRevision(), 5);
   assert.deepEqual(store.getState(), { score: 5 });
 });
+
+test('rejects hidden and symbol properties in arrays instead of losing them', () => {
+  const store = createStateStore({ items: [] });
+  const hidden = [1];
+  Object.defineProperty(hidden, 'hidden', { value: () => {}, enumerable: false });
+  const symbolic = [1];
+  symbolic[Symbol('metadata')] = 10n;
+  for (const value of [hidden, symbolic]) {
+    assert.throws(() => store.setState({ items: value }), /state/i);
+  }
+  assert.deepEqual(store.getState(), { items: [] });
+  assert.equal(store.getRevision(), 0);
+});
+
+test('refuses revision overflow without mutating state', () => {
+  const store = createStateStore({ score: 0 });
+  store.restore({ revision: Number.MAX_SAFE_INTEGER, state: { score: 5 } });
+  assert.throws(() => store.setState({ score: 6 }), /revision|overflow/i);
+  assert.equal(store.getRevision(), Number.MAX_SAFE_INTEGER);
+  assert.deepEqual(store.getState(), { score: 5 });
+});
+
+test('delivers immutable revision events in order despite reentrant writes', () => {
+  const store = createStateStore({ score: 0 });
+  const seen = [];
+  store.subscribe((state, revision) => {
+    if (revision === 1) store.setState({ score: state.score + 1 });
+  });
+  store.subscribe((state, revision) => seen.push([state.score, revision]));
+  store.setState({ score: 1 });
+  assert.deepEqual(seen, [[1, 1], [2, 2]]);
+  assert.equal(store.getRevision(), 2);
+});
+
+test('delivers to remaining subscribers when another subscriber throws', () => {
+  const store = createStateStore({ score: 0 });
+  const seen = [];
+  store.subscribe(() => { throw new Error('subscriber failure'); });
+  store.subscribe((state, revision) => seen.push([state.score, revision]));
+  assert.throws(() => store.setState({ score: 1 }), /subscriber/i);
+  assert.deepEqual(seen, [[1, 1]]);
+  assert.equal(store.getRevision(), 1);
+});
+
+test('rejects prototype-derived restore data with no own snapshot fields', () => {
+  const store = createStateStore({ score: 0 });
+  assert.throws(() => store.restore(Object.create({ revision: 4, state: { score: 8 } })), /snapshot/i);
+  assert.deepEqual(store.getState(), { score: 0 });
+});

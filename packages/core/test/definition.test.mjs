@@ -28,6 +28,7 @@ test('rejects invalid project identifiers, versions and labels', () => {
   assert.throws(() => defineGame({ ...valid(), schemaVersion: 2 }), /schemaVersion/);
   assert.throws(() => defineGame({ ...valid(), id: '../game' }), /id/);
   assert.throws(() => defineGame({ ...valid(), version: 'latest' }), /version/);
+  assert.throws(() => defineGame({ ...valid(), version: '1.0.0-01' }), /version/);
   assert.throws(() => defineGame({ ...valid(), title: { en: '  ' } }), /title/);
   assert.throws(() => defineGame({ ...valid(), engine: '' }), /engine/);
   assert.throws(() => defineGame(null), /definition/);

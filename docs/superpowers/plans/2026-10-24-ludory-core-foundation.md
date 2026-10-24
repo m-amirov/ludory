@@ -69,3 +69,7 @@
 - [ ] Add runnable example demonstrating game definition, tick, pause, snapshot and restore.
 - [ ] Run `npm test`, `npm run check`, `node examples/core-session.mjs` and inspect output.
 - [ ] Review repo diff for source-license, docs, breaking-contract and migration claims; deliver in a feature PR, not an unreviewed merge.
+
+## Review hardening checkpoint
+
+Independent review of the first PR revision exposed array metadata loss, revision overflow, reentrant observer ordering, invalid snapshots, asynchronous callback leakage and numeric-prerelease SemVer acceptance. Regression tests were added first, observed failing, and then made green. The updated PR commit must pass both Node 22/24 CI jobs before it can be considered for a non-draft review; source migration and platform acceptance remain out of scope.

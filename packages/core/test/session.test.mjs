@@ -79,3 +79,29 @@ test('loads same-game snapshots before start and rejects cross-game or malformed
   session.start();
   assert.throws(() => session.restore(accepted), /restore/i);
 });
+
+test('rejects prototype-derived game snapshots, preserving current state', () => {
+  const session = createGameSession({ definition, initialState: { score: 1 } });
+  const validSnapshot = session.snapshot();
+  assert.throws(() => session.restore(Object.create(validSnapshot)), /snapshot/i);
+  assert.deepEqual(session.snapshot(), validSnapshot);
+});
+
+test('forbids asynchronous update handlers and post-tick state mutations', async () => {
+  assert.throws(() => createGameSession({ definition, onUpdate: async () => {} }), /synchronous/i);
+  let lateError;
+  const session = createGameSession({
+    definition,
+    initialState: { score: 0 },
+    onUpdate: ({ setState }) => Promise.resolve().then(() => {
+      try { setState({ score: 99 }); } catch (error) { lateError = error; }
+    }),
+  });
+  session.initialize();
+  session.start();
+  assert.throws(() => session.tick(16), /synchronous/i);
+  session.pause();
+  await Promise.resolve();
+  assert.match(lateError.message, /tick/i);
+  assert.deepEqual(session.getState(), { score: 0 });
+});

@@ -17,6 +17,13 @@ function copyJson(value, path, ancestors = new WeakSet()) {
     if (Object.keys(value).length !== value.length) {
       throw new TypeError(`${path} has holes or extra array properties`);
     }
+    for (const key of Reflect.ownKeys(value)) {
+      if (key === 'length') continue;
+      if (typeof key !== 'string' || !/^(0|[1-9]\d*)$/.test(key) ||
+          !Number.isSafeInteger(Number(key)) || Number(key) >= value.length) {
+        throw new TypeError(`${path} contains a non-JSON array property`);
+      }
+    }
     for (let i = 0; i < value.length; i++) {
       if (!Object.hasOwn(value, i)) throw new TypeError(`${path} has an array hole`);
       const descriptor = Object.getOwnPropertyDescriptor(value, i);
@@ -50,20 +57,61 @@ function copyRootState(state) {
   return copyJson(state, 'state');
 }
 
+/** Internal validator for exact plain, own-data-field snapshot records. */
+export function assertOwnDataFields(value, expectedFields, label = 'snapshot') {
+  if (value === null || typeof value !== 'object' || Array.isArray(value) ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
+    throw new TypeError(`${label} must be a plain object`);
+  }
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== expectedFields.length || keys.some(key => !expectedFields.includes(key))) {
+    throw new TypeError(`${label} has missing or unexpected fields`);
+  }
+  for (const field of expectedFields) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, field);
+    if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
+      throw new TypeError(`${label}.${field} must be an own data field`);
+    }
+  }
+}
+
 /** In-memory JSON-compatible state with explicit revision and copy-in/copy-out. */
 export function createStateStore(initialState = {}) {
   let state = copyRootState(initialState);
   let revision = 0;
   const listeners = new Set();
+  const pending = [];
+  let dispatching = false;
 
   function notify() {
-    for (const listener of [...listeners]) listener(copyRootState(state), revision);
+    pending.push({ state: copyRootState(state), revision, listeners: [...listeners] });
+    if (dispatching) return;
+    dispatching = true;
+    const errors = [];
+    try {
+      while (pending.length) {
+        const event = pending.shift();
+        for (const listener of event.listeners) {
+          try {
+            listener(copyRootState(event.state), event.revision);
+          } catch (error) {
+            errors.push(error);
+          }
+        }
+      }
+    } finally {
+      dispatching = false;
+    }
+    if (errors.length) throw new AggregateError(errors, 'state subscriber notification failed');
   }
 
   return Object.freeze({
     getState: () => copyRootState(state),
     getRevision: () => revision,
     setState(nextState) {
+      if (revision >= Number.MAX_SAFE_INTEGER) {
+        throw new RangeError('state revision overflow: cannot advance safely');
+      }
       const next = copyRootState(nextState);
       state = next;
       revision += 1;
@@ -75,9 +123,7 @@ export function createStateStore(initialState = {}) {
       return () => listeners.delete(listener);
     },
     restore(snapshot) {
-      if (snapshot === null || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
-        throw new TypeError('state snapshot must be an object');
-      }
+      assertOwnDataFields(snapshot, ['revision', 'state'], 'state snapshot');
       if (!Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0) {
         throw new TypeError('snapshot revision must be a non-negative safe integer');
       }
