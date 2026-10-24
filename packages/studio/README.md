@@ -1,4 +1,4 @@
-# `@ludory/studio` — metadata-only foundation
+# `@ludory/studio` — project metadata and safe new-game scaffolding
 
 Node.js 22+. Run `node packages/studio/bin/ludory.mjs help` from this repository.
 
@@ -46,3 +46,39 @@ case requires a manual decision; no inference of additional platform targets.
 This slice is **not** the Starter Kit updater, a CEOS orchestration replacement,
 a runtime, or a release/publishing pipeline. Those features require separate
 behavioral parity validation before migration.
+
+## Profiles and templates (new projects only)
+
+Profile declarations specify a web engine, allowed targets and compatible templates.
+Built-in profiles are `web-game` and optional `narrative-game`; built-in templates
+are `web-basic` and `narrative-basic`. The demos work in a regular browser but
+do **not** contain VK/Yandex SDK integrations or claim host compatibility tests.
+
+```sh
+node packages/studio/bin/ludory.mjs profiles list --json
+node packages/studio/bin/ludory.mjs templates show --name narrative-basic
+
+# Preview: creates nothing.
+node packages/studio/bin/ludory.mjs create --project /path/to/empty-dir \
+  --id my-story --title 'Моя история' --lang ru \
+  --profile narrative-game --template narrative-basic --targets yandex-games,vk-games
+
+# Only after reviewing the preview:
+node packages/studio/bin/ludory.mjs create --project /path/to/empty-dir \
+  --id my-story --title 'Моя история' --lang ru \
+  --profile narrative-game --template narrative-basic --targets yandex-games,vk-games --apply
+```
+
+`create` requires an **existing empty** directory. It writes
+`ludory.project.json`, template files and `ludory.studio.json`, a receipt
+containing source versions and output SHA-256 hashes. It never updates an
+existing game. Previews are read-only, and apply rechecks directory identity,
+catalog source checksums and output collisions. In-flight failures trigger
+best-effort rollback only of unchanged files created by the current command.
+
+External local catalogs are explicit with `--catalog /path/to/catalog`, and
+must contain `profiles/<id>.json` and `templates/<id>/template.json` plus
+static assets named in the template descriptor. JSON schema version is `1`.
+The CLI validates references, paths, uniqueness and symlinks, and external
+catalog entries cannot replace built-ins. Nothing is downloaded or executed
+while browsing templates. The receipt is **not** an updater authority.

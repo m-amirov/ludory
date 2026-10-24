@@ -100,3 +100,45 @@ test('migrate CLI previews then adopts legacy game metadata with explicit apply'
   assert.deepEqual(fs.readFileSync(path.join(project, 'game-spec.yaml')), before);
   assert.equal(JSON.parse(cli('inspect', '--project', project, '--json').stdout).status, 'IN_SYNC');
 });
+
+test('profiles and templates support read-only list/show with stable JSON', () => {
+  const profiles = cli('profiles', 'list', '--json');
+  assert.equal(profiles.status, 0, profiles.stderr);
+  assert.deepEqual(JSON.parse(profiles.stdout).profiles.map(x => x.id), ['narrative-game', 'web-game']);
+  const template = cli('templates', 'show', '--name', 'web-basic', '--json');
+  assert.equal(template.status, 0, template.stderr);
+  assert.equal(JSON.parse(template.stdout).template.profile, 'web-game');
+  assert.match(cli('profiles', 'list').stdout, /web-game/);
+  assert.equal(cli('templates', 'show', '--json').status, 1);
+  assert.equal(cli('profiles', 'list', '--apply').status, 1);
+});
+
+test('create generates files only with --apply and preserves legacy commands', t => {
+  const project = temporary(t);
+  const args = ['create', '--project', project, '--id', 'my-demo', '--title', 'Демо', '--lang', 'ru',
+    '--profile', 'web-game', '--template', 'web-basic', '--targets', 'vk-games,yandex-games', '--json'];
+  const preview = cli(...args);
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.equal(JSON.parse(preview.stdout).status, 'READY');
+  assert.deepEqual(fs.readdirSync(project), []);
+  const applied = cli(...args, '--apply');
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.equal(JSON.parse(applied.stdout).status, 'APPLIED');
+  assert.ok(fs.existsSync(path.join(project, 'src', 'main.js')));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(project, 'ludory.project.json'))).engine, 'web');
+  assert.equal(cli(...args, '--apply').status, 2);
+  assert.equal(JSON.parse(cli('inspect', '--project', project, '--json').stdout).status, 'CURRENT');
+});
+
+test('create validates profile/template flags and rejects conflicting options', t => {
+  const project = temporary(t);
+  const args = ['create', '--project', project, '--id', 'my-demo', '--title', 'Demo', '--lang', 'en',
+    '--profile', 'web-game', '--template', 'web-basic', '--targets', 'vk-games'];
+  assert.equal(cli(...args, '--profile', 'web-game').status, 1);
+  assert.equal(cli(...args, '--engine', 'phaser').status, 1);
+  assert.equal(cli(...args, '--targets', 'unsupported-platform', '--json').status, 1); // duplicate options
+  const targetArgs = args.map((v, i) => i === args.length - 1 ? 'unsupported-platform' : v);
+  assert.equal(cli(...targetArgs, '--json').status, 2);
+  assert.equal(cli('profiles', 'show', '--name', 'unknown').status, 1);
+  assert.deepEqual(fs.readdirSync(project), []);
+});

@@ -2,13 +2,13 @@
 
 LUDORY is a modular toolkit for building and shipping browser games to Yandex Games, VK Games, and future platforms.
 
-> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` now begins with read-only planning and metadata-only adoption. This repository does not yet replace CEOS or Starter Kit, nor does it certify any platform release.
+> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports safe metadata adoption and new-game templates. This repository does not yet replace CEOS or Starter Kit, nor does it certify any platform release.
 
 ## Modules
 
 | Module | Responsibility | Stage |
 | --- | --- | --- |
-| Ludory Studio | Projects, templates, development workflows and project updates | Metadata-only foundation |
+| Ludory Studio | Projects, profiles, templates, development workflows and project updates | Metadata adoption + new-game scaffolding |
 | Ludory Core | Framework-independent game definition, state and lifecycle | Foundation |
 | Ludory AI | CEOS orchestration, agents, workflows and evidence | Planned migration |
 | Ludory Runtime | Host UI, browser lifecycle, input, persistence, sound | Planned |
@@ -50,7 +50,7 @@ const snapshot = game.snapshot();
 
 The Core is optional for existing games. It does **not** import platform SDKs or choose renderers. Platform services are added through separate Runtime/Connect adapters in later stages.
 
-## Ludory Studio: first safe CLI slice
+## Ludory Studio: project metadata and safe scaffolding
 
 The common manifest is `ludory.project.json`, validated by Core. It holds only identity, version, localized title, engine ID and target IDs; it does not replace platform configurations, CEOS run history or the legacy `game-spec.yaml`.
 
@@ -71,7 +71,22 @@ node packages/studio/bin/ludory.mjs migrate --project /path/to/game --apply --js
 node packages/studio/bin/ludory.mjs init --project /path/to/empty --id my-game --title 'Моя игра' --lang ru --engine phaser --targets yandex-games,vk-games --json
 ```
 
-`--apply` exclusively creates one file (`ludory.project.json`); it never modifies existing game code, assets, saves, `AGENTS.md` or platform settings. Mature games require a committed, clean Git worktree and unambiguous metadata. `BLOCKED` and `CONFLICT` require owner intervention. Read [Studio's first-slice contract](docs/superpowers/specs/2026-10-24-studio-foundation-design.md) for limitations; no template/updater/CEOS orchestration has been ported yet.
+For `init` and `migrate`, `--apply` exclusively creates one file (`ludory.project.json`); neither command modifies existing game code, assets, saves, `AGENTS.md` or platform settings. Mature games require a committed, clean Git worktree and unambiguous metadata. `BLOCKED` and `CONFLICT` require owner intervention. Read [Studio's first-slice contract](docs/superpowers/specs/2026-10-24-studio-foundation-design.md) for limitations; the ownership-aware updater and CEOS orchestration have not been ported yet.
+
+Studio also supports versioned profiles and templates for **new empty projects**:
+
+```sh
+node packages/studio/bin/ludory.mjs profiles list
+node packages/studio/bin/ludory.mjs templates list
+node packages/studio/bin/ludory.mjs create --project /path/to/empty-game --id my-game --title 'Моя игра' --lang ru --profile web-game --template web-basic --targets yandex-games,vk-games
+# Review the preview before repeating with --apply.
+```
+
+The new `create` command exclusively generates a playable browser demo, the
+Core-compatible manifest and a SHA-256 creation receipt. Its targets denote
+intended platforms, **not** a production-ready VK/Yandex integration. The
+Starter Kit updater, CEOS orchestration and host release gates remain unmigrated.
+See [Studio's guide](packages/studio/README.md).
 
 ## Source-of-truth repositories during migration
 

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "web-basic",
+  "version": "1.0.0",
+  "description": "Browser click-counter starter playable locally",
+  "profile": "web-game",
+  "engine": "web",
+  "targets": ["yandex-games", "vk-games"],
+  "files": ["index.html", "src/main.js"]
+}
