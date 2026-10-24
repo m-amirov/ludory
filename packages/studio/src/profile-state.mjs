@@ -106,11 +106,12 @@ function parseActive(bytes, generation) {
   catch { throw new Error('Active profile state contains invalid JSON'); }
   strictKeys(value, ['schemaVersion', 'generation', 'profile', 'history'], 'active profile state');
   if (value.schemaVersion !== 1 || value.generation !== generation ||
-      !Array.isArray(value.history) || value.history.length > 256) {
+      !Array.isArray(value.history) || value.history.length !== generation || value.history.length > 256) {
     throw new Error('Unsupported active profile state schema, generation or history');
   }
   checkRevision(value.profile);
   for (const previous of value.history) checkRevision(previous);
+  if (!bytes.equals(encode(value))) throw new Error('Profile revision bytes differ from canonical state');
   return value;
 }
 
@@ -123,6 +124,7 @@ export function readProfileState(project, { transient = [] } = {}) {
   const bytes = readRegular(active, 'active profile state');
   let value = parseActive(bytes, 0);
   let stateBytes = bytes;
+  const committedStates = [bytes];
   const revisionDir = path.join(rootState.root, 'revisions');
   if (entryExists(revisionDir)) {
     physical(revisionDir, 'profile revisions directory');
@@ -133,15 +135,35 @@ export function readProfileState(project, { transient = [] } = {}) {
       if (entries[i] !== expectedName) throw new Error(`Unexpected profile revision: ${entries[i]}`);
       const following = readRegular(path.join(revisionDir, expectedName), 'profile revision');
       const next = parseActive(following, i + 1);
-      if (!next.history.length || JSON.stringify(next.history[0]) !== JSON.stringify(value.profile)) {
+      if (JSON.stringify(next.history) !== JSON.stringify([value.profile, ...value.history])) {
         throw new Error('Profile revision chain does not match previous active state');
       }
       value = next;
       stateBytes = following;
+      committedStates.push(following);
     }
   }
   for (const revision of [value.profile, ...value.history]) readSnapshot(rootState.root, revision);
-  if (entryExists(path.join(rootState.root, 'history'))) physical(path.join(rootState.root, 'history'), 'profile history directory');
+  const historyDir = path.join(rootState.root, 'history');
+  if (value.generation === 0) {
+    // Genesis does not create these directories. Their premature appearance
+    // cannot establish Ludory ownership, even when they are empty.
+    if (entryExists(historyDir) || entryExists(revisionDir)) {
+      throw new Error('Foreign profile history or revisions directory at generation zero');
+    }
+  } else {
+    physical(historyDir, 'profile history directory');
+    const expected = new Map(committedStates.slice(0, -1).map(previous => [`${sha256(previous)}.json`, previous]));
+    const actual = fs.readdirSync(historyDir);
+    if (actual.length !== expected.size || actual.some(name => !expected.has(name))) {
+      throw new Error('Profile recovery history has unexpected, missing or foreign entries');
+    }
+    for (const [name, previous] of expected) {
+      if (!readRegular(path.join(historyDir, name), 'profile history').equals(previous)) {
+        throw new Error('Profile recovery history bytes changed');
+      }
+    }
+  }
   const allowed = new Set(['active.json', 'snapshots', 'history', 'revisions', ...transient]);
   for (const name of fs.readdirSync(rootState.root)) {
     if (!allowed.has(name)) throw new Error(`Unknown profile management path: ${name}`);

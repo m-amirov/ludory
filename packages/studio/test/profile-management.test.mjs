@@ -82,6 +82,21 @@ test('foreign Studio profile state is never adopted as Ludory-owned', t => {
   assert.equal(fs.readFileSync(path.join(root, '.ludory', 'profiles', 'foreign.txt'), 'utf8'), 'owner bytes');
 });
 
+test('first upgrade refuses foreign history and revision directories without adopting them', t => {
+  for (const directoryName of ['history', 'revisions']) {
+    const root = existingGame(t);
+    const catalog = customCatalog(t);
+    assert.equal(applyProfilePlan(planProfileApply(root, { name: 'custom-game', catalog })).status, 'APPLIED');
+    const foreign = path.join(root, '.ludory', 'profiles', directoryName);
+    fs.mkdirSync(foreign);
+    fs.writeFileSync(path.join(foreign, 'foreign.txt'), 'OWNER-BYTES\n');
+    changeProfile(catalog, { version: '1.0.1' });
+    assert.equal(planProfileUpdate(root, { catalog }).status, 'CONFLICT', directoryName);
+    assert.equal(fs.readFileSync(path.join(foreign, 'foreign.txt'), 'utf8'), 'OWNER-BYTES\n');
+    assert.equal(fs.existsSync(path.join(root, '.ludory', 'profiles', 'revisions', '00000001.json')), false);
+  }
+});
+
 test('successful apply only writes Ludory state and is idempotent', t => {
   const root = existingGame(t);
   const before = preserved(root);
@@ -130,6 +145,42 @@ test('modified active pointer and immutable snapshot block status and upgrades',
   fs.writeFileSync(snapshot, 'USER-SNAPSHOT\n');
   assert.equal(profileStatus(root, { catalog }).status, 'CONFLICT');
   assert.equal(fs.readFileSync(snapshot, 'utf8'), 'USER-SNAPSHOT\n');
+});
+
+test('tampering with older profile revision history is rejected before a later upgrade', t => {
+  const root = existingGame(t);
+  const catalog = customCatalog(t);
+  assert.equal(applyProfilePlan(planProfileApply(root, { name: 'custom-game', catalog })).status, 'APPLIED');
+  changeProfile(catalog, { version: '1.0.1' });
+  assert.equal(applyProfilePlan(planProfileUpdate(root, { catalog })).status, 'APPLIED');
+
+  const genesisFile = path.join(root, '.ludory', 'profiles', 'active.json');
+  const genesis = JSON.parse(fs.readFileSync(genesisFile, 'utf8'));
+  genesis.history = [{ ...genesis.profile }];
+  const tampered = `${JSON.stringify(genesis)}\n`;
+  fs.writeFileSync(genesisFile, tampered);
+
+  changeProfile(catalog, { version: '1.0.2' });
+  assert.equal(profileStatus(root, { catalog }).status, 'CONFLICT');
+  assert.equal(planProfileUpdate(root, { catalog }).status, 'CONFLICT');
+  assert.equal(fs.readFileSync(genesisFile, 'utf8'), tampered);
+  assert.equal(fs.existsSync(path.join(root, '.ludory', 'profiles', 'revisions', '00000002.json')), false);
+});
+
+test('modified recovery archive prevents further profile updates without repairing user bytes', t => {
+  const root = existingGame(t);
+  const catalog = customCatalog(t);
+  applyProfilePlan(planProfileApply(root, { name: 'custom-game', catalog }));
+  changeProfile(catalog, { version: '1.0.1' });
+  applyProfilePlan(planProfileUpdate(root, { catalog }));
+  const archiveDir = path.join(root, '.ludory', 'profiles', 'history');
+  const archiveName = fs.readdirSync(archiveDir)[0];
+  const archiveFile = path.join(archiveDir, archiveName);
+  fs.writeFileSync(archiveFile, 'user-altered-recovery-archive\n');
+  changeProfile(catalog, { version: '1.0.2' });
+  assert.equal(profileStatus(root, { catalog }).status, 'CONFLICT');
+  assert.equal(planProfileUpdate(root, { catalog }).status, 'CONFLICT');
+  assert.equal(fs.readFileSync(archiveFile, 'utf8'), 'user-altered-recovery-archive\n');
 });
 
 test('apply rechecks manifest and catalog after preview', t => {

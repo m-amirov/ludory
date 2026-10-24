@@ -312,23 +312,6 @@ export function applyProfilePlan(plan) {
     } finally { process.chdir('..'); }
     if (directoryIdentity('.') !== profileIdentity) throw new Error('Profile directory moved during apply');
 
-    if (isUpdate) {
-      mkdirAndEnter('history', createdDirectories, '.ludory/profiles/');
-      try {
-        const previousState = readProfileState(plan.project, { transient: ['.lock'] });
-        const previous = previousState.bytes;
-        if (previousState.sha256 !== plan.expectedStateSha256) throw new Error('Stale plan: active profile drift');
-        const filename = `${plan.expectedStateSha256}.json`;
-        try {
-          const existing = readRegular(filename, 'profile history');
-          if (!existing.equals(previous)) throw new Error('Conflicting profile history snapshot');
-        } catch (error) {
-          if (error.code !== 'ENOENT') throw error;
-          writtenFile(filename, previous, createdFiles, '.ludory/profiles/history/');
-        }
-      } finally { process.chdir('..'); }
-    }
-
     const staging = `.pending-${crypto.randomBytes(18).toString('hex')}`;
     const staged = writtenFile(staging, fresh._snapshot.activeBytes, createdFiles);
     sourceStillValid(plan);
@@ -338,8 +321,9 @@ export function applyProfilePlan(plan) {
     }
     // Revalidate every recorded snapshot after staging. A concurrent writer
     // changing an old or incoming blob must stop this update before commit.
+    let beforeCommit;
     if (isUpdate) {
-      const beforeCommit = readProfileState(plan.project, { transient: ['.lock', staging] });
+      beforeCommit = readProfileState(plan.project, { transient: ['.lock', staging] });
       if (beforeCommit.sha256 !== plan.expectedStateSha256) throw new Error('Stale plan: managed profile state or snapshot changed');
     }
     checkAndEnter('snapshots');
@@ -353,7 +337,20 @@ export function applyProfilePlan(plan) {
     const stagedBytes = readRegular(staging, 'staged profile state');
     if (!stagedBytes.equals(fresh._snapshot.activeBytes)) throw new Error('Staged profile state changed before publication');
     if (isUpdate) {
-      mkdirAndEnter('revisions', createdDirectories, '.ludory/profiles/');
+      // Neither directory exists at generation zero. Own it only by an
+      // exclusive mkdir, after validation, not by adopting a foreign path.
+      mkdirAndEnter('history', createdDirectories, '.ludory/profiles/', plan.generation === 1 ? 'create' : 'existing');
+      try {
+        const filename = `${plan.expectedStateSha256}.json`;
+        try {
+          const existing = readRegular(filename, 'profile history');
+          if (!existing.equals(beforeCommit.bytes)) throw new Error('Conflicting profile history snapshot');
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+          writtenFile(filename, beforeCommit.bytes, createdFiles, '.ludory/profiles/history/');
+        }
+      } finally { process.chdir('..'); }
+      mkdirAndEnter('revisions', createdDirectories, '.ludory/profiles/', plan.generation === 1 ? 'create' : 'existing');
       const commitName = `${String(plan.generation).padStart(8, '0')}.json`;
       try {
         // Link is atomic and EXCLUSIVE; concurrent user files are never
