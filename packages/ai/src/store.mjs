@@ -185,6 +185,17 @@ function activeRunIds(project) {
     fs.existsSync(path.join(runs, x.name, 'commit.json'))).map(x => x.name).sort();
 }
 
+/** Read-only discovery; never chooses one of several active runs implicitly. */
+export function listNativeRuns(projectDir) {
+  const project = inspectNativeProject(projectDir).project;
+  if (!fs.existsSync(path.join(project, '.ludory', 'ai', 'runs'))) return [];
+  return activeRunIds(project).map(id => {
+    const current = readNativeRun(project, id);
+    return { runId: id, status: current.status, nextStage: current.nextStage,
+      pipeline: current.run.pipeline, createdAt: current.run.createdAt };
+  });
+}
+
 export function readNativeRun(projectDir, runRef = 'latest') {
   const project = path.resolve(projectDir);
   let runId = runRef;
@@ -203,9 +214,13 @@ export function readNativeRun(projectDir, runRef = 'latest') {
   if (marker.schemaVersion !== 1 || marker.runId !== runId || marker.runSha256 !== sha256(runBytes) ||
       run.schemaVersion !== 1 || run.runId !== runId || run.projectId !== run.source?.manifest?.id ||
       getPipeline(run.pipeline).version !== run.pipelineVersion) throw new Error('NATIVE_INTEGRITY_RUN_HASH');
-  if (run.source.project !== project) throw new Error('NATIVE_INTEGRITY_PROJECT_BINDING');
-  const source = verifyNativeSource(run.source);
-  if (!source.ok) throw new Error(`NATIVE_INTEGRITY_SOURCE_${source.code}`);
+  // A run is portable with its game. Copying its store into another *live*
+  // project is not relocation; the original location must be gone first.
+  if (run.source.project !== project && fs.existsSync(run.source.project)) {
+    throw new Error('NATIVE_INTEGRITY_PROJECT_BINDING');
+  }
+  const currentProject = inspectNativeProject(project);
+  if (run.projectId !== currentProject.manifest.id) throw new Error('NATIVE_INTEGRITY_PROJECT_BINDING');
   const eventsDir = path.join(dir, 'events');
   safeDir(eventsDir);
   const files = fs.readdirSync(eventsDir).sort();
@@ -231,8 +246,13 @@ export function readNativeRun(projectDir, runRef = 'latest') {
     if (event.kind === 'CHECKPOINT') {
       if (!Array.isArray(event.artifacts)) throw new Error('NATIVE_INTEGRITY_EVENT_ARTIFACTS');
       for (const artifact of event.artifacts) {
-        const actual = snapshotArtifact(project, artifact.path);
-        if (actual.sha256 !== artifact.sha256 || actual.size !== artifact.size) throw new Error('NATIVE_INTEGRITY_ARTIFACT_HASH');
+        // Hashes describe bytes at checkpoint time, not an eternal promise
+        // that the mutable working copy will still contain the same bytes.
+        if (!artifact || typeof artifact.path !== 'string' || !artifact.path ||
+            !/^[a-f0-9]{64}$/.test(artifact.sha256) ||
+            !Number.isSafeInteger(artifact.size) || artifact.size < 0) {
+          throw new Error('NATIVE_INTEGRITY_EVENT_ARTIFACTS');
+        }
       }
       const transition = checkTransition(run.pipeline, event.stage, event.outcome, { hasEvidence: event.artifacts.length > 0 });
       if (!transition.ok) throw new Error(`NATIVE_INTEGRITY_INVALID_TRANSITION: ${transition.code}`);
@@ -255,6 +275,7 @@ export function readNativeRun(projectDir, runRef = 'latest') {
 export function planNativeEvent(projectDir, runRef, input) {
   const project = path.resolve(projectDir);
   const current = readNativeRun(project, runRef);
+  const source = inspectNativeProject(project);
   if (current.terminal) throw new Error('NATIVE_TERMINAL_RUN');
   if (!input || !['CHECKPOINT', 'ACTION_REQUESTED'].includes(input.kind)) throw new Error('NATIVE_EVENT_KIND_INVALID');
   if (input.stage !== current.nextStage) throw new Error(`NATIVE_INVALID_STAGE: expected ${current.nextStage}`);
@@ -270,10 +291,14 @@ export function planNativeEvent(projectDir, runRef, input) {
     throw new Error('NATIVE_ACTION_ALREADY_REQUESTED');
   }
   const event = { schemaVersion: 1, index: current.events.length + 1, prevSha256: current.headSha256,
-    kind: input.kind, stage: input.stage, outcome, artifacts, at: new Date().toISOString() };
+    kind: input.kind, stage: input.stage, outcome, artifacts, at: new Date().toISOString(),
+    sourceAtCheckpoint: { gitHead: source.gitHead, manifestSha256: source.manifestSha256 } };
   return { status: 'READY', kind: 'NATIVE_EVENT', project, runId: current.run.runId,
-    source: current.run.source, expectedHeadSha256: current.headSha256, event,
-    fingerprint: sha256(serial(event)), writes: [`.ludory/ai/runs/${current.run.runId}/events/${String(event.index).padStart(6, '0')}.json`] };
+    source, expectedHeadSha256: current.headSha256, event,
+    fingerprint: sha256(serial(event)), writes: [
+      `.ludory/ai/runs/${current.run.runId}/events/${String(event.index).padStart(6, '0')}.json`,
+      `.ludory/ai/runs/${current.run.runId}/events/${String(event.index).padStart(6, '0')}.commit.json`,
+    ] };
 }
 
 export function commitNativeEvent(plan) {

@@ -19,15 +19,15 @@ test('native project preflight binds a clean game to manifest and Git head read-
   assert.deepEqual(verifyNativeSource(binding), { ok: true });
 });
 
-test('source changes, new commits, missing or symbolic manifests block project adoption', t => {
+test('edits and commits are advisory while missing or symbolic manifests still block', t => {
   const project = nativeProject(t);
   const binding = inspectNativeProject(project);
   fs.writeFileSync(path.join(project, 'src', 'main.js'), 'modified\n');
-  assert.equal(verifyNativeSource(binding).code, 'SOURCE_WORKTREE_DIRTY');
-  assert.throws(() => inspectNativeProject(project), /SOURCE_WORKTREE_DIRTY/);
+  assert.deepEqual(verifyNativeSource(binding), { ok: true });
+  assert.equal(inspectNativeProject(project).gitClean, false);
   runGit(project, 'add', 'src/main.js');
   runGit(project, '-c', 'user.name=Ludory Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'changed');
-  assert.equal(verifyNativeSource(binding).code, 'SOURCE_HEAD_CHANGED');
+  assert.deepEqual(verifyNativeSource(binding), { ok: true });
   fs.unlinkSync(path.join(project, 'ludory.project.json'));
   assert.throws(() => inspectNativeProject(project), /manifest|source/i);
   fs.symlinkSync(path.join(project, 'src', 'main.js'), path.join(project, 'ludory.project.json'));
@@ -50,26 +50,50 @@ test('artifact evidence hashes actual bytes, and rejects traversal and symlinked
   assert.notEqual(snapshotArtifact(project, 'src/main.js').sha256, result.sha256);
 });
 
-test('canonical manifest must be tracked by HEAD with safe index flags', t => {
+test('index anomalies are reported as untrusted Git provenance without blocking development', t => {
   const ignored = nativeProject(t);
   runGit(ignored, 'rm', '--cached', 'ludory.project.json');
   fs.writeFileSync(path.join(ignored, '.gitignore'), 'ludory.project.json\n');
   runGit(ignored, 'add', '.gitignore');
   runGit(ignored, '-c', 'user.name=Ludory Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'stop tracking manifest');
-  assert.throws(() => inspectNativeProject(ignored), /SOURCE_MANIFEST_NOT_TRACKED/);
+  assert.equal(inspectNativeProject(ignored).gitTrusted, false);
 
   const skip = nativeProject(t);
   runGit(skip, 'update-index', '--skip-worktree', 'ludory.project.json');
-  assert.throws(() => inspectNativeProject(skip), /SOURCE_MANIFEST_INDEX_UNSAFE/);
+  assert.equal(inspectNativeProject(skip).gitTrusted, false);
 
   const assume = nativeProject(t);
   runGit(assume, 'update-index', '--assume-unchanged', 'ludory.project.json');
-  assert.throws(() => inspectNativeProject(assume), /SOURCE_MANIFEST_INDEX_UNSAFE/);
+  assert.equal(inspectNativeProject(assume).gitTrusted, false);
 
   const hiddenEdit = nativeProject(t);
   const original = inspectNativeProject(hiddenEdit);
   runGit(hiddenEdit, 'update-index', '--assume-unchanged', 'src/main.js');
   fs.writeFileSync(path.join(hiddenEdit, 'src', 'main.js'), '// hidden modified source\n');
-  assert.throws(() => inspectNativeProject(hiddenEdit), /SOURCE_GIT_INDEX_UNSAFE/);
-  assert.equal(verifyNativeSource(original).ok, false);
+  assert.equal(inspectNativeProject(hiddenEdit).gitTrusted, false);
+  assert.equal(verifyNativeSource(original).ok, true);
+});
+
+test('development inspection tolerates unversioned games, edits, and nested workspaces', t => {
+  const unversioned = nativeProject(t);
+  fs.rmSync(path.join(unversioned, '.git'), { recursive: true, force: true });
+  const fresh = inspectNativeProject(unversioned);
+  assert.equal(fresh.manifest.id, 'native-game');
+  assert.equal(fresh.gitHead, null);
+  assert.equal(verifyNativeSource(fresh).ok, true);
+
+  const tracked = nativeProject(t);
+  const before = inspectNativeProject(tracked);
+  fs.writeFileSync(path.join(tracked, 'src', 'main.js'), '// active development\n');
+  assert.equal(inspectNativeProject(tracked).gitClean, false);
+  assert.deepEqual(verifyNativeSource(before), { ok: true });
+  runGit(tracked, 'add', 'src/main.js');
+  runGit(tracked, '-c', 'user.name=Ludory Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'development');
+  assert.deepEqual(verifyNativeSource(before), { ok: true });
+
+  const monorepo = nativeProject(t);
+  const nested = path.join(monorepo, 'games', 'little-game');
+  fs.mkdirSync(nested, { recursive: true });
+  fs.copyFileSync(path.join(monorepo, 'ludory.project.json'), path.join(nested, 'ludory.project.json'));
+  assert.equal(inspectNativeProject(nested).manifest.id, 'native-game');
 });

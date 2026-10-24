@@ -2,6 +2,8 @@
 
 This is a **complete tracked-file closure** and a functional **migration ownership matrix**, not a declaration of behavioral parity. The machine-readable [source closure](source-closure.json) classifies **all 398 tracked blobs** at pinned commits, with no unassigned files. Every capability below is `NOT_MIGRATED` unless explicitly marked otherwise. Do not interpret folder ownership as authorization to copy upstream code.
 
+> **Historical inventory only.** The owner has canceled historical CEOS run/project migration and frozen existing games. This table is a reference for selecting useful capabilities for *new* Ludory games, not a required 29-group parity checklist or permission to import old project state. See [the current native development decision](../superpowers/specs/2026-10-24-native-dev-workflows-simplification-design.md).
+
 Independent source cross-check (2026-10-24): compared every closure path/blob SHA with the recursive GitHub Git trees at the pinned commits: CEOS **219/219**, Starter Kit **179/179**, **0 missing, 0 extras, 0 SHA mismatches**. This establishes tracked-file completeness at those exact revisions only; the repository test also checks internal inventory consistency offline.
 
 | Source | Pinned HEAD | Tracked blobs | Production/tooling group |
@@ -53,9 +55,9 @@ Statuses are migration statuses, **not** judgments that the original implementat
 4. Both `.agents/skills` and `.codex/skills` may already exist; Studio does not rewrite or register either during metadata migration.
 5. Game engines, Phaser code, visual novels, binaries, audio, art and user saves are **project-owned**. Core and Studio may reference them but do not migrate or copy them at this phase.
 
-## Migration readiness and verification boundary
+## Current Ludory readiness and verification boundary
 
 - **Inventory completeness:** every source blob mapped in `source-closure.json`; the source SHAs are pinned and can be refreshed on a future audit.
-- **Migration parity:** `0/29` upstream capability groups have been ported or independently accepted. Only the new Core foundation exists.
+- **Old import:** canceled; `NOT_MIGRATED` is a historical mapping status, not a task backlog. Useful capabilities are reimplemented and individually verified for new games, without recreating CEOS's session/worktree complexity.
 - **Studio phase 1:** strictly metadata-only `init`, read-only `inspect`, dry-run `migrate`, explicit safe `--apply`. No CEOS state, Starter ownership update, SDK, CI release or production game deployment.
-- **Before retiring either old repository:** port tests/fixtures group by group, compare old/new behavior, run two mature-game pilots with actual assets/save data and rollback evidence, and obtain independent platform acceptance.
+- **Old repositories:** remain untouched read-only references; no mature-game pilots or CEOS history conversion during the freeze. New Ludory games require their own tests and independent VK/Yandex production gates before any platform release.

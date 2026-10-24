@@ -2,7 +2,7 @@
 
 LUDORY is a modular toolkit for building and shipping browser games to Yandex Games, VK Games, and future platforms.
 
-> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports metadata adoption, templates, profiles and **native Ludory AI workflow commands**. A full CEOS/Starter Kit replacement, existing-run migration, live AI agent automation and platform release certification remain future gates.
+> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports manifests, templates, profiles and **native Ludory AI workflow commands**. Full replacement of CEOS/Starter Kit capabilities, AI agent automation and platform release certification remain future gates. Existing games are frozen; historical CEOS runs will **not** be imported.
 
 ## Modules
 
@@ -53,6 +53,8 @@ The Core is optional for existing games. It does **not** import platform SDKs or
 ## Ludory Studio: project metadata and safe scaffolding
 
 The common manifest is `ludory.project.json`, validated by Core. It holds only identity, version, localized title, engine ID and target IDs; it does not replace platform configurations, CEOS run history or the legacy `game-spec.yaml`.
+
+The existing `migrate`/`profiles apply` commands remain documented for compatibility, **not as instructions to change frozen games**. During current development, create isolated new Ludory test games only.
 
 ```sh
 # Print commands; after npm install, use npm exec -- ludory ... if desired.
@@ -105,7 +107,7 @@ ownership. Profile application does not activate game-engine functionality.
 
 ## Native Ludory AI workflows through Studio
 
-Studio invokes its own `@ludory/ai` workflow engine **without installing or invoking CEOS**. Native runs are stored under `.ludory/ai/`. A valid `ludory.project.json` and a clean Git source are required; game code, assets, saves, `.codex-os/` and historical `.ceos-runs/` remain untouched.
+Studio invokes its own `@ludory/ai` workflow engine **without installing or invoking CEOS**. Native runs are stored under `.ludory/ai/`. A valid `ludory.project.json` is required; Git is optional during development. Game code, assets and saves remain untouched. Native history is readable after source edits, commits or relocating the game; immutable checkpoint receipts preserve the hashes recorded at the time of each action.
 
 ```sh
 # Read-only inspection of native Ludory state.
@@ -124,11 +126,11 @@ node packages/studio/bin/ludory.mjs workflow checkpoint --project /path/to/game 
   --run latest --stage EVIDENCE_COLLECTED --artifact 'reports/evidence.json' --outcome CONTINUE --json
 ```
 
-`--apply` is mandatory for mutating `start`, `continue` and `checkpoint`; `doctor`, `status` and `next` are read-only. `continue --apply` records an **action request**, not an executed agent task. Terminal `PASS` is blocked until an independent Ludory Release verifier exists. Historical CEOS imports and resume from old checkpoints are a separate, planned migration phase. See [Studio's workflow reference](packages/studio/README.md#native-workflows-through-the-unified-cli).
+`--apply` is mandatory for mutating `start`, `continue` and `checkpoint`; `doctor`, `status` and `next` are read-only. `continue --apply` records an **action request**, not an executed agent task. Terminal `PASS` is blocked until an independent Ludory Release verifier exists. When several runs are active, `status` lists their IDs; supply an explicit `--run` to continue one. No historic CEOS checkpoints are imported. See [Studio's workflow reference](packages/studio/README.md#native-workflows-through-the-unified-cli).
 
-## Source-of-truth repositories during migration
+## Frozen legacy repositories
 
-- [Codex Engineering OS](https://github.com/m-amirov/codex-engineering-system) — orchestration and agent/evidence logic until migrated.
-- [Yandex Games Starter Kit](https://github.com/m-amirov/starter-kit-yandex-games) — templates, ownership-aware updater and platform validation until migrated.
+- [Codex Engineering OS](https://github.com/m-amirov/codex-engineering-system) — read-only reference for useful orchestration and evidence behavior.
+- [Yandex Games Starter Kit](https://github.com/m-amirov/starter-kit-yandex-games) — read-only reference for runtime, templates and platform validation.
 
-Do not delete, rename or deprecate the original repositories until compatibility, migrations and release gates have been proven independently.
+Old games are frozen and must not be changed, migrated, submitted or used as test projects while Ludory is being developed. Do not delete the original repositories. A later voluntary `ludory adopt` may start a **fresh** native workflow for an existing game, with no old CEOS run history import. See the [owner's simplifying decision](docs/superpowers/specs/2026-10-24-native-dev-workflows-simplification-design.md).

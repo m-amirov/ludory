@@ -1,4 +1,6 @@
-# Native Ludory AI and One-Time CEOS Migration — Design (2026-10-24)
+# Native Ludory AI and One-Time CEOS Migration — Historical Design (2026-10-24)
+
+> **SUPERSEDED OWNER DECISION:** The one-time historical CEOS import, old-run resume and legacy project migration sections below are no longer approved. Existing games are frozen; new Ludory games use fresh native runs, and a future opt-in adoption (if requested) will not copy CEOS history. Current source of truth: [native workflow simplification](2026-10-24-native-dev-workflows-simplification-design.md). The description below documents the earlier proposal only, not an implementation mandate.
 
 ## Product decision and source baseline
 

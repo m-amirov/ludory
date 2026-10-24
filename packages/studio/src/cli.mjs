@@ -31,7 +31,9 @@ create --apply only creates new template files, manifest and Studio receipt in a
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
 workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
 Native AI agent execution and independent release PASS verification are not yet implemented.
-Migration requires clean Git and supported Starter Kit game-spec.yaml schema 2.
+Native development workflow accepts dirty or unversioned projects; Release verification is separate.
+The legacy metadata-only migrate command requires clean Git and Starter Kit game-spec.yaml schema 2;
+do not run it against frozen existing games. CEOS history import is not planned.
 `;
 
 function argumentsFor(command, argv) {
@@ -90,6 +92,7 @@ function displayWorkflow(result, json, out) {
   if (result.engine) out(`  engine: ${result.engine}\n`);
   if (result.nativeStatus) out(`  native status: ${result.nativeStatus}\n`);
   if (result.nextAction?.kind) out(`  next: ${result.nextAction.kind}\n`);
+  for (const run of result.runs ?? []) out(`  run: ${run.runId} · ${run.status} · ${run.nextStage ?? 'terminal'}\n`);
   if (result.status === 'READY') for (const item of result.writes ?? []) out(`  planned: ${item}\n`);
   for (const conflict of result.conflicts ?? []) out(`  blocked: ${conflict}\n`);
 }

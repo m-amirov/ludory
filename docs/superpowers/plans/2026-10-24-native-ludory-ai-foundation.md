@@ -1,5 +1,7 @@
 # Native Ludory AI Foundation Implementation Plan
 
+> **UPDATE:** The native foundation tasks were delivered in Draft PR #6. The originally planned historical CEOS importer and restrictive Git/source-binding model are superseded by [the owner's simplified native development decision](../specs/2026-10-24-native-dev-workflows-simplification-design.md). Do not execute the obsolete importer task below.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the external CEOS workflow CLI adapter with a minimal, safe, independently tested native `@ludory/ai` workflow engine and the same Ludory Studio CLI surface, without requiring CEOS to be installed.
@@ -97,9 +99,9 @@
 
 ## Deferred plans / ordering
 
-1. **Legacy CEOS importer** (next plan): schema registry, read-only inventory and SHA manifest, content-addressed archive, linked run projection, idempotent atomic activation, old-run resume with fresh capability authorization, rollback. No arbitrary historical run auto-activation.
-2. **Ludory AI capability and agent parity:** C01–C15, AI model broker, production-art, Web High, narrative, recovery and source-bound attestations.
-3. **Starter Kit/Release parity:** S01–S14, updates, ownership, platform build/SDK/release gates, two mature game pilots, actual Windows host acceptance.
+1. **No legacy importer:** canceled by the owner. Existing games are frozen and historical CEOS checkpoints are retained only in their original repositories.
+2. **Ludory AI execution:** first connect real task execution/agents and the simple `continue` experience, without new nested session/worktree contracts.
+3. **New-game Runtime/Connect/Release:** use isolated Ludory test games for platform build/SDK/release gates and Windows host acceptance; no mature-game pilots while frozen.
 
 ## Self-review
 

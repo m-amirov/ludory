@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { runCli } from '../src/cli.mjs';
 import { nativeProject } from '../../ai/test/helpers/project.mjs';
@@ -65,4 +66,38 @@ test('native workflow CLI rejects CEOS adapter flags and returns honest blockers
     '--target', 'X', '--in-scope', 'src', '--acceptance', 'all', '--mutation-boundary', 'none');
   assert.equal(unsupported.status, 1);
   assert.equal(JSON.parse(unsupported.stdout).status, 'FAILED');
+});
+
+test('CLI status lists every active run ID instead of leaving latest ambiguous', t => {
+  const project = nativeProject(t);
+  const common = ['--project', project, '--json'];
+  const start = ['workflow', 'start', ...common, '--pipeline', 'audit-repair-loop',
+    '--target', 'test', '--in-scope', 'src', '--acceptance', 'evidence',
+    '--mutation-boundary', 'own report', '--apply'];
+  const a = JSON.parse(cli(...start).stdout).runId;
+  const b = JSON.parse(cli(...start).stdout).runId;
+  const response = cli('workflow', 'status', ...common);
+  assert.equal(response.status, 0);
+  const parsed = JSON.parse(response.stdout);
+  assert.equal(parsed.nativeStatus, 'MULTIPLE_ACTIVE');
+  assert.deepEqual(parsed.runs.map(run => run.runId).sort(), [a, b].sort());
+});
+
+test('a newly created Ludory game can start a native workflow without Git setup', t => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-created-game-'));
+  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+  const created = cli('create', '--project', project, '--id', 'fresh-web',
+    '--title', 'Fresh Web', '--lang', 'en', '--profile', 'web-game',
+    '--template', 'web-basic', '--targets', 'yandex-games', '--apply', '--json');
+  assert.equal(created.status, 0, created.stderr);
+  assert.equal(JSON.parse(created.stdout).status, 'APPLIED');
+  assert.equal(fs.existsSync(path.join(project, '.git')), false);
+  const doctor = cli('workflow', 'doctor', '--project', project, '--json');
+  assert.equal(doctor.status, 0, doctor.stderr);
+  assert.equal(JSON.parse(doctor.stdout).sourceHead, null);
+  const started = cli('workflow', 'start', '--project', project, '--pipeline', 'audit-repair-loop',
+    '--target', 'first-run', '--in-scope', 'src', '--acceptance', 'report verified',
+    '--mutation-boundary', 'report only', '--apply', '--json');
+  assert.equal(started.status, 0, started.stderr);
+  assert.equal(JSON.parse(started.stdout).nativeStatus, 'ACTIVE');
 });

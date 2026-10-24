@@ -29,9 +29,7 @@ function git(project, ...args) {
     cwd: project, encoding: 'utf8', timeout: 15_000, windowsHide: true, shell: false,
     env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
   });
-  if (result.status !== 0 || result.error || result.signal) {
-    throw new Error('SOURCE_GIT_UNAVAILABLE');
-  }
+  if (result.status !== 0 || result.error || result.signal) return null;
   return result.stdout.trim();
 }
 
@@ -61,21 +59,18 @@ export function inspectNativeProject(projectDir) {
   let manifest;
   try { manifest = defineGame(JSON.parse(bytes.toString('utf8'))); }
   catch { throw new Error('SOURCE_MANIFEST_INVALID'); }
-  const root = fs.realpathSync.native(git(project, 'rev-parse', '--show-toplevel'));
-  if (!samePath(root, project)) throw new Error('SOURCE_WRONG_GIT_ROOT');
-  const gitHead = git(project, 'rev-parse', '--verify', 'HEAD');
-  if (!/^[a-f0-9]{40,64}$/.test(gitHead)) throw new Error('SOURCE_GIT_HEAD_INVALID');
-  const status = git(project, 'status', '--porcelain=v1', '--untracked-files=all', '--', '.', ':(exclude).ludory/ai');
-  if (status) throw new Error('SOURCE_WORKTREE_DIRTY');
-  // Git status can silently trust skip-worktree/assume-unchanged index bits.
-  // Require ordinary, tracked index entries for *all* source files, not only
-  // the manifest; this is CRLF/filter-safe unlike raw bytes-versus-HEAD.
-  const indexed = git(project, 'ls-files', '-v', '-z', '--').split('\0').filter(Boolean);
+  // Development is allowed in a dirty or unversioned project. Git is
+  // provenance metadata, not a precondition for operating Ludory's own files.
+  const gitRootText = git(project, 'rev-parse', '--show-toplevel');
+  const gitRoot = gitRootText ? fs.realpathSync.native(gitRootText) : null;
+  const gitHead = gitRoot ? git(project, 'rev-parse', '--verify', 'HEAD') : null;
+  const status = gitRoot ? git(project, 'status', '--porcelain=v1', '--untracked-files=all', '--', '.', ':(exclude).ludory/ai') : null;
+  const indexed = gitRoot ? (git(project, 'ls-files', '-v', '-z', '--') ?? '').split('\0').filter(Boolean) : [];
   const manifestFlag = indexed.find(entry => entry.slice(2) === 'ludory.project.json');
-  if (!manifestFlag) throw new Error('SOURCE_MANIFEST_NOT_TRACKED');
-  if (manifestFlag !== 'H ludory.project.json') throw new Error('SOURCE_MANIFEST_INDEX_UNSAFE');
-  if (indexed.some(entry => !entry.startsWith('H '))) throw new Error('SOURCE_GIT_INDEX_UNSAFE');
-  return { project, rootIdentity: directoryIdentity(project), manifest, manifestSha256: digest(bytes), gitHead, gitClean: true };
+  const gitTrusted = Boolean(gitRoot && manifestFlag === 'H ludory.project.json' &&
+    indexed.every(entry => entry.startsWith('H ')) && /^[a-f0-9]{40,64}$/.test(gitHead ?? ''));
+  return { project, rootIdentity: directoryIdentity(project), manifest,
+    manifestSha256: digest(bytes), gitRoot, gitHead, gitClean: status === null ? null : status === '', gitTrusted };
 }
 
 export function verifyNativeSource(binding) {
@@ -83,7 +78,6 @@ export function verifyNativeSource(binding) {
     const current = inspectNativeProject(binding.project);
     if (binding.rootIdentity !== current.rootIdentity) return { ok: false, code: 'SOURCE_ROOT_CHANGED' };
     if (binding.manifestSha256 !== current.manifestSha256) return { ok: false, code: 'SOURCE_MANIFEST_CHANGED' };
-    if (binding.gitHead !== current.gitHead) return { ok: false, code: 'SOURCE_HEAD_CHANGED' };
     return { ok: true };
   } catch (error) {
     return { ok: false, code: error.message.split(':')[0] };

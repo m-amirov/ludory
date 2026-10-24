@@ -25,6 +25,8 @@ Exit codes: `0` for successful read/preview/application; `1` for invalid argumen
 
 ## Migration guarantees and limitations
 
+The legacy metadata `migrate` command is retained for compatibility; the owner has frozen all existing game projects, so do not run it against them during Ludory development. No CEOS state/history importer is planned.
+
 To apply to a mature game, both legacy metadata files must be tracked in HEAD,
 have ordinary Git index flags (no `skip-worktree` / `assume-unchanged`) and be on
 a clean worktree according to Git's checkout-filter-aware checks. The new manifest
@@ -143,12 +145,12 @@ and CEOS updater remains a later stage requiring behavioral parity tests.
 
 ## Native workflows through the unified CLI
 
-The `ludory workflow` family executes through `@ludory/ai` **inside Ludory**. It neither searches for CEOS nor invokes an external CEOS executable. A valid `ludory.project.json` and clean Git checkout are required. Native runs and SHA-bound append-only checkpoint events live exclusively under `.ludory/ai/`; previous `.codex-os/` and `.ceos-runs/` data remain untouched.
+The `ludory workflow` family executes through `@ludory/ai` **inside Ludory**. It neither searches for CEOS nor invokes an external CEOS executable. A valid `ludory.project.json` is required; Git is optional for development. Native runs and SHA-bound append-only checkpoint events live exclusively under `.ludory/ai/`. Existing games are frozen and must not be connected yet.
 
 | Command | Native behavior | Execution semantics |
 | --- | --- | --- |
-| `workflow doctor` | Manifest/Git health | Immediate, read-only |
-| `workflow status [--run ID]` | Native run replay and integrity | Immediate, read-only |
+| `workflow doctor` | Manifest + optional Git diagnostics | Immediate, read-only, works on dirty/unversioned projects |
+| `workflow status [--run ID]` | Native run replay and integrity; list active IDs when ambiguous | Immediate, read-only |
 | `workflow next [--run ID]` | Next stage/action or blocker | Immediate, read-only |
 | `workflow start` | New scoped `audit-repair-loop` or `production-art` | Plan; `--apply` creates run |
 | `workflow continue [--run ID]` | Request the next stage action | Plan; `--apply` only records `ACTION_REQUESTED` |
@@ -169,6 +171,6 @@ node packages/studio/bin/ludory.mjs workflow checkpoint --project /path/to/game 
   --run latest --stage EVIDENCE_COLLECTED --artifact 'reports/qa.json' --outcome CONTINUE --json
 ```
 
-Read-only operations reject `--apply`. All other workflow mutations require it, with source/manifest/inode and evidence hash revalidation. Unknown flags and former `--ceos-entry` are rejected. JSON reports `engine: ludory-ai`, status, run ID and the next action, never CEOS exit codes. Exit code `0` means a successful inspection/preview/native operation, `1` an invocation error, `2` a native blocker. Multiple active runs require explicit `--run ID` to avoid an ambiguous `latest`.
+Read-only operations reject `--apply`. All other workflow mutations require it, with current manifest/inode and new evidence hash revalidation. Git edits and new commits do not block development or destroy historical run state. Run/event receipts remain immutable; changing source or art afterward does not retroactively corrupt their historical SHA-256. Unknown flags and former `--ceos-entry` are rejected. JSON reports `engine: ludory-ai`, status, run ID and the next action, never CEOS exit codes. Exit code `0` means a successful inspection/preview/native operation, `1` an invocation error, `2` a native blocker. Multiple active runs are listed by `status`; specify `--run ID` to advance exactly one.
 
-**Foundation limitations:** `continue --apply` does **not** perform an AI agent task or advance the workflow; it records a request and waits for evidence. Terminal `PASS` is blocked (`EVIDENCE_VERIFIER_NOT_READY`) until native Release verification is implemented. Historical CEOS runs are not yet imported; one-time, non-destructive migration with safe resume is the next phase. Node and fake-project tests do not establish Windows-host, VK/Yandex runtime or release readiness.
+**Foundation limitations:** `continue --apply` does **not** perform an AI agent task or advance the workflow; it records a request and waits for evidence. Terminal `PASS` is blocked (`EVIDENCE_VERIFIER_NOT_READY`) until native Release verification is implemented. Strict current-artifact checks belong to Release, not mutable development history. Historical CEOS runs will **not** be imported. Node and fake-project tests do not establish Windows-host, VK/Yandex runtime or release readiness.

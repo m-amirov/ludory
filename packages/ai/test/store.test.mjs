@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { nativeProject } from './helpers/project.mjs';
-import { planNewRun, commitNewRun, readNativeRun, planNativeEvent, commitNativeEvent } from '../src/store.mjs';
+import { nativeProject, runGit } from './helpers/project.mjs';
+import { planNewRun, commitNewRun, readNativeRun, planNativeEvent, commitNativeEvent, listNativeRuns } from '../src/store.mjs';
 
 const scope = { target: 'EP3 QA', inScope: ['src/main.js'], outOfScope: [],
   acceptanceContract: 'all checks', mutationBoundary: 'only report evidence' };
@@ -24,7 +24,7 @@ test('native run plan is read-only and explicit commit publishes a verified run'
   assert.throws(() => commitNewRun(plan), /STALE|CONFLICT|already exists/);
 });
 
-test('checkpoints append immutable source-bound events and detect changed evidence', t => {
+test('checkpoints preserve immutable historical evidence even after game files change', t => {
   const project = nativeProject(t);
   const current = commitNewRun(newRun(project));
   const plan = planNativeEvent(project, current.run.runId, { kind: 'CHECKPOINT',
@@ -40,7 +40,9 @@ test('checkpoints append immutable source-bound events and detect changed eviden
   assert.throws(() => commitNativeEvent(plan), /STALE|CONFLICT/);
   assert.deepEqual(fs.readFileSync(stored), before);
   fs.writeFileSync(path.join(project, 'src', 'main.js'), 'modified evidence\n');
-  assert.throws(() => readNativeRun(project, current.run.runId), /INTEGRITY|hash|SOURCE/);
+  const history = readNativeRun(project, current.run.runId);
+  assert.equal(history.integrity.ok, true);
+  assert.deepEqual(history.events[0].artifacts, plan.event.artifacts);
 });
 
 test('multiple active runs block ambiguous latest selection', t => {
@@ -50,6 +52,8 @@ test('multiple active runs block ambiguous latest selection', t => {
   assert.notEqual(first.run.runId, second.run.runId);
   assert.throws(() => readNativeRun(project, 'latest'), /AMBIGUOUS/);
   assert.equal(readNativeRun(project, second.run.runId).status, 'ACTIVE');
+  assert.deepEqual(listNativeRuns(project).map(item => item.runId).sort(),
+    [first.run.runId, second.run.runId].sort());
 });
 
 test('incomplete run marker and checkpoint bytes cannot masquerade as valid state', t => {
@@ -67,10 +71,13 @@ test('incomplete run marker and checkpoint bytes cannot masquerade as valid stat
   assert.throws(() => readNativeRun(project, run.run.runId), /INTEGRITY|event/i);
 });
 
-test('foreign symlinked storage and stale project source block all native writes', t => {
+test('foreign symlinked storage and stale manifest block all native writes', t => {
   const project = nativeProject(t);
   const plan = newRun(project);
-  fs.writeFileSync(path.join(project, 'src', 'main.js'), 'changed\n');
+  const manifestPath = path.join(project, 'ludory.project.json');
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  manifest.version = '0.2.0';
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
   assert.throws(() => commitNewRun(plan), /SOURCE|STALE/);
   const second = nativeProject(t);
   fs.symlinkSync(project, path.join(second, '.ludory'));
@@ -164,4 +171,38 @@ test('event publication never writes through a swapped events directory', t => {
   finally { fs.openSync = originalOpen; }
   assert.equal(swapped, true);
   assert.deepEqual(fs.readdirSync(offsite), []);
+});
+
+test('historic checkpoints remain readable after edits and new commits, and can continue', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const first = planNativeEvent(project, run.run.runId, {
+    kind: 'CHECKPOINT', stage: 'EVIDENCE_COLLECTED', outcome: 'CONTINUE', artifacts: ['src/main.js'],
+  });
+  const recordedSha = first.event.artifacts[0].sha256;
+  commitNativeEvent(first);
+  fs.writeFileSync(path.join(project, 'src', 'main.js'), '// fixed code\n');
+  runGit(project, 'add', 'src/main.js');
+  runGit(project, '-c', 'user.name=Ludory Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fix game');
+  const after = readNativeRun(project, run.run.runId);
+  assert.equal(after.events[0].artifacts[0].sha256, recordedSha);
+  assert.equal(after.nextStage, 'AUDITED');
+  const next = planNativeEvent(project, run.run.runId, {
+    kind: 'CHECKPOINT', stage: 'AUDITED', outcome: 'CONTINUE', artifacts: ['src/main.js'],
+  });
+  assert.notEqual(next.event.artifacts[0].sha256, recordedSha);
+  assert.equal(commitNativeEvent(next).nextStage, 'DEFECTS_CONFIRMED');
+});
+
+test('a moved game resumes its native run without accepting a copy into another live game', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const moved = `${project}-moved`;
+  t.after(() => fs.rmSync(moved, { recursive: true, force: true }));
+  fs.renameSync(project, moved);
+  assert.equal(readNativeRun(moved, run.run.runId).nextStage, 'EVIDENCE_COLLECTED');
+  const next = planNativeEvent(moved, run.run.runId, {
+    kind: 'CHECKPOINT', stage: 'EVIDENCE_COLLECTED', outcome: 'CONTINUE', artifacts: ['src/main.js'],
+  });
+  assert.equal(commitNativeEvent(next).nextStage, 'AUDITED');
 });

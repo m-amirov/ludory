@@ -1,6 +1,6 @@
 import { inspectNativeProject } from './source.mjs';
 import { getPipeline } from './pipelines.mjs';
-import { planNewRun, commitNewRun, readNativeRun, planNativeEvent, commitNativeEvent } from './store.mjs';
+import { planNewRun, commitNewRun, readNativeRun, listNativeRuns, planNativeEvent, commitNativeEvent } from './store.mjs';
 
 const OPERATIONS = new Set(['doctor', 'status', 'next', 'start', 'continue', 'checkpoint']);
 const READ_ONLY = new Set(['doctor', 'status', 'next']);
@@ -47,7 +47,8 @@ export function planWorkflow(projectDir, operation, options = {}) {
   const project = source.project;
   if (operation === 'doctor') {
     return { engine: 'ludory-ai', project, operation, status: 'OK', writes: [],
-      conflicts: [], manifestId: source.manifest.id, sourceHead: source.gitHead };
+      conflicts: [], manifestId: source.manifest.id, sourceHead: source.gitHead,
+      gitRoot: source.gitRoot, gitClean: source.gitClean, gitTrusted: source.gitTrusted };
   }
   if (operation === 'start') {
     getPipeline(options.pipeline);
@@ -65,6 +66,15 @@ export function planWorkflow(projectDir, operation, options = {}) {
   let current;
   try { current = readNativeRun(project, run); }
   catch (error) {
+    if (error.message === 'NATIVE_AMBIGUOUS_ACTIVE_RUNS') {
+      const runs = listNativeRuns(project);
+      const active = runs.filter(item => !['FAIL', 'BLOCKED', 'ESCALATE', 'PASS'].includes(item.status));
+      if (operation === 'status') return { engine: 'ludory-ai', project, operation,
+        status: 'OK', nativeStatus: 'MULTIPLE_ACTIVE', writes: [], conflicts: [], runs: active,
+        nextAction: { kind: 'SELECT_RUN', executable: false } };
+      return { ...blocked(project, operation, `NATIVE_AMBIGUOUS_ACTIVE_RUNS: ${active.map(item => item.runId).join(', ')}`),
+        runs: active };
+    }
     if (/^NATIVE_/.test(error.message)) return blocked(project, operation, error.message);
     throw error;
   }

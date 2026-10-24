@@ -70,18 +70,28 @@ test('without native Release verifier terminal PASS remains explicitly blocked',
 
 test('native mutations revalidate project and block stale plans and unknown options', t => {
   const project = nativeProject(t);
-  const stale = planWorkflow(project, 'start', startOptions);
+  const editing = planWorkflow(project, 'start', startOptions);
   fs.writeFileSync(path.join(project, 'src', 'main.js'), 'changed\n');
+  assert.equal(executeWorkflow(editing, { apply: true }).status, 'APPLIED');
+  const stale = planWorkflow(project, 'start', startOptions);
+  const manifest = path.join(project, 'ludory.project.json');
+  const updated = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+  updated.version = '0.2.0';
+  fs.writeFileSync(manifest, `${JSON.stringify(updated)}\n`);
   assert.throws(() => executeWorkflow(stale, { apply: true }), /SOURCE|STALE/);
-  assert.equal(fs.existsSync(path.join(project, '.ludory')), false);
   assert.throws(() => planWorkflow(project, 'start', { ...startOptions, command: 'rm -rf' }), /Unknown workflow option/);
 });
 
 test('terminal blocked run cannot continue and multiple active runs need explicit selection', t => {
   const project = nativeProject(t);
   const first = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true });
-  executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true });
-  assert.equal(planWorkflow(project, 'status').status, 'BLOCKED');
+  const second = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true });
+  const listing = planWorkflow(project, 'status');
+  assert.equal(listing.status, 'OK');
+  assert.equal(listing.nativeStatus, 'MULTIPLE_ACTIVE');
+  assert.deepEqual(listing.runs.map(item => item.runId).sort(), [first.runId, second.runId].sort());
+  assert.equal(planWorkflow(project, 'next').status, 'BLOCKED');
+  assert.match(planWorkflow(project, 'next').conflicts[0], new RegExp(first.runId));
   const blocked = executeWorkflow(planWorkflow(project, 'checkpoint', {
     run: first.runId, stage: 'EVIDENCE_COLLECTED', outcome: 'BLOCKED',
   }), { apply: true });
