@@ -170,8 +170,10 @@ test('replacing a nested output directory cannot redirect file creation outside 
   let swapped = false;
   fs.openSync = function (filename, flags, ...args) {
     if (!swapped && typeof filename === 'string' && filename.endsWith('main.js') && (flags & fs.constants.O_CREAT)) {
+      process.chdir(project);
       fs.renameSync(path.join(project, 'src'), path.join(project, 'src-original'));
       fs.symlinkSync(outside, path.join(project, 'src'), 'dir');
+      process.chdir(path.join(project, 'src-original'));
       swapped = true;
     }
     return originalOpen.call(this, filename, flags, ...args);
@@ -268,6 +270,7 @@ test('rollback rechecks root inode after chdir to avoid deleting a matching outs
   };
   process.chdir = function (target) {
     if (failWrite && !swapped && target === project) {
+      originalChdir.call(process, path.dirname(project));
       fs.renameSync(project, parked);
       fs.symlinkSync(outside, project, 'dir');
       fs.linkSync(path.join(parked, 'ludory.project.json'), path.join(outside, 'ludory.project.json'));
@@ -298,8 +301,10 @@ test('nested mkdir remains anchored when earlier output directory is swapped for
   let createdOutside = false;
   fs.mkdirSync = function (filename, ...args) {
     if (!swapped && (filename === 'src/nested' || filename === 'nested')) {
+      process.chdir(project);
       fs.renameSync(path.join(project, 'src'), path.join(project, 'src-original'));
       fs.symlinkSync(outside, path.join(project, 'src'), 'dir');
+      process.chdir(path.join(project, 'src-original'));
       swapped = true;
     }
     const result = originalMkdir.call(this, filename, ...args);
@@ -335,8 +340,10 @@ test('rollback removes nested directories from their pinned parent, not a replac
   };
   fs.rmdirSync = function (filename, ...args) {
     if (!swapped && (filename === 'src/nested' || filename === 'nested')) {
+      process.chdir(project);
       fs.renameSync(path.join(project, 'src'), path.join(project, 'src-original'));
       fs.symlinkSync(outside, path.join(project, 'src'), 'dir');
+      process.chdir(path.join(project, 'src-original'));
       swapped = true;
     }
     return originalRmdir.call(this, filename, ...args);

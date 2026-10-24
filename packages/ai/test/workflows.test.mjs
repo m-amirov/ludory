@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { nativeProject } from './helpers/project.mjs';
 import { planWorkflow, executeWorkflow } from '../src/workflows.mjs';
-import { readNativeRun } from '../src/store.mjs';
+import { commitNativeEvent, planNativeEvent, readNativeRun } from '../src/store.mjs';
 
 const startOptions = { pipeline: 'audit-repair-loop', target: 'EP3 QA', inScope: 'src/main.js',
   acceptance: 'checks complete', mutationBoundary: 'evidence only' };
@@ -161,6 +161,35 @@ test('missing Codex blocks before writing a request; attempted failure is record
   } });
   assert.equal(failed.status, 'FAILED');
   assert.equal(readNativeRun(project, id).status, 'EXECUTION_FAILED');
+  assert.equal(planWorkflow(project, 'continue', { run: id, executor: 'codex' }).status, 'READY');
+});
+
+test('interrupted Codex execution requires explicit recovery confirmation and preserves partial files', t => {
+  const project = nativeProject(t);
+  markNewStudioGame(project);
+  const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
+  const request = planWorkflow(project, 'continue', { run: id, executor: 'codex' });
+  fs.writeFileSync(path.join(project, 'src', 'main.js'), '// partial work\n');
+  commitNativeEvent(request.nativePlan); // Simulate parent termination after ACTION_REQUESTED.
+
+  const recovery = planWorkflow(project, 'recover', { run: id });
+  assert.equal(recovery.status, 'READY');
+  assert.equal(recovery.nextAction.kind, 'CONFIRM_EXECUTOR_STOPPED');
+  assert.match(recovery.warning, /no Codex process|не.*Codex/i);
+  const unconfirmed = executeWorkflow(recovery, { apply: true });
+  assert.equal(unconfirmed.status, 'BLOCKED');
+  assert.match(unconfirmed.conflicts[0], /CONFIRM/);
+  assert.equal(readNativeRun(project, id).events.length, 1);
+
+  const confirmed = executeWorkflow(planWorkflow(project, 'recover', {
+    run: id, confirmNoExecutor: true,
+  }), { apply: true });
+  assert.equal(confirmed.status, 'APPLIED');
+  assert.equal(confirmed.nativeStatus, 'EXECUTION_FAILED');
+  assert.equal(confirmed.nextAction.kind, 'RETRY_EXECUTOR');
+  assert.equal(readNativeRun(project, id).events.length, 2);
+  assert.equal(readNativeRun(project, id).events[1].result.code, 'EXECUTOR_INTERRUPTED');
+  assert.equal(fs.readFileSync(path.join(project, 'src', 'main.js'), 'utf8'), '// partial work\n');
   assert.equal(planWorkflow(project, 'continue', { run: id, executor: 'codex' }).status, 'READY');
 });
 

@@ -248,8 +248,10 @@ test('parent replacement during apply blocks publication and never follows redir
   fs.openSync = function (name, flags, ...args) {
     if (!switched && typeof name === 'string' && name.startsWith('.pending-') && (flags & fs.constants.O_CREAT)) {
       switched = true;
+      process.chdir(root);
       fs.renameSync(path.join(root, '.ludory'), moved);
       fs.symlinkSync(outside, path.join(root, '.ludory'), 'dir');
+      process.chdir(path.join(moved, 'profiles'));
     }
     return original.call(this, name, flags, ...args);
   };

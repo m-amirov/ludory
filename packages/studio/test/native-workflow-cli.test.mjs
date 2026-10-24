@@ -6,7 +6,8 @@ import path from 'node:path';
 import { runCli } from '../src/cli.mjs';
 import { nativeProject } from '../../ai/test/helpers/project.mjs';
 import { checkCodexAvailable, runCodexExecution } from '../../ai/src/executor.mjs';
-import { readNativeRun } from '../../ai/src/store.mjs';
+import { commitNativeEvent, readNativeRun } from '../../ai/src/store.mjs';
+import { planWorkflow } from '../../ai/src/workflows.mjs';
 
 function cli(...args) {
   let stdout = '', stderr = '';
@@ -160,3 +161,36 @@ test('CLI executor refuses frozen projects and flags outside continue', t => {
   assert.equal(readNativeRun(project, run).events.length, 0);
   assert.equal(cli('workflow', 'doctor', '--project', project, '--executor', 'codex', '--json').status, 1);
 });
+
+test('CLI recovery previews, requires confirmation, then records an interrupted attempt', t => {
+  const project = nativeProject(t);
+  const common = ['--project', project, '--json'];
+  fs.writeFileSync(path.join(project, 'ludory.studio.json'), JSON.stringify({
+    schemaVersion: 1, profile: { id: 'web-game', version: 1 },
+    template: { id: 'web-basic', version: 1 }, files: { 'ludory.project.json': 'f'.repeat(64) },
+  }));
+  const start = cli('workflow', 'start', ...common, '--pipeline', 'audit-repair-loop',
+    '--target', 'recover', '--in-scope', 'src/main.js', '--acceptance', 'verified',
+    '--mutation-boundary', 'src/main.js', '--apply');
+  const runId = JSON.parse(start.stdout).runId;
+  const request = planWorkflowForTest(project, runId);
+  commitNativeEvent(request);
+
+  const preview = cli('workflow', 'recover', ...common, '--run', runId);
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.equal(JSON.parse(preview.stdout).nextAction.kind, 'CONFIRM_EXECUTOR_STOPPED');
+  assert.equal(readNativeRun(project, runId).events.length, 1);
+
+  const refused = cli('workflow', 'recover', ...common, '--run', runId, '--apply');
+  assert.equal(refused.status, 2);
+  assert.match(JSON.parse(refused.stdout).conflicts[0], /CONFIRM/);
+  const applied = cli('workflow', 'recover', ...common, '--run', runId,
+    '--confirm-no-executor', '--apply');
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.equal(JSON.parse(applied.stdout).nativeStatus, 'EXECUTION_FAILED');
+  assert.equal(readNativeRun(project, runId).events.length, 2);
+});
+
+function planWorkflowForTest(project, runId) {
+  return planWorkflow(project, 'continue', { run: runId, executor: 'codex' }).nativePlan;
+}

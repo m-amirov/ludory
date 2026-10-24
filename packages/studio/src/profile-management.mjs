@@ -162,7 +162,7 @@ function mkdirAndEnter(name, created, prefix, required = 'any') {
   let createdNow = false;
   try {
     if (required === 'existing') {
-      fs.lstatSync(name);
+      fs.lstatSync(name, { bigint: true });
     } else {
       fs.mkdirSync(name);
       createdNow = true;
@@ -173,7 +173,7 @@ function mkdirAndEnter(name, created, prefix, required = 'any') {
     }
   }
   if (required === 'create' && !createdNow) throw new Error(`Unowned profile directory appeared: ${prefix}${name}`);
-  const stat = fs.lstatSync(name);
+  const stat = fs.lstatSync(name, { bigint: true });
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe profile directory: ${name}`);
   process.chdir(name);
   if (directoryIdentity('.') !== `${BigInt(stat.dev)}:${BigInt(stat.ino)}`) {
@@ -183,7 +183,7 @@ function mkdirAndEnter(name, created, prefix, required = 'any') {
 }
 
 function checkAndEnter(name) {
-  const st = fs.lstatSync(name);
+  const st = fs.lstatSync(name, { bigint: true });
   if (!st.isDirectory() || st.isSymbolicLink()) throw new Error(`Unsafe profile directory: ${name}`);
   process.chdir(name);
   if (directoryIdentity('.') !== `${BigInt(st.dev)}:${BigInt(st.ino)}`) throw new Error(`Profile directory was replaced: ${name}`);
@@ -191,7 +191,7 @@ function checkAndEnter(name) {
 
 function writtenFile(name, bytes, files, prefix = '.ludory/profiles/') {
   const fd = fs.openSync(name, exclusive, 0o600);
-  const st = fs.fstatSync(fd);
+  const st = fs.fstatSync(fd, { bigint: true });
   const record = { relative: `${prefix}${name}`, bytes, dev: st.dev, ino: st.ino };
   files.push(record);
   try { fs.writeFileSync(fd, bytes); }
@@ -211,7 +211,7 @@ function enteredDirectory(project, relative, rootIdentity) {
 function safeCleanupFile(project, rootIdentity, record) {
   try {
     const name = enteredDirectory(project, record.relative, rootIdentity);
-    const stat = fs.lstatSync(name);
+    const stat = fs.lstatSync(name, { bigint: true });
     const actual = stat.isFile() && !stat.isSymbolicLink() ? fs.readFileSync(name) : null;
     if (!actual || stat.ino !== record.ino || stat.dev !== record.dev ||
         // Failed writes may be a valid prefix; leave everything else alone.
@@ -220,7 +220,7 @@ function safeCleanupFile(project, rootIdentity, record) {
     }
     const quarantine = `.ludory-rollback-${crypto.randomBytes(20).toString('hex')}`;
     fs.renameSync(name, quarantine);
-    const moved = fs.lstatSync(quarantine);
+    const moved = fs.lstatSync(quarantine, { bigint: true });
     const movedBytes = moved.isFile() && !moved.isSymbolicLink() ? fs.readFileSync(quarantine) : null;
     if (!movedBytes || moved.ino !== record.ino || moved.dev !== record.dev ||
         movedBytes.length > record.bytes.length || !movedBytes.equals(record.bytes.subarray(0, movedBytes.length))) {
@@ -236,7 +236,7 @@ function safeCleanupFile(project, rootIdentity, record) {
 function safeCleanupDirectory(project, rootIdentity, record) {
   try {
     const name = enteredDirectory(project, record.relative, rootIdentity);
-    const stat = fs.lstatSync(name);
+    const stat = fs.lstatSync(name, { bigint: true });
     if (!stat.isDirectory() || stat.isSymbolicLink() || stat.ino !== record.ino || stat.dev !== record.dev) {
       return `moved directory retained: ${record.relative}`;
     }

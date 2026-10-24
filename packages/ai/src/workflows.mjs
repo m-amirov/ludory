@@ -1,14 +1,16 @@
 import { inspectNativeProject, verifyNativeSource } from './source.mjs';
 import { getPipeline } from './pipelines.mjs';
 import { planNewRun, commitNewRun, readNativeRun, listNativeRuns, planNativeEvent, commitNativeEvent } from './store.mjs';
-import { prepareCodexExecution, checkCodexAvailable, runCodexExecution, hasStudioCreationReceipt } from './executor.mjs';
+import { prepareCodexExecution, checkCodexAvailable, runCodexExecution, hasStudioCreationReceipt,
+  EMPTY_TRANSCRIPT_SHA256 } from './executor.mjs';
 
-const OPERATIONS = new Set(['doctor', 'status', 'next', 'start', 'continue', 'checkpoint']);
+const OPERATIONS = new Set(['doctor', 'status', 'next', 'start', 'continue', 'checkpoint', 'recover']);
 const READ_ONLY = new Set(['doctor', 'status', 'next']);
 const OPTS = {
   doctor: [], status: ['run'], next: ['run'], continue: ['run', 'executor'],
   start: ['pipeline', 'target', 'inScope', 'outOfScope', 'acceptance', 'mutationBoundary'],
   checkpoint: ['run', 'stage', 'artifact', 'outcome'],
+  recover: ['run', 'confirmNoExecutor'],
 };
 
 function text(value, label) {
@@ -94,11 +96,20 @@ export function planWorkflow(projectDir, operation, options = {}) {
   if (operation === 'continue' && options.executor === 'codex' && !hasStudioCreationReceipt(project)) {
     return blocked(project, operation, 'NATIVE_EXECUTOR_STUDIO_CREATION_REQUIRED: frozen/legacy game');
   }
+  if (operation === 'recover' && current.pendingExecutor !== 'codex') {
+    return blocked(project, operation, 'NATIVE_RECOVERY_NO_PENDING_EXECUTOR');
+  }
   let nativePlan;
   try {
     if (operation === 'continue') nativePlan = planNativeEvent(project, current.run.runId, {
       kind: 'ACTION_REQUESTED', stage: current.nextStage,
       ...(options.executor === 'codex' && { executor: 'codex' }),
+    });
+    else if (operation === 'recover') nativePlan = planNativeEvent(project, current.run.runId, {
+      kind: 'EXECUTION_RESULT', stage: current.nextStage, result: {
+        ok: false, code: 'EXECUTOR_INTERRUPTED', exitCode: null,
+        transcriptSha256: EMPTY_TRANSCRIPT_SHA256, eventCount: 0, completed: false,
+      },
     });
     else {
       const stage = text(options.stage, 'stage');
@@ -113,10 +124,16 @@ export function planWorkflow(projectDir, operation, options = {}) {
   }
   const executorPlan = operation === 'continue' && options.executor === 'codex'
     ? prepareCodexExecution(project, current.run.scope, current.nextStage, { gitRoot: source.gitRoot }) : null;
+  const recoveryWarning = operation === 'recover'
+    ? 'Recovery cannot reliably inspect the old Codex child; confirm that no Codex process can still modify this project before --apply.'
+    : null;
   return { engine: 'ludory-ai', project, operation, status: 'READY', writes: nativePlan.writes,
     conflicts: [], runId: current.run.runId, nextStage: current.nextStage, nativePlan,
     ...(executorPlan && { executor: 'codex', mutationScope: executorPlan.sandbox, executorPlan,
-      warning: 'Codex workspace-write may edit game files; in-scope paths are instructions, not enforced allowlists.' }) };
+      warning: 'Codex workspace-write may edit game files; in-scope paths are instructions, not enforced allowlists.' }),
+    ...(recoveryWarning && { requiresConfirmation: true, warning: recoveryWarning,
+      nextAction: { kind: 'CONFIRM_EXECUTOR_STOPPED', stage: current.nextStage, executable: false } }),
+    ...(operation === 'recover' && { confirmNoExecutor: options.confirmNoExecutor === true }) };
 }
 
 export function executeWorkflow(plan, { apply = false, executor } = {}) {
@@ -125,6 +142,11 @@ export function executeWorkflow(plan, { apply = false, executor } = {}) {
   }
   if (apply && READ_ONLY.has(plan.operation)) throw new Error('Native read-only workflow does not accept --apply');
   if (plan.status !== 'READY' || !apply) return plan;
+  if (plan.operation === 'recover' && !plan.confirmNoExecutor) {
+    return { ...blocked(plan.project, 'recover', 'NATIVE_RECOVERY_CONFIRMATION_REQUIRED'),
+      runId: plan.runId, requiresConfirmation: true, warning: plan.warning,
+      nextAction: { kind: 'CONFIRM_EXECUTOR_STOPPED', stage: plan.nextStage, executable: false } };
+  }
   if (plan.operation === 'continue' && plan.executor === 'codex') {
     // The executable's cwd and input must come from the hash-checked run,
     // never from a caller-mutated preview object.

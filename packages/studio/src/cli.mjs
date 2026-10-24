@@ -23,6 +23,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow start --project <game-directory> --pipeline <audit-repair-loop|production-art> --target <text> --in-scope <a;b> --acceptance <text> --mutation-boundary <text> [--out-of-scope <a;b>] [--apply] [--json]
   ludory workflow continue --project <game-directory> [--run <run-id|latest>] [--executor codex] [--apply] [--json]
+  ludory workflow recover --project <game-directory> [--run <run-id|latest>] [--confirm-no-executor] [--apply] [--json]
   ludory workflow checkpoint --project <game-directory> --stage <STAGE> [--run <run-id|latest>] [--artifact <path;path>] [--outcome <CONTINUE|PASS|FAIL|BLOCKED|ESCALATE>] [--apply] [--json]
   ludory help
 
@@ -33,6 +34,7 @@ workflow runs natively in Ludory AI; mutations require --apply and historical CE
 Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.
 Codex workspace-write may edit game files; in-scope paths are instructions, not enforced allowlists.
 Without --executor, continue --apply still records a manual action request only.
+workflow recover previews a failed interrupted result and requires --confirm-no-executor --apply.
 Independent release PASS verification is not implemented.
 Native development workflow accepts dirty or unversioned projects; Release verification is separate.
 The legacy metadata-only migrate command requires clean Git and Starter Kit game-spec.yaml schema 2;
@@ -45,9 +47,10 @@ function argumentsFor(command, argv) {
   const allowed = command.startsWith('workflow-')
     ? new Set(command === 'workflow-doctor' ? workflowCommon
       : command === 'workflow-status' || command === 'workflow-next' ? [...workflowCommon, '--run']
-        : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
-          : command === 'workflow-continue' ? [...workflowCommon, '--run', '--executor', '--apply']
-            : [...workflowCommon, '--run', '--stage', '--artifact', '--outcome', '--apply'])
+          : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
+            : command === 'workflow-continue' ? [...workflowCommon, '--run', '--executor', '--apply']
+              : command === 'workflow-recover' ? [...workflowCommon, '--run', '--confirm-no-executor', '--apply']
+              : [...workflowCommon, '--run', '--stage', '--artifact', '--outcome', '--apply'])
     : command === 'init'
     ? new Set([...common, '--id', '--title', '--lang', '--engine', '--targets', '--version', '--apply'])
     : command === 'create'
@@ -64,7 +67,7 @@ function argumentsFor(command, argv) {
     const key = argv[i];
     if (!allowed.has(key)) throw new Error(`Unknown option: ${key}`);
     if (flags.has(key)) throw new Error(`Duplicate option: ${key}`);
-    if (key === '--apply' || key === '--json') {
+    if (key === '--apply' || key === '--json' || key === '--confirm-no-executor') {
       flags.set(key, true);
       continue;
     }
@@ -87,6 +90,7 @@ function workflowOptions(flags) {
     acceptance: flags.get('--acceptance'), mutationBoundary: flags.get('--mutation-boundary'),
     stage: flags.get('--stage'), artifact: flags.get('--artifact'), outcome: flags.get('--outcome'),
     executor: flags.get('--executor'),
+    confirmNoExecutor: flags.has('--confirm-no-executor') ? true : undefined,
   };
 }
 
@@ -176,7 +180,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'workflow') {
       const [operation, ...args] = rest;
-      if (!['doctor', 'status', 'next', 'start', 'continue', 'checkpoint'].includes(operation)) {
+      if (!['doctor', 'status', 'next', 'start', 'continue', 'checkpoint', 'recover'].includes(operation)) {
         throw new Error(`Unknown workflow operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`workflow-${operation}`, args);

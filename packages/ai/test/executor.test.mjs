@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { spawnSync } from 'node:child_process';
 import { prepareCodexExecution, checkCodexAvailable, runCodexExecution } from '../src/executor.mjs';
@@ -64,6 +67,30 @@ test('Codex availability probes only --version, without executing a task', () =>
   assert.equal(plan.args.includes('--skip-git-repo-check'), false);
 });
 
+test('Windows Codex .cmd wrappers are invoked without shell interpolation', { skip: process.platform !== 'win32' }, t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-codex-wrapper-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const marker = path.join(directory, 'task-ran.txt');
+  const worker = path.join(directory, 'codex-worker.mjs');
+  const wrapper = path.join(directory, 'codex.cmd');
+  fs.writeFileSync(worker, [
+    "import fs from 'node:fs';",
+    "if (process.argv.slice(2).join(' ') !== '--version') fs.writeFileSync(process.env.LUDORY_CODEX_MARKER, 'task');",
+    "process.stdout.write('codex wrapper test\\n');",
+  ].join('\n'));
+  fs.writeFileSync(wrapper, [
+    '@ECHO off',
+    '"%~dp0node.exe" "%~dp0codex-worker.mjs" %*',
+  ].join('\r\n'));
+  const plan = prepareCodexExecution(directory, scope, 'AUDITED');
+  const available = checkCodexAvailable(plan, {
+    executable: wrapper,
+    prefixArgs: [],
+  });
+  assert.deepEqual(available, { ok: true, code: 'AVAILABLE' });
+  assert.equal(fs.existsSync(marker), false, 'availability must not run the task');
+});
+
 test('missing Codex binary is a failure, not an executed run', () => {
   const plan = prepareCodexExecution('/games/new', scope, 'AUDITED', { gitRoot: null });
   const missing = { status: null, error: Object.assign(new Error('missing'), { code: 'ENOENT' }), stdout: '', stderr: '' };
@@ -78,6 +105,18 @@ test('exit zero without turn.completed never claims executed success', () => {
   const result = runCodexExecution(plan, { spawn: () => ({ status: 0, stdout: '{"type":"turn.started"}\n', stderr: '' }) });
   assert.equal(result.ok, false);
   assert.equal(result.code, 'EXECUTOR_INCOMPLETE');
+});
+
+test('non-terminal error events followed by turn.completed remain unverified execution', () => {
+  const plan = prepareCodexExecution('/games/new', scope, 'AUDITED');
+  const result = runCodexExecution(plan, { spawn: () => ({
+    status: 0,
+    stdout: '{"type":"error","message":"recoverable tool error"}\n{"type":"turn.completed"}\n',
+    stderr: '',
+  }) });
+  assert.equal(result.ok, true);
+  assert.equal(result.code, 'EXECUTED_UNVERIFIED');
+  assert.equal(result.completed, true);
 });
 
 test('nonzero, malformed, timeout and oversized stdout have distinct failure codes', () => {

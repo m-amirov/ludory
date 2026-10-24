@@ -10,7 +10,8 @@ const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,179}$/;
 const EXCLUSIVE = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0);
 const EXECUTION_CODES = new Set(['EXECUTED_UNVERIFIED', 'EXECUTOR_INCOMPLETE', 'EXECUTOR_UNAVAILABLE',
   'EXECUTOR_TIMEOUT', 'EXECUTOR_OUTPUT_LIMIT', 'EXECUTOR_SPAWN_FAILED', 'EXECUTOR_NONZERO_EXIT',
-  'EXECUTOR_MALFORMED_JSONL', 'EXECUTOR_TURN_FAILED']);
+  'EXECUTOR_MALFORMED_JSONL', 'EXECUTOR_TURN_FAILED', 'EXECUTOR_WRAPPER_UNSUPPORTED',
+  'EXECUTOR_INTERRUPTED']);
 
 function validateExecutionResult(result) {
   if (!result || typeof result !== 'object' || Array.isArray(result) ||

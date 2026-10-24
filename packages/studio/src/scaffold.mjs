@@ -95,7 +95,7 @@ function ensureDirectories(relative, createdDirectories) {
       if (error.code !== 'EEXIST') throw error;
       if (!createdDirectories.some(dir => dir.name === current)) throw new Error(`Existing output directory conflict: ${current}`);
     }
-    const st = fs.lstatSync(segment);
+    const st = fs.lstatSync(segment, { bigint: true });
     if (!st.isDirectory() || st.isSymbolicLink()) throw new Error(`Unsafe output directory: ${current}`);
     process.chdir(segment);
     if (directoryIdentity('.') !== `${BigInt(st.dev)}:${BigInt(st.ino)}`) {
@@ -117,7 +117,7 @@ function safeOutputParents(name, directories) {
     const expected = directories.find(dir => dir.name === current);
     if (!expected) return false;
     try {
-      const st = fs.lstatSync(current);
+      const st = fs.lstatSync(current, { bigint: true });
       if (!st.isDirectory() || st.isSymbolicLink() || st.dev !== expected.dev || st.ino !== expected.ino) return false;
     } catch { return false; }
   }
@@ -147,7 +147,7 @@ function rollbackCreated(files, directories, project, rootIdentity) {
   for (const { name, bytes, ownership, complete } of files.reverse()) {
     try {
       const basename = enterOwnedParent(name, directories, project, rootIdentity);
-      const st = fs.lstatSync(basename);
+      const st = fs.lstatSync(basename, { bigint: true });
       const actual = st.isFile() && !st.isSymbolicLink() ? fs.readFileSync(basename) : null;
       // A failed *partial* write may leave a prefix; completed files require
       // byte-for-byte equality so user edits are never silently discarded.
@@ -163,7 +163,7 @@ function rollbackCreated(files, directories, project, rootIdentity) {
       // the incomplete rollback rather than deleting user-owned bytes.
       const quarantine = `.ludory-rollback-${crypto.randomBytes(24).toString('hex')}`;
       fs.renameSync(basename, quarantine);
-      const moved = fs.lstatSync(quarantine);
+      const moved = fs.lstatSync(quarantine, { bigint: true });
       const movedBytes = moved.isFile() && !moved.isSymbolicLink() ? fs.readFileSync(quarantine) : null;
       if (!movedBytes || moved.dev !== ownership.dev || moved.ino !== ownership.ino ||
           (complete ? !movedBytes.equals(bytes) : movedBytes.length > bytes.length ||
@@ -183,7 +183,7 @@ function rollbackCreated(files, directories, project, rootIdentity) {
   for (const { name, dev, ino } of directories.reverse()) {
     try {
       const basename = enterOwnedParent(name, directories, project, rootIdentity);
-      const st = fs.lstatSync(basename);
+      const st = fs.lstatSync(basename, { bigint: true });
       if (!st.isDirectory() || st.isSymbolicLink() || st.dev !== dev || st.ino !== ino) {
         failures.push(`moved directory retained: ${name}`);
         continue;
@@ -226,7 +226,7 @@ export function applyCreatePlan(plan) {
       const flags = fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0);
       const fd = fs.openSync(basename, flags, 0o600);
       // Track immediately, so a short/failed write is also eligible for cleanup.
-      const stat = fs.fstatSync(fd);
+      const stat = fs.fstatSync(fd, { bigint: true });
       const owned = { name, bytes, ownership: { dev: stat.dev, ino: stat.ino }, complete: false };
       createdFiles.push(owned);
       try {
