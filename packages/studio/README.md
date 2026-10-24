@@ -1,4 +1,4 @@
-# `@ludory/studio` — project metadata and safe new-game scaffolding
+# `@ludory/studio` — project metadata, templates and safe profile adoption
 
 Node.js 22+. Run `node packages/studio/bin/ludory.mjs help` from this repository.
 
@@ -82,3 +82,61 @@ static assets named in the template descriptor. JSON schema version is `1`.
 The CLI validates references, paths, uniqueness and symlinks, and external
 catalog entries cannot replace built-ins. Nothing is downloaded or executed
 while browsing templates. The receipt is **not** an updater authority.
+
+## Applying profiles to existing games
+
+Existing games with a valid `ludory.project.json` can opt into a compatible
+profile without modifying the game itself. The profile must explicitly match
+the game's engine and support all its target platforms. The built-in profiles
+are for `web` games; existing `phaser` projects need an explicitly selected,
+compatible external profile until Phaser profiles are delivered.
+
+```sh
+# These first commands are read-only previews.
+node packages/studio/bin/ludory.mjs profiles apply \
+  --project /path/to/existing-web-game --name narrative-game --json
+
+# After reviewing READY, make exactly the profile-management changes.
+node packages/studio/bin/ludory.mjs profiles apply \
+  --project /path/to/existing-web-game --name narrative-game --apply --json
+
+# Inspect managed state, check whether a newer catalog version is available.
+node packages/studio/bin/ludory.mjs profiles status \
+  --project /path/to/existing-web-game --json
+node packages/studio/bin/ludory.mjs profiles update \
+  --project /path/to/existing-web-game --json
+
+# Only for a higher compatible profile version and after reviewing READY:
+node packages/studio/bin/ludory.mjs profiles update \
+  --project /path/to/existing-web-game --apply --json
+```
+
+For an external profile, append `--catalog /path/to/catalog` consistently to
+`apply`, `status` and `update`. A missing profile, incompatible engine or target,
+unexpected file, modified managed state, same-version content change or
+downgrade blocks application. There is no `--force` or automatic conflict
+resolution. Stop and inspect the stated conflict before trying again.
+
+Profile management stores **only** declarative state in `.ludory/profiles/`:
+the initial `active.json`, SHA-256-addressed immutable `snapshots/`,
+append-only `revisions/00000001.json`, `00000002.json`, ... and retained
+previous states in `history/`. **The latest validated revision is authoritative**;
+`active.json` alone shows only the initial installation after upgrades.
+Writes use exclusive file creation, recheck project and catalog bytes before
+publication, and atomically link a complete new revision **without replacing
+any existing filename**. This requires hard-link support on the project
+filesystem (for example NTFS); a filesystem lacking that capability fails
+closed. During a write, `.lock` blocks other Studio operations.
+If the process crashes and leaves a lock, incomplete file
+or inconsistent state, Studio blocks until the owner investigates; it never
+blindly adopts or removes the residue. Use the Git history and/or an intact
+`.ludory/profiles/history/<previous-state-sha>.json` to recover the previous
+pointer after verifying the state and stopping other writers.
+
+No code, engine configuration, browser SDK, existing template file, artwork,
+save data, rights manifest, `AGENTS.md`, `game-spec.yaml`, `package.json` or
+`ludory.studio.json` is modified by these commands. The PR #3 creation receipt
+is historical provenance, **not** evidence of safe ownership for editing
+old template files. Applying a profile does not enable its validators or
+establish VK/Yandex runtime or release compliance. Replacing the Starter Kit
+and CEOS updater remains a later stage requiring behavioral parity tests.

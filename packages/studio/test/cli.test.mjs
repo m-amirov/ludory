@@ -142,3 +142,42 @@ test('create validates profile/template flags and rejects conflicting options', 
   assert.equal(cli('profiles', 'show', '--name', 'unknown').status, 1);
   assert.deepEqual(fs.readdirSync(project), []);
 });
+
+test('profiles apply/update/status preview then explicitly apply in an existing game', t => {
+  const project = temporary(t);
+  fs.writeFileSync(path.join(project, 'ludory.project.json'), JSON.stringify({
+    schemaVersion: 1, id: 'existing', version: '1.0.0', title: { en: 'Existing' },
+    engine: 'web', targets: ['vk-games'],
+  }));
+  fs.writeFileSync(path.join(project, 'owner.txt'), 'my code is mine');
+  const args = ['profiles', 'apply', '--project', project, '--name', 'web-game', '--json'];
+  const preview = cli(...args);
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.equal(JSON.parse(preview.stdout).status, 'READY');
+  assert.equal(fs.existsSync(path.join(project, '.ludory')), false);
+  const applied = cli(...args, '--apply');
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.equal(JSON.parse(applied.stdout).status, 'APPLIED');
+  const status = cli('profiles', 'status', '--project', project, '--json');
+  assert.equal(status.status, 0, status.stderr);
+  assert.equal(JSON.parse(status.stdout).status, 'IN_SYNC');
+  assert.equal(JSON.parse(status.stdout).profile.id, 'web-game');
+  assert.equal(JSON.parse(cli('profiles', 'update', '--project', project, '--json').stdout).status, 'IN_SYNC');
+  assert.equal(cli(...args, '--apply').status, 0);
+  assert.equal(fs.readFileSync(path.join(project, 'owner.txt'), 'utf8'), 'my code is mine');
+});
+
+test('profiles apply rejects incompatible games and malformed operation flags', t => {
+  const project = temporary(t);
+  fs.writeFileSync(path.join(project, 'ludory.project.json'), JSON.stringify({
+    schemaVersion: 1, id: 'existing', version: '1.0.0', title: { en: 'Existing' },
+    engine: 'phaser', targets: ['yandex-games'],
+  }));
+  const blocked = cli('profiles', 'apply', '--project', project, '--name', 'web-game', '--apply', '--json');
+  assert.equal(blocked.status, 2, blocked.stderr);
+  assert.equal(JSON.parse(blocked.stdout).status, 'BLOCKED');
+  assert.equal(cli('profiles', 'status', '--project', project, '--apply').status, 1);
+  assert.equal(cli('profiles', 'apply', '--project', project).status, 1);
+  assert.equal(cli('profiles', 'update', '--project', project, '--name', 'web-game').status, 1);
+  assert.equal(fs.existsSync(path.join(project, '.ludory')), false);
+});

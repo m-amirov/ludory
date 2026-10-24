@@ -2,6 +2,7 @@ import { defineGame } from '@ludory/core';
 import { inspectProject, planInit, planMigration, applyPlan } from './projects.mjs';
 import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
+import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
 
 const usage = `Ludory Studio 0.1.0 — safe game-project metadata
 
@@ -10,6 +11,9 @@ const usage = `Ludory Studio 0.1.0 — safe game-project metadata
   ludory migrate --project <existing-game> [--apply] [--json]
   ludory profiles list [--catalog <directory>] [--json]
   ludory profiles show --name <id> [--catalog <directory>] [--json]
+  ludory profiles apply --project <game-directory> --name <id> [--catalog <directory>] [--apply] [--json]
+  ludory profiles update --project <game-directory> [--catalog <directory>] [--apply] [--json]
+  ludory profiles status --project <game-directory> [--catalog <directory>] [--json]
   ludory templates list [--catalog <directory>] [--json]
   ludory templates show --name <id> [--catalog <directory>] [--json]
   ludory create --project <empty-directory> --id <slug> --title <name> --lang <locale> --profile <id> --template <id> --targets <comma-separated> [--version <semver>] [--catalog <directory>] [--apply] [--json]
@@ -17,6 +21,7 @@ const usage = `Ludory Studio 0.1.0 — safe game-project metadata
 
 No writes by default. init/migrate --apply only create ludory.project.json;
 create --apply only creates new template files, manifest and Studio receipt in an empty directory.
+profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
 Migration requires clean Git and supported Starter Kit game-spec.yaml schema 2.
 `;
 
@@ -29,6 +34,9 @@ function argumentsFor(command, argv) {
       : command === 'migrate' ? new Set([...common, '--apply'])
         : command === 'profiles-list' || command === 'templates-list' ? new Set(['--json', '--catalog'])
           : command === 'profiles-show' || command === 'templates-show' ? new Set(['--json', '--catalog', '--name'])
+            : command === 'profiles-apply' ? new Set([...common, '--name', '--catalog', '--apply'])
+              : command === 'profiles-update' ? new Set([...common, '--catalog', '--apply'])
+                : command === 'profiles-status' ? new Set([...common, '--catalog'])
             : common;
   const flags = new Map();
   for (let i = 0; i < argv.length; i++) {
@@ -47,6 +55,7 @@ function argumentsFor(command, argv) {
     throw new Error('--project is required');
   }
   if (command.endsWith('-show') && !flags.get('--name')) throw new Error('--name is required for show');
+  if (command === 'profiles-apply' && !flags.get('--name')) throw new Error('--name is required for profiles apply');
   return flags;
 }
 
@@ -100,9 +109,15 @@ function display(result, json, out) {
     return;
   }
   out(`${result.status} · ${result.project}\n`);
-  for (const item of result.writes) out(`  ${result.status === 'APPLIED' ? 'created' : 'would create'}: ${item}\n`);
+  for (const item of result.writes) {
+    const action = result.status === 'APPLIED'
+      ? result.mode.startsWith('profile-') ? 'applied' : 'created'
+      : result.mode === 'profile-update' ? 'would update' : 'would create';
+    out(`  ${action}: ${item}\n`);
+  }
   for (const problem of result.conflicts) out(`  blocked: ${problem}\n`);
   if (result.manifest) out(`  id: ${result.manifest.id} · version: ${result.manifest.version}\n`);
+  if (result.profile) out(`  profile: ${result.profile.id} · version: ${result.profile.version}\n`);
 }
 
 /** Pure command boundary; inject streams to test status/output without child processes. */
@@ -116,8 +131,18 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'profiles' || command === 'templates') {
       const [operation, ...args] = rest;
-      if (!['list', 'show'].includes(operation)) throw new Error(`Unknown ${command} operation: ${operation || '(missing)'}`);
+      const operations = command === 'profiles' ? ['list', 'show', 'apply', 'update', 'status'] : ['list', 'show'];
+      if (!operations.includes(operation)) throw new Error(`Unknown ${command} operation: ${operation || '(missing)'}`);
       const flags = argumentsFor(`${command}-${operation}`, args);
+      if (command === 'profiles' && ['apply', 'update', 'status'].includes(operation)) {
+        const project = flags.get('--project');
+        const catalog = flags.get('--catalog');
+        const preview = operation === 'apply' ? planProfileApply(project, { name: flags.get('--name'), catalog })
+          : operation === 'update' ? planProfileUpdate(project, { catalog }) : profileStatus(project, { catalog });
+        const result = flags.get('--apply') && preview.status === 'READY' ? applyProfilePlan(preview) : preview;
+        display(result, flags.has('--json'), out);
+        return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : 0;
+      }
       const item = operation === 'show' ? showCatalog(command, flags.get('--name'), flags.get('--catalog')) : null;
       const data = operation === 'list' ? listCatalog(command, flags.get('--catalog')) : null;
       const result = item ? { status: 'OK', kind: command, [command.slice(0, -1)]: item }

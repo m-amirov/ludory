@@ -2,13 +2,13 @@
 
 LUDORY is a modular toolkit for building and shipping browser games to Yandex Games, VK Games, and future platforms.
 
-> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports safe metadata adoption and new-game templates. This repository does not yet replace CEOS or Starter Kit, nor does it certify any platform release.
+> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports safe metadata adoption, new-game templates and managed profile declarations for existing games. This repository does not yet replace CEOS or Starter Kit, nor does it certify any platform release.
 
 ## Modules
 
 | Module | Responsibility | Stage |
 | --- | --- | --- |
-| Ludory Studio | Projects, profiles, templates, development workflows and project updates | Metadata adoption + new-game scaffolding |
+| Ludory Studio | Projects, profiles, templates, development workflows and project updates | Metadata adoption + scaffolding + profile-only updates |
 | Ludory Core | Framework-independent game definition, state and lifecycle | Foundation |
 | Ludory AI | CEOS orchestration, agents, workflows and evidence | Planned migration |
 | Ludory Runtime | Host UI, browser lifecycle, input, persistence, sound | Planned |
@@ -87,6 +87,21 @@ Core-compatible manifest and a SHA-256 creation receipt. Its targets denote
 intended platforms, **not** a production-ready VK/Yandex integration. The
 Starter Kit updater, CEOS orchestration and host release gates remain unmigrated.
 See [Studio's guide](packages/studio/README.md).
+
+For **existing games** with a canonical manifest, Studio now supports an
+opt-in, read-only-by-default profile association and updates:
+
+```sh
+node packages/studio/bin/ludory.mjs profiles apply --project /path/to/game --name web-game
+node packages/studio/bin/ludory.mjs profiles apply --project /path/to/game --name web-game --apply
+node packages/studio/bin/ludory.mjs profiles status --project /path/to/game --json
+node packages/studio/bin/ludory.mjs profiles update --project /path/to/game
+# Once READY: repeat update with --apply.
+```
+
+Only new Ludory-owned `.ludory/profiles/` metadata is eligible for updates;
+runtime files and CEOS/Starter Kit infrastructure remain outside Ludory's
+ownership. Profile application does not activate game-engine functionality.
 
 ## Source-of-truth repositories during migration
 
