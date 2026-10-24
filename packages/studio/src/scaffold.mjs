@@ -11,7 +11,8 @@ const serialize = item => Buffer.from(`${JSON.stringify(item, null, 2)}\n`, 'utf
 function filesFor(manifest, profile, template) {
   const manifestBytes = serialize(manifest);
   const entries = [['ludory.project.json', manifestBytes]];
-  const tracked = { 'ludory.project.json': digest(manifestBytes) };
+  const tracked = Object.create(null);
+  tracked['ludory.project.json'] = digest(manifestBytes);
   for (const filename of template.files) {
     const bytes = template.assets.get(filename).bytes;
     entries.push([filename, bytes]);
@@ -84,38 +85,68 @@ function ensureDirectories(relative, createdDirectories) {
   let current = '';
   for (const segment of segments) {
     current = current ? `${current}/${segment}` : segment;
+    let created = false;
     try {
       fs.mkdirSync(current);
-      createdDirectories.push(current);
+      created = true;
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
-      if (!createdDirectories.includes(current)) throw new Error(`Existing output directory conflict: ${current}`);
+      if (!createdDirectories.some(dir => dir.name === current)) throw new Error(`Existing output directory conflict: ${current}`);
     }
     const st = fs.lstatSync(current);
     if (!st.isDirectory() || st.isSymbolicLink()) throw new Error(`Unsafe output directory: ${current}`);
+    if (created) createdDirectories.push({ name: current, dev: st.dev, ino: st.ino });
+    else {
+      const expected = createdDirectories.find(dir => dir.name === current);
+      if (expected.dev !== st.dev || expected.ino !== st.ino) throw new Error(`Output directory identity changed: ${current}`);
+    }
   }
+}
+
+function safeOutputParents(name, directories) {
+  const segments = name.split('/').slice(0, -1);
+  let current = '';
+  for (const part of segments) {
+    current = current ? `${current}/${part}` : part;
+    const expected = directories.find(dir => dir.name === current);
+    if (!expected) return false;
+    try {
+      const st = fs.lstatSync(current);
+      if (!st.isDirectory() || st.isSymbolicLink() || st.dev !== expected.dev || st.ino !== expected.ino) return false;
+    } catch { return false; }
+  }
+  return true;
 }
 
 function rollbackCreated(files, directories) {
   const failures = [];
-  for (const [name, expectedBytes, ownership] of files.reverse()) {
+  for (const { name, bytes, ownership, complete } of files.reverse()) {
     try {
+      if (!safeOutputParents(name, directories)) {
+        failures.push(`moved output retained: ${name}`);
+        continue;
+      }
       const st = fs.lstatSync(name);
       const actual = st.isFile() && !st.isSymbolicLink() ? fs.readFileSync(name) : null;
-      // A write may fail after creating only a prefix of the file. It is
-      // still ours if its inode matches the exclusive creation and it has
-      // not diverged from the bytes this command was attempting to write.
+      // A failed *partial* write may leave a prefix; completed files require
+      // byte-for-byte equality so user edits are never silently discarded.
       if (!actual || st.dev !== ownership.dev || st.ino !== ownership.ino ||
-          actual.length > expectedBytes.length || !actual.equals(expectedBytes.subarray(0, actual.length))) {
+          (complete ? !actual.equals(bytes) : actual.length > bytes.length || !actual.equals(bytes.subarray(0, actual.length)))) {
         failures.push(`modified output retained: ${name}`);
         continue;
       }
       fs.unlinkSync(name);
     } catch (error) { failures.push(`${name}: ${error.message}`); }
   }
-  for (const name of directories.reverse()) {
-    try { fs.rmdirSync(name); }
-    catch (error) { failures.push(`${name}: ${error.message}`); }
+  for (const { name, dev, ino } of directories.reverse()) {
+    try {
+      const st = fs.lstatSync(name);
+      if (!st.isDirectory() || st.isSymbolicLink() || st.dev !== dev || st.ino !== ino) {
+        failures.push(`moved directory retained: ${name}`);
+        continue;
+      }
+      fs.rmdirSync(name);
+    } catch (error) { failures.push(`${name}: ${error.message}`); }
   }
   return failures;
 }
@@ -142,14 +173,44 @@ export function applyCreatePlan(plan) {
     anchored = directoryIdentity('.') === plan.rootIdentity;
     if (!anchored) throw new Error('Stale plan: project directory changed during apply');
     for (const [name, bytes] of fresh._snapshot) {
+      // Return to the *validated* project root before every path lookup.
+      process.chdir(fresh.project);
+      if (directoryIdentity('.') !== plan.rootIdentity) throw new Error('Project directory identity changed during apply');
       ensureDirectories(name, createdDirectories);
+      const pieces = name.split('/');
+      const basename = pieces.pop();
+      if (pieces.length) {
+        let parent = '';
+        // Traverse one level at a time, validating the inode recorded when
+        // *each* directory was created. Validating just the leaf would let
+        // an exchanged ancestor symlink redirect the entire nested path.
+        for (const part of pieces) {
+          parent = parent ? `${parent}/${part}` : part;
+          const expected = createdDirectories.find(dir => dir.name === parent);
+          if (!expected) throw new Error(`Untracked output directory: ${parent}`);
+          process.chdir(part);
+          if (directoryIdentity('.') !== `${BigInt(expected.dev)}:${BigInt(expected.ino)}`) {
+            throw new Error(`Output directory changed before file creation: ${parent}`);
+          }
+        }
+      }
+      // The final basename is opened relative to the checked directory inode.
+      // Intermediate symbolic substitutions cannot redirect it elsewhere.
       const flags = fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0);
-      const fd = fs.openSync(name, flags, 0o600);
+      const fd = fs.openSync(basename, flags, 0o600);
       // Track immediately, so a short/failed write is also eligible for cleanup.
       const stat = fs.fstatSync(fd);
-      createdFiles.push([name, bytes, { dev: stat.dev, ino: stat.ino }]);
-      try { fs.writeFileSync(fd, bytes); }
+      const owned = { name, bytes, ownership: { dev: stat.dev, ino: stat.ino }, complete: false };
+      createdFiles.push(owned);
+      try {
+        fs.writeFileSync(fd, bytes);
+        owned.complete = true;
+      }
       finally { fs.closeSync(fd); }
+      process.chdir(fresh.project);
+      if (directoryIdentity('.') !== plan.rootIdentity || !safeOutputParents(name, createdDirectories)) {
+        throw new Error('Output directory moved during apply');
+      }
     }
     if (!isOriginalDirectory(fresh.project, plan.rootIdentity)) {
       throw new Error('Project directory moved during apply; created files remain anchored to original directory');
@@ -157,6 +218,10 @@ export function applyCreatePlan(plan) {
     return { ...fresh, status: 'APPLIED', applied: true };
   } catch (error) {
     if (anchored && isOriginalDirectory(fresh.project, plan.rootIdentity)) {
+      process.chdir(fresh.project);
+      if (directoryIdentity('.') !== plan.rootIdentity) {
+        throw new Error(`${error.message}; rollback skipped: project root directory changed`, { cause: error });
+      }
       const problems = rollbackCreated(createdFiles, createdDirectories);
       if (problems.length) throw new Error(`${error.message}; incomplete rollback: ${problems.join('; ')}`, { cause: error });
     }

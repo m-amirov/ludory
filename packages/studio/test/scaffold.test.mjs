@@ -161,3 +161,122 @@ test('partial write failure cleans up its incomplete owned file', t => {
   assert.equal(once, true);
   assert.deepEqual(fs.readdirSync(project), []);
 });
+
+test('replacing a nested output directory cannot redirect file creation outside project', t => {
+  const project = empty(t);
+  const outside = empty(t);
+  const plan = planCreate(project, { ...params, profile: 'web-game', template: 'web-basic' });
+  const originalOpen = fs.openSync;
+  let swapped = false;
+  fs.openSync = function (filename, flags, ...args) {
+    if (!swapped && typeof filename === 'string' && filename.endsWith('main.js') && (flags & fs.constants.O_CREAT)) {
+      fs.renameSync(path.join(project, 'src'), path.join(project, 'src-original'));
+      fs.symlinkSync(outside, path.join(project, 'src'), 'dir');
+      swapped = true;
+    }
+    return originalOpen.call(this, filename, flags, ...args);
+  };
+  try { assert.throws(() => applyCreatePlan(plan), /changed|moved|directory|stale|unsafe|incomplete/i); }
+  finally { fs.openSync = originalOpen; }
+  assert.equal(swapped, true);
+  assert.equal(fs.existsSync(path.join(outside, 'main.js')), false);
+});
+
+test('valid filename __proto__ is included in creation receipt', t => {
+  const project = empty(t);
+  const catalog = custom(t);
+  const descriptorPath = path.join(catalog, 'templates', 'custom-basic', 'template.json');
+  const descriptor = JSON.parse(fs.readFileSync(descriptorPath));
+  descriptor.files = ['__proto__'];
+  fs.writeFileSync(descriptorPath, JSON.stringify(descriptor));
+  fs.writeFileSync(path.join(catalog, 'templates', 'custom-basic', '__proto__'), 'safe filename');
+  const plan = planCreate(project, { ...params, profile: 'custom-game', template: 'custom-basic', targets: ['vk-games'], catalog });
+  assert.equal(plan.status, 'READY');
+  applyCreatePlan(plan);
+  const receipt = JSON.parse(fs.readFileSync(path.join(project, 'ludory.studio.json')));
+  assert.equal(Object.hasOwn(receipt.files, '__proto__'), true);
+  assert.equal(receipt.files.__proto__, hash(fs.readFileSync(path.join(project, '__proto__'))));
+});
+
+test('rollback retains previously completed files modified by a user after creation', t => {
+  const project = empty(t);
+  const plan = planCreate(project, params);
+  const originalOpen = fs.openSync;
+  let modified = false;
+  fs.openSync = function (filename, flags, ...args) {
+    if (!modified && filename === 'index.html' && (flags & fs.constants.O_CREAT)) {
+      modified = true;
+      fs.truncateSync(path.join(project, 'ludory.project.json'), 5);
+      throw new Error('injected later failure');
+    }
+    return originalOpen.call(this, filename, flags, ...args);
+  };
+  try { assert.throws(() => applyCreatePlan(plan), /incomplete rollback|modified output retained/i); }
+  finally { fs.openSync = originalOpen; }
+  assert.equal(modified, true);
+  assert.equal(fs.readFileSync(path.join(project, 'ludory.project.json')).length, 5);
+});
+
+test('two-level output parent substitution cannot escape through an unverified ancestor', t => {
+  const project = empty(t);
+  const outside = empty(t);
+  const catalog = custom(t);
+  const templateRoot = path.join(catalog, 'templates', 'custom-basic');
+  fs.mkdirSync(path.join(templateRoot, 'src', 'nested'));
+  fs.writeFileSync(path.join(templateRoot, 'src', 'nested', 'main.js'), 'safe bytes');
+  const descriptorFile = path.join(templateRoot, 'template.json');
+  const descriptor = JSON.parse(fs.readFileSync(descriptorFile));
+  descriptor.files = ['src/nested/main.js'];
+  fs.writeFileSync(descriptorFile, JSON.stringify(descriptor));
+  fs.mkdirSync(path.join(outside, 'nested'));
+  const plan = planCreate(project, { ...params, profile: 'custom-game', template: 'custom-basic', catalog, targets: ['vk-games'] });
+  const originalLstat = fs.lstatSync;
+  let changed = false;
+  fs.lstatSync = function (filename, ...args) {
+    if (!changed && filename === 'src/nested') {
+      fs.renameSync(path.join(project, 'src'), path.join(project, 'src-original'));
+      fs.symlinkSync(outside, path.join(project, 'src'), 'dir');
+      changed = true;
+    }
+    return originalLstat.call(this, filename, ...args);
+  };
+  try { assert.throws(() => applyCreatePlan(plan), /directory|moved|unsafe|changed|incomplete/i); }
+  finally { fs.lstatSync = originalLstat; }
+  assert.equal(changed, true);
+  assert.equal(fs.existsSync(path.join(outside, 'nested', 'main.js')), false);
+});
+
+test('rollback rechecks root inode after chdir to avoid deleting a matching outside hardlink', t => {
+  const project = empty(t);
+  const parked = `${project}-parked`;
+  const outside = empty(t);
+  t.after(() => {
+    if (fs.existsSync(project) && fs.lstatSync(project).isSymbolicLink()) fs.unlinkSync(project);
+    fs.rmSync(parked, { recursive: true, force: true });
+  });
+  const plan = planCreate(project, params);
+  const originalOpen = fs.openSync;
+  const originalChdir = process.chdir;
+  let failWrite = false;
+  let swapped = false;
+  fs.openSync = function (filename, flags, ...args) {
+    if (!failWrite && filename === 'index.html' && (flags & fs.constants.O_CREAT)) {
+      failWrite = true;
+      throw new Error('simulate apply failure');
+    }
+    return originalOpen.call(this, filename, flags, ...args);
+  };
+  process.chdir = function (target) {
+    if (failWrite && !swapped && target === project) {
+      fs.renameSync(project, parked);
+      fs.symlinkSync(outside, project, 'dir');
+      fs.linkSync(path.join(parked, 'ludory.project.json'), path.join(outside, 'ludory.project.json'));
+      swapped = true;
+    }
+    return originalChdir.call(process, target);
+  };
+  try { assert.throws(() => applyCreatePlan(plan), /failure|moved|directory/i); }
+  finally { fs.openSync = originalOpen; process.chdir = originalChdir; }
+  assert.equal(swapped, true);
+  assert.equal(fs.existsSync(path.join(outside, 'ludory.project.json')), true);
+});
