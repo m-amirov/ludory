@@ -1,0 +1,11 @@
+{
+  "name": "@ludory/core",
+  "version": "0.1.0",
+  "description": "Platform-neutral game definition, state and lifecycle primitives for LUDORY",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "exports": { ".": "./src/index.mjs" },
+  "files": ["src", "README.md"],
+  "sideEffects": false,
+  "license": "UNLICENSED"
+}
