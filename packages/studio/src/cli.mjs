@@ -22,7 +22,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory workflow status --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow start --project <game-directory> --pipeline <audit-repair-loop|production-art> --target <text> --in-scope <a;b> --acceptance <text> --mutation-boundary <text> [--out-of-scope <a;b>] [--apply] [--json]
-  ludory workflow continue --project <game-directory> [--run <run-id|latest>] [--apply] [--json]
+  ludory workflow continue --project <game-directory> [--run <run-id|latest>] [--executor codex] [--apply] [--json]
   ludory workflow checkpoint --project <game-directory> --stage <STAGE> [--run <run-id|latest>] [--artifact <path;path>] [--outcome <CONTINUE|PASS|FAIL|BLOCKED|ESCALATE>] [--apply] [--json]
   ludory help
 
@@ -30,7 +30,10 @@ No writes by default. init/migrate --apply only create ludory.project.json;
 create --apply only creates new template files, manifest and Studio receipt in an empty directory.
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
 workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
-Native AI agent execution and independent release PASS verification are not yet implemented.
+Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.
+Codex workspace-write may edit game files; in-scope paths are instructions, not enforced allowlists.
+Without --executor, continue --apply still records a manual action request only.
+Independent release PASS verification is not implemented.
 Native development workflow accepts dirty or unversioned projects; Release verification is separate.
 The legacy metadata-only migrate command requires clean Git and Starter Kit game-spec.yaml schema 2;
 do not run it against frozen existing games. CEOS history import is not planned.
@@ -43,7 +46,7 @@ function argumentsFor(command, argv) {
     ? new Set(command === 'workflow-doctor' ? workflowCommon
       : command === 'workflow-status' || command === 'workflow-next' ? [...workflowCommon, '--run']
         : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
-          : command === 'workflow-continue' ? [...workflowCommon, '--run', '--apply']
+          : command === 'workflow-continue' ? [...workflowCommon, '--run', '--executor', '--apply']
             : [...workflowCommon, '--run', '--stage', '--artifact', '--outcome', '--apply'])
     : command === 'init'
     ? new Set([...common, '--id', '--title', '--lang', '--engine', '--targets', '--version', '--apply'])
@@ -83,6 +86,7 @@ function workflowOptions(flags) {
     target: flags.get('--target'), inScope: flags.get('--in-scope'), outOfScope: flags.get('--out-of-scope'),
     acceptance: flags.get('--acceptance'), mutationBoundary: flags.get('--mutation-boundary'),
     stage: flags.get('--stage'), artifact: flags.get('--artifact'), outcome: flags.get('--outcome'),
+    executor: flags.get('--executor'),
   };
 }
 
@@ -91,6 +95,9 @@ function displayWorkflow(result, json, out) {
   out(`${result.status} · ${result.project}\n`);
   if (result.engine) out(`  engine: ${result.engine}\n`);
   if (result.nativeStatus) out(`  native status: ${result.nativeStatus}\n`);
+  if (result.executor) out(`  executor: ${result.executor}\n`);
+  if (result.warning) out(`  warning: ${result.warning}\n`);
+  if (result.executorCode) out(`  result: ${result.executorCode}\n`);
   if (result.nextAction?.kind) out(`  next: ${result.nextAction.kind}\n`);
   for (const run of result.runs ?? []) out(`  run: ${run.runId} · ${run.status} · ${run.nextStage ?? 'terminal'}\n`);
   if (result.status === 'READY') for (const item of result.writes ?? []) out(`  planned: ${item}\n`);
@@ -159,7 +166,7 @@ function display(result, json, out) {
 }
 
 /** Pure command boundary; inject streams to test status/output without child processes. */
-export function runCli(argv, { out = text => process.stdout.write(text), err = text => process.stderr.write(text) } = {}) {
+export function runCli(argv, { out = text => process.stdout.write(text), err = text => process.stderr.write(text), executor } = {}) {
   try {
     const [command = 'help', ...rest] = argv;
     if (command === 'help' || command === '--help') {
@@ -174,7 +181,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       }
       const flags = argumentsFor(`workflow-${operation}`, args);
       const plan = planWorkflow(flags.get('--project'), operation, workflowOptions(flags));
-      const result = executeWorkflow(plan, { apply: flags.has('--apply') });
+      const result = executeWorkflow(plan, { apply: flags.has('--apply'), executor });
       displayWorkflow(result, flags.has('--json'), out);
       return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : result.status === 'ESCALATE' ? 3 : result.status === 'FAILED' ? 1 : 0;
     }

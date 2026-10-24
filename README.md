@@ -2,7 +2,7 @@
 
 LUDORY is a modular toolkit for building and shipping browser games to Yandex Games, VK Games, and future platforms.
 
-> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports manifests, templates, profiles and **native Ludory AI workflow commands**. Full replacement of CEOS/Starter Kit capabilities, AI agent automation and platform release certification remain future gates. Existing games are frozen; historical CEOS runs will **not** be imported.
+> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports manifests, templates, profiles and **native Ludory AI workflows**. An opt-in, bounded Codex executor is available for newly created games; general autonomous development, full CEOS/Starter Kit replacement and platform release certification remain future gates. Existing games are frozen; historical CEOS runs will **not** be imported.
 
 ## Modules
 
@@ -10,7 +10,7 @@ LUDORY is a modular toolkit for building and shipping browser games to Yandex Ga
 | --- | --- | --- |
 | Ludory Studio | Projects, profiles, templates, development workflows and project updates | Metadata + scaffolding + profile updates + native AI CLI |
 | Ludory Core | Framework-independent game definition, state and lifecycle | Foundation |
-| Ludory AI | Native workflow state, checkpoints and eventually agents/evidence | Native foundation; agent/release parity pending |
+| Ludory AI | Native workflow state, checkpoints and Codex task execution | Bounded Codex MVP; agent/release parity pending |
 | Ludory Runtime | Host UI, browser lifecycle, input, persistence, sound | Planned |
 | Ludory Connect | Optional SDK adapters for Yandex Games, VK Games and others | Planned |
 | Ludory Release | Validation, builds, evidence and distribution gates | Planned migration |
@@ -107,7 +107,7 @@ ownership. Profile application does not activate game-engine functionality.
 
 ## Native Ludory AI workflows through Studio
 
-Studio invokes its own `@ludory/ai` workflow engine **without installing or invoking CEOS**. Native runs are stored under `.ludory/ai/`. A valid `ludory.project.json` is required; Git is optional during development. Game code, assets and saves remain untouched. Native history is readable after source edits, commits or relocating the game; immutable checkpoint receipts preserve the hashes recorded at the time of each action.
+Studio invokes its own `@ludory/ai` workflow engine **without installing or invoking CEOS**. Native runs are stored under `.ludory/ai/`. A valid `ludory.project.json` is required; Git is optional during development. **Manual workflow commands** leave game code, assets and saves untouched; the explicit `--executor codex --apply` mode may edit game files. Native history remains readable after ordinary source edits, commits or relocating the game; API-level append-only checkpoint receipts record hashes from the time of each action (not cryptographic authentication against a privileged writer).
 
 ```sh
 # Read-only inspection of native Ludory state.
@@ -120,13 +120,16 @@ node packages/studio/bin/ludory.mjs workflow start --project /path/to/game \
   --pipeline audit-repair-loop --target 'EP3 QA' --in-scope 'src;tests' \
   --acceptance 'No blocking defects' --mutation-boundary 'Only scoped evidence' --json
 
-# Continue --apply requests an action; the AI agent has not performed it yet.
+# Manual mode: continue --apply records a request, without running an agent.
 node packages/studio/bin/ludory.mjs workflow continue --project /path/to/game --run latest --json
+# Opt-in Codex executor for a NEW game created by Studio: preview, then explicitly apply.
+node packages/studio/bin/ludory.mjs workflow continue --project /path/to/new-game --run latest --executor codex --json
+node packages/studio/bin/ludory.mjs workflow continue --project /path/to/new-game --run latest --executor codex --apply --json
 node packages/studio/bin/ludory.mjs workflow checkpoint --project /path/to/game \
   --run latest --stage EVIDENCE_COLLECTED --artifact 'reports/evidence.json' --outcome CONTINUE --json
 ```
 
-`--apply` is mandatory for mutating `start`, `continue` and `checkpoint`; `doctor`, `status` and `next` are read-only. `continue --apply` records an **action request**, not an executed agent task. Terminal `PASS` is blocked until an independent Ludory Release verifier exists. When several runs are active, `status` lists their IDs; supply an explicit `--run` to continue one. No historic CEOS checkpoints are imported. See [Studio's workflow reference](packages/studio/README.md#native-workflows-through-the-unified-cli).
+`--apply` is mandatory for mutating `start`, `continue` and `checkpoint`; `doctor`, `status` and `next` are read-only. By default, `continue --apply` records an **action request**, not an executed task. With `--executor codex`, it invokes the installed Codex CLI inside its `workspace-write` sandbox and stores only bounded execution metadata in the hash-chain ledger. The agent may modify files within the new game; `in-scope` is an instruction, **not a hard file allowlist**. A pending Codex request blocks checkpointing until its result is recorded; a process crash may require manual diagnosis/recovery. Codex completion yields `EXECUTED_UNVERIFIED`, never an independent quality or Release PASS. Host verification with actual Codex, subprocess descendants and Windows/NTFS is pending. When several runs are active, `status` lists their IDs; supply an explicit `--run`. No historic CEOS checkpoints are imported. See [Studio's workflow reference](packages/studio/README.md#native-workflows-through-the-unified-cli).
 
 ## Frozen legacy repositories
 

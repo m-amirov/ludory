@@ -206,3 +206,89 @@ test('a moved game resumes its native run without accepting a copy into another 
   });
   assert.equal(commitNativeEvent(next).nextStage, 'AUDITED');
 });
+
+test('Codex execution result is recorded after request without granting a checkpoint or PASS', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const id = run.run.runId;
+  commitNativeEvent(planNativeEvent(project, id, { kind: 'ACTION_REQUESTED', stage: 'EVIDENCE_COLLECTED', executor: 'codex' }));
+  const result = { ok: true, code: 'EXECUTED_UNVERIFIED', exitCode: 0,
+    transcriptSha256: 'a'.repeat(64), eventCount: 3, completed: true };
+  const planned = planNativeEvent(project, id, { kind: 'EXECUTION_RESULT', stage: 'EVIDENCE_COLLECTED', result });
+  assert.equal(planned.writes.length, 2);
+  assert.equal(commitNativeEvent(planned).status, 'EXECUTED_UNVERIFIED');
+  const history = readNativeRun(project, id);
+  assert.equal(history.nextStage, 'EVIDENCE_COLLECTED');
+  assert.deepEqual(history.events.map(event => event.kind), ['ACTION_REQUESTED', 'EXECUTION_RESULT']);
+  assert.equal(history.events[1].result.transcriptSha256, 'a'.repeat(64));
+  assert.equal(history.events[0].executor, 'codex');
+  assert.equal(history.events[1].requestSha256, history.events[0].receiptSha256 ?? planned.event.prevSha256);
+  assert.throws(() => planNativeEvent(project, id, { kind: 'ACTION_REQUESTED', stage: 'EVIDENCE_COLLECTED' }), /ALREADY|REQUESTED|EVIDENCE/);
+  const checkpoint = planNativeEvent(project, id, { kind: 'CHECKPOINT', stage: 'EVIDENCE_COLLECTED',
+    outcome: 'CONTINUE', artifacts: ['src/main.js'] });
+  assert.equal(commitNativeEvent(checkpoint).nextStage, 'AUDITED');
+});
+
+test('failed agent attempt has durable receipt and can be explicitly retried', t => {
+  const project = nativeProject(t);
+  const id = commitNewRun(newRun(project)).run.runId;
+  assert.throws(() => planNativeEvent(project, id, { kind: 'EXECUTION_RESULT', stage: 'EVIDENCE_COLLECTED',
+    result: { ok: true, code: 'EXECUTED_UNVERIFIED', exitCode: 0, transcriptSha256: 'f'.repeat(64), eventCount: 2, completed: true } }), /REQUEST|RESULT/);
+  commitNativeEvent(planNativeEvent(project, id, { kind: 'ACTION_REQUESTED', stage: 'EVIDENCE_COLLECTED', executor: 'codex' }));
+  const failed = { ok: false, code: 'EXECUTOR_NONZERO_EXIT', exitCode: 3,
+    transcriptSha256: 'b'.repeat(64), eventCount: 1, completed: false };
+  commitNativeEvent(planNativeEvent(project, id, { kind: 'EXECUTION_RESULT', stage: 'EVIDENCE_COLLECTED', result: failed }));
+  assert.equal(readNativeRun(project, id).status, 'EXECUTION_FAILED');
+  commitNativeEvent(planNativeEvent(project, id, { kind: 'ACTION_REQUESTED', stage: 'EVIDENCE_COLLECTED', executor: 'codex' }));
+  assert.equal(readNativeRun(project, id).status, 'WAITING_FOR_EVIDENCE');
+});
+
+test('forged or malformed executor result fails closed before publication', t => {
+  const project = nativeProject(t);
+  const id = commitNewRun(newRun(project)).run.runId;
+  commitNativeEvent(planNativeEvent(project, id, { kind: 'ACTION_REQUESTED', stage: 'EVIDENCE_COLLECTED', executor: 'codex' }));
+  for (const result of [
+    { ok: true, code: 'EXECUTED_UNVERIFIED', exitCode: 0, transcriptSha256: 'BAD', eventCount: 1, completed: true },
+    { ok: true, code: 'EXECUTED_UNVERIFIED', exitCode: 5, transcriptSha256: 'f'.repeat(64), eventCount: 1, completed: true },
+    { ok: false, code: 'CUSTOM_UNTRUSTED_CODE', exitCode: 1, transcriptSha256: 'f'.repeat(64), eventCount: 1, completed: false },
+  ]) {
+    assert.throws(() => planNativeEvent(project, id, { kind: 'EXECUTION_RESULT', stage: 'EVIDENCE_COLLECTED', result }), /EXECUTION|RESULT|INVALID/);
+  }
+  assert.equal(readNativeRun(project, id).events.length, 1);
+});
+
+test('an active Codex request blocks checkpoint until its exact result is committed', t => {
+  const project = nativeProject(t);
+  const id = commitNewRun(newRun(project)).run.runId;
+  commitNativeEvent(planNativeEvent(project, id, {
+    kind: 'ACTION_REQUESTED', stage: 'EVIDENCE_COLLECTED', executor: 'codex',
+  }));
+  const pending = readNativeRun(project, id);
+  assert.equal(pending.pendingExecutor, 'codex');
+  assert.throws(() => planNativeEvent(project, id, {
+    kind: 'CHECKPOINT', stage: 'EVIDENCE_COLLECTED', artifacts: ['src/main.js'], outcome: 'CONTINUE',
+  }), /EXECUTOR_PENDING_RESULT/);
+  const finished = commitNativeEvent(planNativeEvent(project, id, {
+    kind: 'EXECUTION_RESULT', stage: 'EVIDENCE_COLLECTED',
+    result: { ok: false, code: 'EXECUTOR_NONZERO_EXIT', exitCode: 3,
+      transcriptSha256: 'b'.repeat(64), eventCount: 2, completed: false },
+  }));
+  assert.equal(finished.pendingExecutor, null);
+  assert.equal(commitNativeEvent(planNativeEvent(project, id, {
+    kind: 'CHECKPOINT', stage: 'EVIDENCE_COLLECTED', artifacts: ['src/main.js'], outcome: 'CONTINUE',
+  })).nextStage, 'AUDITED');
+});
+
+test('manually requested actions never accept a forged Codex execution result', t => {
+  const project = nativeProject(t);
+  const id = commitNewRun(newRun(project)).run.runId;
+  commitNativeEvent(planNativeEvent(project, id, {
+    kind: 'ACTION_REQUESTED', stage: 'EVIDENCE_COLLECTED',
+  }));
+  assert.equal(readNativeRun(project, id).pendingExecutor, null);
+  assert.throws(() => planNativeEvent(project, id, {
+    kind: 'EXECUTION_RESULT', stage: 'EVIDENCE_COLLECTED',
+    result: { ok: true, code: 'EXECUTED_UNVERIFIED', exitCode: 0,
+      transcriptSha256: 'b'.repeat(64), eventCount: 2, completed: true },
+  }), /EXECUTION_RESULT_WITHOUT_REQUEST/);
+});

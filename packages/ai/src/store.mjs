@@ -8,6 +8,24 @@ const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const serial = value => `${JSON.stringify(value, null, 2)}\n`;
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,179}$/;
 const EXCLUSIVE = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0);
+const EXECUTION_CODES = new Set(['EXECUTED_UNVERIFIED', 'EXECUTOR_INCOMPLETE', 'EXECUTOR_UNAVAILABLE',
+  'EXECUTOR_TIMEOUT', 'EXECUTOR_OUTPUT_LIMIT', 'EXECUTOR_SPAWN_FAILED', 'EXECUTOR_NONZERO_EXIT',
+  'EXECUTOR_MALFORMED_JSONL', 'EXECUTOR_TURN_FAILED']);
+
+function validateExecutionResult(result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result) ||
+      typeof result.ok !== 'boolean' || !EXECUTION_CODES.has(result.code) ||
+      !(result.exitCode === null || (Number.isSafeInteger(result.exitCode) && result.exitCode >= 0)) ||
+      !/^[a-f0-9]{64}$/.test(result.transcriptSha256 ?? '') ||
+      !Number.isSafeInteger(result.eventCount) || result.eventCount < 0 ||
+      typeof result.completed !== 'boolean' ||
+      (result.ok !== (result.code === 'EXECUTED_UNVERIFIED')) ||
+      (result.ok && (result.exitCode !== 0 || !result.completed))) {
+    throw new Error('NATIVE_EXECUTION_RESULT_INVALID');
+  }
+  return { ok: result.ok, code: result.code, exitCode: result.exitCode,
+    transcriptSha256: result.transcriptSha256, eventCount: result.eventCount, completed: result.completed };
+}
 
 function directoryIdentity(dir) {
   const st = fs.statSync(dir, { bigint: true });
@@ -228,6 +246,8 @@ export function readNativeRun(projectDir, runRef = 'latest') {
   let precedingHash = marker.runSha256;
   let next = getPipeline(run.pipeline).stages[0].id;
   let status = 'ACTIVE', terminal = null;
+  let pendingExecutor = null;
+  let pendingRequestSha256 = null;
   const events = [];
   for (let index = 0; index < files.length / 2; index++) {
     const prefix = String(index + 1).padStart(6, '0');
@@ -244,6 +264,7 @@ export function readNativeRun(projectDir, runRef = 'latest') {
       throw new Error('NATIVE_INTEGRITY_EVENT_CHAIN');
     }
     if (event.kind === 'CHECKPOINT') {
+      if (pendingExecutor) throw new Error('NATIVE_INTEGRITY_EXECUTOR_PENDING_RESULT');
       if (!Array.isArray(event.artifacts)) throw new Error('NATIVE_INTEGRITY_EVENT_ARTIFACTS');
       for (const artifact of event.artifacts) {
         // Hashes describe bytes at checkpoint time, not an eternal promise
@@ -260,15 +281,31 @@ export function readNativeRun(projectDir, runRef = 'latest') {
       terminal = transition.terminal;
       status = terminal ?? 'ACTIVE';
     } else if (event.kind === 'ACTION_REQUESTED') {
-      if (status === 'WAITING_FOR_EVIDENCE' || event.outcome !== null || event.artifacts?.length) {
+      if (['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(status) ||
+          event.outcome !== null || event.artifacts?.length ||
+          (event.executor !== undefined && event.executor !== 'codex')) {
         throw new Error('NATIVE_INTEGRITY_DUPLICATE_REQUEST');
       }
       status = 'WAITING_FOR_EVIDENCE';
+      pendingExecutor = event.executor ?? null;
+      pendingRequestSha256 = pendingExecutor ? sha256(bytes) : null;
+    } else if (event.kind === 'EXECUTION_RESULT') {
+      if (status !== 'WAITING_FOR_EVIDENCE' || pendingExecutor !== 'codex' ||
+          event.requestSha256 !== pendingRequestSha256 ||
+          event.outcome !== null || event.artifacts?.length) {
+        throw new Error('NATIVE_INTEGRITY_UNREQUESTED_EXECUTION_RESULT');
+      }
+      try { validateExecutionResult(event.result); }
+      catch { throw new Error('NATIVE_INTEGRITY_EXECUTION_RESULT'); }
+      status = event.result.ok ? 'EXECUTED_UNVERIFIED' : 'EXECUTION_FAILED';
+      pendingExecutor = null;
+      pendingRequestSha256 = null;
     } else throw new Error('NATIVE_INTEGRITY_EVENT_KIND');
     precedingHash = sha256(bytes);
     events.push(event);
   }
   return { run, events, status, nextStage: next, terminal, headSha256: precedingHash,
+    pendingExecutor, pendingRequestSha256,
     integrity: { ok: true, issues: [] } };
 }
 
@@ -277,22 +314,37 @@ export function planNativeEvent(projectDir, runRef, input) {
   const current = readNativeRun(project, runRef);
   const source = inspectNativeProject(project);
   if (current.terminal) throw new Error('NATIVE_TERMINAL_RUN');
-  if (!input || !['CHECKPOINT', 'ACTION_REQUESTED'].includes(input.kind)) throw new Error('NATIVE_EVENT_KIND_INVALID');
+  if (!input || !['CHECKPOINT', 'ACTION_REQUESTED', 'EXECUTION_RESULT'].includes(input.kind)) throw new Error('NATIVE_EVENT_KIND_INVALID');
   if (input.stage !== current.nextStage) throw new Error(`NATIVE_INVALID_STAGE: expected ${current.nextStage}`);
   let artifacts = [];
   let outcome = null;
+  let result = null;
   if (input.kind === 'CHECKPOINT') {
+    if (current.pendingExecutor) throw new Error('NATIVE_EXECUTOR_PENDING_RESULT');
     if (!Array.isArray(input.artifacts)) throw new Error('NATIVE_ARTIFACTS_INVALID');
     artifacts = input.artifacts.map(relative => snapshotArtifact(project, relative));
     outcome = input.outcome ?? 'CONTINUE';
     const decision = checkTransition(current.run.pipeline, input.stage, outcome, { hasEvidence: artifacts.length > 0 });
     if (!decision.ok) throw new Error(`NATIVE_CHECKPOINT_BLOCKED: ${decision.code}`);
-  } else if (current.status === 'WAITING_FOR_EVIDENCE') {
-    throw new Error('NATIVE_ACTION_ALREADY_REQUESTED');
+  } else if (input.kind === 'EXECUTION_RESULT') {
+    if (current.status !== 'WAITING_FOR_EVIDENCE' || current.pendingExecutor !== 'codex') {
+      throw new Error('NATIVE_EXECUTION_RESULT_WITHOUT_REQUEST');
+    }
+    result = validateExecutionResult(input.result);
+  } else {
+    if (['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(current.status)) {
+      throw new Error('NATIVE_ACTION_ALREADY_REQUESTED');
+    }
+    if (input.executor !== undefined && input.executor !== 'codex') {
+      throw new Error('NATIVE_EXECUTOR_UNSUPPORTED');
+    }
   }
   const event = { schemaVersion: 1, index: current.events.length + 1, prevSha256: current.headSha256,
     kind: input.kind, stage: input.stage, outcome, artifacts, at: new Date().toISOString(),
     sourceAtCheckpoint: { gitHead: source.gitHead, manifestSha256: source.manifestSha256 } };
+  if (result) event.result = result;
+  if (input.kind === 'ACTION_REQUESTED' && input.executor === 'codex') event.executor = 'codex';
+  if (result) event.requestSha256 = current.pendingRequestSha256;
   return { status: 'READY', kind: 'NATIVE_EVENT', project, runId: current.run.runId,
     source, expectedHeadSha256: current.headSha256, event,
     fingerprint: sha256(serial(event)), writes: [
@@ -311,7 +363,10 @@ export function commitNativeEvent(plan) {
     const current = readNativeRun(plan.project, plan.runId);
     if (current.headSha256 !== plan.expectedHeadSha256 ||
         current.nextStage !== plan.event.stage || plan.event.index !== current.events.length + 1 ||
-        (plan.event.kind === 'ACTION_REQUESTED' && current.status === 'WAITING_FOR_EVIDENCE')) {
+        (plan.event.kind === 'ACTION_REQUESTED' && ['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(current.status)) ||
+        (plan.event.kind === 'CHECKPOINT' && current.pendingExecutor) ||
+        (plan.event.kind === 'EXECUTION_RESULT' && (current.status !== 'WAITING_FOR_EVIDENCE' ||
+          current.pendingExecutor !== 'codex' || plan.event.requestSha256 !== current.pendingRequestSha256))) {
       throw new Error('NATIVE_STALE_EVENT_CONFLICT');
     }
     const fresh = verifyNativeSource(plan.source);

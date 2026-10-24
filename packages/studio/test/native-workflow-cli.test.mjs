@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { runCli } from '../src/cli.mjs';
 import { nativeProject } from '../../ai/test/helpers/project.mjs';
+import { checkCodexAvailable, runCodexExecution } from '../../ai/src/executor.mjs';
+import { readNativeRun } from '../../ai/src/store.mjs';
 
 function cli(...args) {
   let stdout = '', stderr = '';
@@ -100,4 +102,61 @@ test('a newly created Ludory game can start a native workflow without Git setup'
     '--mutation-boundary', 'report only', '--apply', '--json');
   assert.equal(started.status, 0, started.stderr);
   assert.equal(JSON.parse(started.stdout).nativeStatus, 'ACTIVE');
+});
+
+test('CLI opt-in runs a real fake Codex process for a new game and never claims PASS', t => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-executor-new-game-'));
+  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+  assert.equal(cli('create', '--project', project, '--id', 'executor-game', '--title', 'Executor', '--lang', 'en',
+    '--profile', 'web-game', '--template', 'web-basic', '--targets', 'vk-games', '--apply', '--json').status, 0);
+  const start = cli('workflow', 'start', '--project', project, '--pipeline', 'audit-repair-loop',
+    '--target', 'Implement a title change', '--in-scope', 'src/main.js', '--acceptance', 'browser opens',
+    '--mutation-boundary', 'src/main.js', '--apply', '--json');
+  const runId = JSON.parse(start.stdout).runId;
+  const codexFixture = path.join(project, 'fake-codex.mjs');
+  fs.writeFileSync(codexFixture, [
+    "import fs from 'node:fs';",
+    "import path from 'node:path';",
+    "if (process.argv.includes('--version')) { process.stdout.write('codex test\\n'); process.exit(0); }",
+    "const prompt = fs.readFileSync(0, 'utf8');",
+    "if (!prompt.includes('Implement a title change')) process.exit(5);",
+    "fs.writeFileSync(path.join(process.cwd(), 'src', 'main.js'), '// task actually executed\\n');",
+    "process.stdout.write('{\"type\":\"thread.started\",\"thread_id\":\"test\"}\\n{\"type\":\"turn.completed\"}\\n');",
+  ].join('\n'));
+  const runner = {
+    check: p => checkCodexAvailable(p, { executable: process.execPath, prefixArgs: [codexFixture] }),
+    run: p => runCodexExecution(p, { executable: process.execPath, prefixArgs: [codexFixture] }),
+  };
+  const invoke = (...extra) => {
+    let stdout = '', stderr = '';
+    const status = runCli(['workflow', 'continue', '--project', project, '--run', runId,
+      '--executor', 'codex', '--json', ...extra],
+    { out: s => { stdout += s; }, err: s => { stderr += s; }, executor: runner });
+    return { status, result: JSON.parse(stdout), stderr };
+  };
+  const before = invoke();
+  assert.equal(before.status, 0);
+  assert.equal(before.result.status, 'READY');
+  assert.equal(readNativeRun(project, runId).events.length, 0);
+  assert.notEqual(fs.readFileSync(path.join(project, 'src', 'main.js'), 'utf8'), '// task actually executed\n');
+  const applied = invoke('--apply');
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.equal(applied.result.status, 'EXECUTED_UNVERIFIED');
+  assert.equal(applied.result.nextAction.kind, 'AWAIT_EVIDENCE');
+  assert.equal(readNativeRun(project, runId).events.length, 2);
+  assert.equal(fs.readFileSync(path.join(project, 'src', 'main.js'), 'utf8'), '// task actually executed\n');
+  assert.equal(JSON.stringify(readNativeRun(project, runId).events).includes('Implement a title change'), false);
+});
+
+test('CLI executor refuses frozen projects and flags outside continue', t => {
+  const project = nativeProject(t);
+  const start = cli('workflow', 'start', '--project', project, '--pipeline', 'audit-repair-loop',
+    '--target', 'Protected', '--in-scope', 'src', '--acceptance', 'no writes',
+    '--mutation-boundary', 'none', '--apply', '--json');
+  const run = JSON.parse(start.stdout).runId;
+  const legacy = cli('workflow', 'continue', '--project', project, '--run', run, '--executor', 'codex', '--apply', '--json');
+  assert.equal(legacy.status, 2);
+  assert.match(JSON.parse(legacy.stdout).conflicts[0], /STUDIO_CREATION_REQUIRED/);
+  assert.equal(readNativeRun(project, run).events.length, 0);
+  assert.equal(cli('workflow', 'doctor', '--project', project, '--executor', 'codex', '--json').status, 1);
 });
