@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { runCli } from '../src/cli.mjs';
+import { fakeCeos, fakeProject } from './helpers/fake-ceos.mjs';
 
 function cli(...args) {
   let stdout = '';
@@ -32,6 +33,81 @@ test('CLI help and unknown options have explicit exit codes', () => {
   const flag = cli('inspect', '--project', '.', '--force');
   assert.equal(flag.status, 1);
   assert.match(flag.stderr, /Unknown option/i);
+});
+
+test('workflow CLI routes doctor/status/next to pinned CEOS and reports JSON', t => {
+  const { entry } = fakeCeos(t);
+  const project = fakeProject(t);
+  const base = ['--project', project, '--ceos-entry', entry, '--json'];
+  assert.match(cli('help').stdout, /ludory workflow doctor/);
+  const doctor = cli('workflow', 'doctor', ...base);
+  assert.equal(doctor.status, 0, doctor.stderr);
+  assert.deepEqual(JSON.parse(doctor.stdout).ceos.argv, ['doctor', '--project', project, '--json']);
+  const status = cli('workflow', 'status', '--run', 'run-123', ...base);
+  assert.equal(status.status, 0, status.stderr);
+  assert.deepEqual(JSON.parse(status.stdout).ceos.argv, ['run-status', 'run-123', '--project', project, '--json']);
+  const next = cli('workflow', 'next', ...base);
+  assert.equal(next.status, 0, next.stderr);
+  assert.deepEqual(JSON.parse(next.stdout).ceos.argv, ['continue', 'latest', '--mode', 'inspect', '--project', project, '--json']);
+  assert.equal(fs.existsSync(path.join(project, 'fake-ceos-actions.txt')), false);
+});
+
+test('workflow CLI start/continue/checkpoint require apply to mutate CEOS state', t => {
+  const { entry } = fakeCeos(t);
+  const project = fakeProject(t);
+  const base = ['--project', project, '--ceos-entry', entry, '--json'];
+  const startArgs = ['workflow', 'start', '--pipeline', 'audit-repair-loop', '--target', 'Audit',
+    '--in-scope', 'src;tests', '--acceptance', 'proof', '--mutation-boundary', 'src', ...base];
+  assert.equal(JSON.parse(cli(...startArgs).stdout).status, 'READY');
+  assert.equal(fs.existsSync(path.join(project, 'fake-ceos-actions.txt')), false);
+  assert.equal(JSON.parse(cli(...startArgs, '--apply').stdout).status, 'APPLIED');
+  const continuation = ['workflow', 'continue', ...base];
+  const preview = cli(...continuation);
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.equal(JSON.parse(preview.stdout).status, 'READY');
+  assert.deepEqual(JSON.parse(preview.stdout).ceos.argv, ['continue', 'latest', '--mode', 'inspect', '--project', project, '--json']);
+  assert.equal(JSON.parse(cli(...continuation, '--apply').stdout).status, 'APPLIED');
+  const checkpoint = ['workflow', 'checkpoint', '--stage', 'VERIFIED', '--artifact', 'proof.json', ...base];
+  assert.equal(JSON.parse(cli(...checkpoint).stdout).status, 'READY');
+  assert.equal(JSON.parse(cli(...checkpoint, '--apply').stdout).status, 'APPLIED');
+  assert.equal(fs.readFileSync(path.join(project, 'fake-ceos-actions.txt'), 'utf8'), 'run\ncontinue\ncheckpoint\n');
+});
+
+test('workflow CLI rejects unsafe options and preserves CEOS blocked exit without PASS', t => {
+  const blocked = fakeCeos(t, { exitCode: 2 });
+  const project = fakeProject(t);
+  const args = ['--project', project, '--ceos-entry', blocked.entry, '--json'];
+  assert.equal(cli('workflow', 'doctor', ...args, '--apply').status, 1);
+  assert.equal(cli('workflow', 'status', ...args, '--bogus').status, 1);
+  assert.equal(cli('workflow', 'next', '--run', '../escape', ...args).status, 1);
+  const result = cli('workflow', 'status', ...args);
+  assert.equal(result.status, 2, result.stderr);
+  assert.equal(JSON.parse(result.stdout).status, 'BLOCKED');
+  assert.equal(JSON.parse(result.stdout).ceosExitCode, 2);
+  const notInstalled = cli('workflow', 'doctor', '--project', project, '--ceos-entry', path.join(project, 'missing.mjs'), '--json');
+  assert.equal(notInstalled.status, 2, notInstalled.stderr);
+  assert.equal(JSON.parse(notInstalled.stdout).status, 'BLOCKED');
+  assert.match(JSON.parse(notInstalled.stdout).conflicts[0], /BLOCKED_CEOS/);
+});
+
+test('workflow --json always produces structured failures for rejected flags and CEOS transport', t => {
+  const ceos = fakeCeos(t);
+  const project = fakeProject(t);
+  const argv = ['--project', project, '--ceos-entry', ceos.entry, '--json'];
+  const unsafe = cli('workflow', 'next', '--run', '../escape', ...argv);
+  assert.equal(unsafe.status, 1);
+  assert.equal(unsafe.stderr, '');
+  assert.equal(JSON.parse(unsafe.stdout).status, 'FAILED');
+  assert.match(JSON.parse(unsafe.stdout).conflicts[0], /Invalid run identifier/);
+  const badFlag = cli('workflow', 'doctor', ...argv, '--oops');
+  assert.equal(badFlag.status, 1);
+  assert.equal(JSON.parse(badFlag.stdout).status, 'FAILED');
+  fs.writeFileSync(ceos.entry, `process.stdout.write('not JSON');`);
+  const malformed = cli('workflow', 'doctor', ...argv);
+  assert.equal(malformed.status, 1);
+  assert.equal(malformed.stderr, '');
+  assert.equal(JSON.parse(malformed.stdout).status, 'FAILED');
+  assert.match(JSON.parse(malformed.stdout).conflicts[0], /CEOS_INVALID_JSON/);
 });
 
 test('init previews by default and applies explicit manifest only', t => {

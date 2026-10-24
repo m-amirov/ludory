@@ -2,13 +2,13 @@
 
 LUDORY is a modular toolkit for building and shipping browser games to Yandex Games, VK Games, and future platforms.
 
-> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports safe metadata adoption, new-game templates and managed profile declarations for existing games. This repository does not yet replace CEOS or Starter Kit, nor does it certify any platform release.
+> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports safe metadata adoption, new-game templates, managed profiles, and a pinned CEOS workflow CLI adapter. This repository does not yet replace CEOS or Starter Kit, nor does it certify any platform release.
 
 ## Modules
 
 | Module | Responsibility | Stage |
 | --- | --- | --- |
-| Ludory Studio | Projects, profiles, templates, development workflows and project updates | Metadata adoption + scaffolding + profile-only updates |
+| Ludory Studio | Projects, profiles, templates, development workflows and project updates | Metadata + scaffolding + profile updates + CEOS 0.5.40 adapter |
 | Ludory Core | Framework-independent game definition, state and lifecycle | Foundation |
 | Ludory AI | CEOS orchestration, agents, workflows and evidence | Planned migration |
 | Ludory Runtime | Host UI, browser lifecycle, input, persistence, sound | Planned |
@@ -85,7 +85,7 @@ node packages/studio/bin/ludory.mjs create --project /path/to/empty-game --id my
 The new `create` command exclusively generates a playable browser demo, the
 Core-compatible manifest and a SHA-256 creation receipt. Its targets denote
 intended platforms, **not** a production-ready VK/Yandex integration. The
-Starter Kit updater, CEOS orchestration and host release gates remain unmigrated.
+Starter Kit updater, native CEOS orchestration and host release gates remain unmigrated.
 See [Studio's guide](packages/studio/README.md).
 
 For **existing games** with a canonical manifest, Studio now supports an
@@ -102,6 +102,29 @@ node packages/studio/bin/ludory.mjs profiles update --project /path/to/game
 Only new Ludory-owned `.ludory/profiles/` metadata is eligible for updates;
 runtime files and CEOS/Starter Kit infrastructure remain outside Ludory's
 ownership. Profile application does not activate game-engine functionality.
+
+## CEOS workflows through Studio
+
+Studio delegates a bounded set of operations to an **existing CEOS 0.5.40** installation. Its workflow history, checkpoints, evidence, `.codex-os/` and `.ceos-runs/` remain CEOS-owned. An existing, valid `ludory.project.json` is required. Studio does not edit game code, assets, saves or platform settings.
+
+```sh
+# These read-only inspections dispatch to CEOS directly.
+node packages/studio/bin/ludory.mjs workflow doctor --project /path/to/game --json
+node packages/studio/bin/ludory.mjs workflow status --project /path/to/game --run latest --json
+node packages/studio/bin/ludory.mjs workflow next --project /path/to/game --run latest --json
+
+# Preview a scoped CEOS run; repeat with --apply only after reviewing.
+node packages/studio/bin/ludory.mjs workflow start --project /path/to/game \
+  --pipeline audit-repair-loop --target 'EP3 QA' --in-scope 'S24;S25' \
+  --acceptance 'No blocking defects' --mutation-boundary 'Only scoped evidence' --json
+
+# Without --apply, continue requests CEOS inspect mode; --apply uses guided mode.
+node packages/studio/bin/ludory.mjs workflow continue --project /path/to/game --run latest --json
+node packages/studio/bin/ludory.mjs workflow checkpoint --project /path/to/game \
+  --run latest --stage QA_REVIEW --outcome CONTINUE --json
+```
+
+Use `--ceos-entry /absolute/path/to/bin/ceos.mjs` on any workflow command for an explicit installation; alternatively set `LUDORY_CEOS_ENTRY`. Discovery precedence is flag, environment, then npm-global. There is no automatic installation or state migration. `--apply` is mandatory for mutating `start`, `continue` and `checkpoint`, and prohibited for read-only commands. CEOS status and exit codes are preserved. See [Studio's workflow reference](packages/studio/README.md#ceos-workflows-through-the-unified-cli).
 
 ## Source-of-truth repositories during migration
 
