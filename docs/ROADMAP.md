@@ -18,9 +18,9 @@
 | **2. Studio (profiles/templates in progress)** | Unified `ludory` CLI, manifest, safe metadata adoption and versioned profiles/templates for new projects; later ownership-aware updater | Preview/manifest creation and new-project scaffold covered by tests; mature-project update/rollback parity still pending |
 | 3. Runtime | Engine-agnostic host contract and optional Phaser integration, lifecycle, persistence, responsive UI, audio | Desktop/mobile behavior, persistence round trip, zero regressions in existing games |
 | 4. Connect | `@ludory/connect-yandex`, `@ludory/connect-vk`, feature/capability detection and per-platform entrypoints | SDK integration tests; isolated builds; real platform runtime observations |
-| 5. AI | Port CEOS state machine, scoped plans, evidence, agents/skills, capability routing and art pipeline | CEOS behavioral parity tests, recovery and safety gates; no false PASS |
+| 5. AI (native foundation in progress) | Native run/event store and CLI first, then complete state/evidence/agents/skills/capability/art parity without CEOS executable | Native tests without installed CEOS; imported-run and full CEOS parity still pending, no false PASS |
 | 6. Release | Consolidate updater/build validation, compliance, artifact/signature checks and publication workflows | Independent Yandex and VK gates, real uploaded builds, publish requires owner authorization |
-| 7. Migration | Side-by-side project pilots then legacy sunset | Two production game pilots, reproducible migrations, no lost state/assets/rights/evidence, documented rollback |
+| 7. Migration | One-time CEOS history/checkpoint import and resumable state, side-by-side project pilots, then legacy sunset | Two production game pilots, verified old-run replay, no lost state/assets/rights/evidence, documented rollback |
 
 ## Source mapping
 

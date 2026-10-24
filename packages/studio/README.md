@@ -1,4 +1,4 @@
-# `@ludory/studio` — project metadata, templates and safe profile adoption
+# `@ludory/studio` — metadata, templates, profiles and native AI workflows
 
 Node.js 22+. Run `node packages/studio/bin/ludory.mjs help` from this repository.
 
@@ -140,3 +140,35 @@ is historical provenance, **not** evidence of safe ownership for editing
 old template files. Applying a profile does not enable its validators or
 establish VK/Yandex runtime or release compliance. Replacing the Starter Kit
 and CEOS updater remains a later stage requiring behavioral parity tests.
+
+## Native workflows through the unified CLI
+
+The `ludory workflow` family executes through `@ludory/ai` **inside Ludory**. It neither searches for CEOS nor invokes an external CEOS executable. A valid `ludory.project.json` and clean Git checkout are required. Native runs and SHA-bound append-only checkpoint events live exclusively under `.ludory/ai/`; previous `.codex-os/` and `.ceos-runs/` data remain untouched.
+
+| Command | Native behavior | Execution semantics |
+| --- | --- | --- |
+| `workflow doctor` | Manifest/Git health | Immediate, read-only |
+| `workflow status [--run ID]` | Native run replay and integrity | Immediate, read-only |
+| `workflow next [--run ID]` | Next stage/action or blocker | Immediate, read-only |
+| `workflow start` | New scoped `audit-repair-loop` or `production-art` | Plan; `--apply` creates run |
+| `workflow continue [--run ID]` | Request the next stage action | Plan; `--apply` only records `ACTION_REQUESTED` |
+| `workflow checkpoint --stage STAGE [--run ID]` | Append real, verified artifact evidence | Plan; `--apply` appends one immutable event |
+
+```sh
+node packages/studio/bin/ludory.mjs workflow doctor --project /path/to/game --json
+node packages/studio/bin/ludory.mjs workflow start --project /path/to/game \
+  --pipeline audit-repair-loop --target 'EP3 QA' \
+  --in-scope 'src;tests' --acceptance 'Scope verified' \
+  --mutation-boundary 'Report evidence only' --json
+# Review READY, then repeat the same command with --apply to persist a new run.
+node packages/studio/bin/ludory.mjs workflow status --project /path/to/game --run latest --json
+node packages/studio/bin/ludory.mjs workflow next --project /path/to/game --run latest --json
+node packages/studio/bin/ludory.mjs workflow continue --project /path/to/game --run latest --json
+# Once the evidence file really exists, preview then apply its checkpoint:
+node packages/studio/bin/ludory.mjs workflow checkpoint --project /path/to/game \
+  --run latest --stage EVIDENCE_COLLECTED --artifact 'reports/qa.json' --outcome CONTINUE --json
+```
+
+Read-only operations reject `--apply`. All other workflow mutations require it, with source/manifest/inode and evidence hash revalidation. Unknown flags and former `--ceos-entry` are rejected. JSON reports `engine: ludory-ai`, status, run ID and the next action, never CEOS exit codes. Exit code `0` means a successful inspection/preview/native operation, `1` an invocation error, `2` a native blocker. Multiple active runs require explicit `--run ID` to avoid an ambiguous `latest`.
+
+**Foundation limitations:** `continue --apply` does **not** perform an AI agent task or advance the workflow; it records a request and waits for evidence. Terminal `PASS` is blocked (`EVIDENCE_VERIFIER_NOT_READY`) until native Release verification is implemented. Historical CEOS runs are not yet imported; one-time, non-destructive migration with safe resume is the next phase. Node and fake-project tests do not establish Windows-host, VK/Yandex runtime or release readiness.

@@ -2,15 +2,15 @@
 
 LUDORY is a modular toolkit for building and shipping browser games to Yandex Games, VK Games, and future platforms.
 
-> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports safe metadata adoption, new-game templates and managed profile declarations for existing games. This repository does not yet replace CEOS or Starter Kit, nor does it certify any platform release.
+> **Status:** foundation in progress. `@ludory/core` is independently tested; `@ludory/studio` supports metadata adoption, templates, profiles and **native Ludory AI workflow commands**. A full CEOS/Starter Kit replacement, existing-run migration, live AI agent automation and platform release certification remain future gates.
 
 ## Modules
 
 | Module | Responsibility | Stage |
 | --- | --- | --- |
-| Ludory Studio | Projects, profiles, templates, development workflows and project updates | Metadata adoption + scaffolding + profile-only updates |
+| Ludory Studio | Projects, profiles, templates, development workflows and project updates | Metadata + scaffolding + profile updates + native AI CLI |
 | Ludory Core | Framework-independent game definition, state and lifecycle | Foundation |
-| Ludory AI | CEOS orchestration, agents, workflows and evidence | Planned migration |
+| Ludory AI | Native workflow state, checkpoints and eventually agents/evidence | Native foundation; agent/release parity pending |
 | Ludory Runtime | Host UI, browser lifecycle, input, persistence, sound | Planned |
 | Ludory Connect | Optional SDK adapters for Yandex Games, VK Games and others | Planned |
 | Ludory Release | Validation, builds, evidence and distribution gates | Planned migration |
@@ -85,7 +85,7 @@ node packages/studio/bin/ludory.mjs create --project /path/to/empty-game --id my
 The new `create` command exclusively generates a playable browser demo, the
 Core-compatible manifest and a SHA-256 creation receipt. Its targets denote
 intended platforms, **not** a production-ready VK/Yandex integration. The
-Starter Kit updater, CEOS orchestration and host release gates remain unmigrated.
+Starter Kit updater, full CEOS automation and host release gates remain unmigrated.
 See [Studio's guide](packages/studio/README.md).
 
 For **existing games** with a canonical manifest, Studio now supports an
@@ -102,6 +102,29 @@ node packages/studio/bin/ludory.mjs profiles update --project /path/to/game
 Only new Ludory-owned `.ludory/profiles/` metadata is eligible for updates;
 runtime files and CEOS/Starter Kit infrastructure remain outside Ludory's
 ownership. Profile application does not activate game-engine functionality.
+
+## Native Ludory AI workflows through Studio
+
+Studio invokes its own `@ludory/ai` workflow engine **without installing or invoking CEOS**. Native runs are stored under `.ludory/ai/`. A valid `ludory.project.json` and a clean Git source are required; game code, assets, saves, `.codex-os/` and historical `.ceos-runs/` remain untouched.
+
+```sh
+# Read-only inspection of native Ludory state.
+node packages/studio/bin/ludory.mjs workflow doctor --project /path/to/game --json
+node packages/studio/bin/ludory.mjs workflow status --project /path/to/game --run latest --json
+node packages/studio/bin/ludory.mjs workflow next --project /path/to/game --run latest --json
+
+# Preview a scoped native run; repeat with --apply after reviewing.
+node packages/studio/bin/ludory.mjs workflow start --project /path/to/game \
+  --pipeline audit-repair-loop --target 'EP3 QA' --in-scope 'src;tests' \
+  --acceptance 'No blocking defects' --mutation-boundary 'Only scoped evidence' --json
+
+# Continue --apply requests an action; the AI agent has not performed it yet.
+node packages/studio/bin/ludory.mjs workflow continue --project /path/to/game --run latest --json
+node packages/studio/bin/ludory.mjs workflow checkpoint --project /path/to/game \
+  --run latest --stage EVIDENCE_COLLECTED --artifact 'reports/evidence.json' --outcome CONTINUE --json
+```
+
+`--apply` is mandatory for mutating `start`, `continue` and `checkpoint`; `doctor`, `status` and `next` are read-only. `continue --apply` records an **action request**, not an executed agent task. Terminal `PASS` is blocked until an independent Ludory Release verifier exists. Historical CEOS imports and resume from old checkpoints are a separate, planned migration phase. See [Studio's workflow reference](packages/studio/README.md#native-workflows-through-the-unified-cli).
 
 ## Source-of-truth repositories during migration
 

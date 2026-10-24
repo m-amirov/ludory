@@ -3,8 +3,9 @@ import { inspectProject, planInit, planMigration, applyPlan } from './projects.m
 import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
+import { planWorkflow, executeWorkflow } from '@ludory/ai';
 
-const usage = `Ludory Studio 0.1.0 — safe game-project metadata
+const usage = `Ludory Studio 0.1.0 — native game-development workflows
 
   ludory inspect --project <directory> [--json]
   ludory init --project <empty-directory> --id <slug> --title <name> --lang <locale> --engine <id> --targets <comma-separated> [--version <semver>] [--apply] [--json]
@@ -17,17 +18,32 @@ const usage = `Ludory Studio 0.1.0 — safe game-project metadata
   ludory templates list [--catalog <directory>] [--json]
   ludory templates show --name <id> [--catalog <directory>] [--json]
   ludory create --project <empty-directory> --id <slug> --title <name> --lang <locale> --profile <id> --template <id> --targets <comma-separated> [--version <semver>] [--catalog <directory>] [--apply] [--json]
+  ludory workflow doctor --project <game-directory> [--json]
+  ludory workflow status --project <game-directory> [--run <run-id|latest>] [--json]
+  ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
+  ludory workflow start --project <game-directory> --pipeline <audit-repair-loop|production-art> --target <text> --in-scope <a;b> --acceptance <text> --mutation-boundary <text> [--out-of-scope <a;b>] [--apply] [--json]
+  ludory workflow continue --project <game-directory> [--run <run-id|latest>] [--apply] [--json]
+  ludory workflow checkpoint --project <game-directory> --stage <STAGE> [--run <run-id|latest>] [--artifact <path;path>] [--outcome <CONTINUE|PASS|FAIL|BLOCKED|ESCALATE>] [--apply] [--json]
   ludory help
 
 No writes by default. init/migrate --apply only create ludory.project.json;
 create --apply only creates new template files, manifest and Studio receipt in an empty directory.
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
+workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
+Native AI agent execution and independent release PASS verification are not yet implemented.
 Migration requires clean Git and supported Starter Kit game-spec.yaml schema 2.
 `;
 
 function argumentsFor(command, argv) {
   const common = new Set(['--project', '--json']);
-  const allowed = command === 'init'
+  const workflowCommon = [...common];
+  const allowed = command.startsWith('workflow-')
+    ? new Set(command === 'workflow-doctor' ? workflowCommon
+      : command === 'workflow-status' || command === 'workflow-next' ? [...workflowCommon, '--run']
+        : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
+          : command === 'workflow-continue' ? [...workflowCommon, '--run', '--apply']
+            : [...workflowCommon, '--run', '--stage', '--artifact', '--outcome', '--apply'])
+    : command === 'init'
     ? new Set([...common, '--id', '--title', '--lang', '--engine', '--targets', '--version', '--apply'])
     : command === 'create'
       ? new Set([...common, '--id', '--title', '--lang', '--profile', '--template', '--targets', '--version', '--catalog', '--apply'])
@@ -57,6 +73,25 @@ function argumentsFor(command, argv) {
   if (command.endsWith('-show') && !flags.get('--name')) throw new Error('--name is required for show');
   if (command === 'profiles-apply' && !flags.get('--name')) throw new Error('--name is required for profiles apply');
   return flags;
+}
+
+function workflowOptions(flags) {
+  return {
+    run: flags.get('--run'), pipeline: flags.get('--pipeline'),
+    target: flags.get('--target'), inScope: flags.get('--in-scope'), outOfScope: flags.get('--out-of-scope'),
+    acceptance: flags.get('--acceptance'), mutationBoundary: flags.get('--mutation-boundary'),
+    stage: flags.get('--stage'), artifact: flags.get('--artifact'), outcome: flags.get('--outcome'),
+  };
+}
+
+function displayWorkflow(result, json, out) {
+  if (json) { out(`${JSON.stringify(result, null, 2)}\n`); return; }
+  out(`${result.status} · ${result.project}\n`);
+  if (result.engine) out(`  engine: ${result.engine}\n`);
+  if (result.nativeStatus) out(`  native status: ${result.nativeStatus}\n`);
+  if (result.nextAction?.kind) out(`  next: ${result.nextAction.kind}\n`);
+  if (result.status === 'READY') for (const item of result.writes ?? []) out(`  planned: ${item}\n`);
+  for (const conflict of result.conflicts ?? []) out(`  blocked: ${conflict}\n`);
 }
 
 function parsedTargets(flags) {
@@ -129,6 +164,17 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       out(usage);
       return 0;
     }
+    if (command === 'workflow') {
+      const [operation, ...args] = rest;
+      if (!['doctor', 'status', 'next', 'start', 'continue', 'checkpoint'].includes(operation)) {
+        throw new Error(`Unknown workflow operation: ${operation || '(missing)'}`);
+      }
+      const flags = argumentsFor(`workflow-${operation}`, args);
+      const plan = planWorkflow(flags.get('--project'), operation, workflowOptions(flags));
+      const result = executeWorkflow(plan, { apply: flags.has('--apply') });
+      displayWorkflow(result, flags.has('--json'), out);
+      return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : result.status === 'ESCALATE' ? 3 : result.status === 'FAILED' ? 1 : 0;
+    }
     if (command === 'profiles' || command === 'templates') {
       const [operation, ...args] = rest;
       const operations = command === 'profiles' ? ['list', 'show', 'apply', 'update', 'status'] : ['list', 'show'];
@@ -161,6 +207,13 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     display(result, flags.has('--json'), out);
     return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : 0;
   } catch (error) {
+    if (argv[0] === 'workflow' && argv.includes('--json')) {
+      const projectIndex = argv.indexOf('--project');
+      const result = { mode: `workflow-${argv[1] ?? 'unknown'}`, project: projectIndex < 0 ? null : (argv[projectIndex + 1] ?? null),
+        status: 'FAILED', writes: [], conflicts: [error.message] };
+      displayWorkflow(result, true, out);
+      return 1;
+    }
     err(`Ludory: ${error.message}\n`);
     return 1;
   }
