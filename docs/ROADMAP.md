@@ -19,7 +19,7 @@
 | **2. Studio (profiles/templates in progress)** | Unified `ludory` CLI, manifest, safe metadata adoption and versioned profiles/templates for new projects; later ownership-aware updater | Preview/manifest creation and new-project scaffold covered by tests; mature-project update/rollback parity still pending |
 | 3. Runtime | Engine-agnostic host contract and optional Phaser integration, lifecycle, persistence, responsive UI, audio | Desktop/mobile behavior, persistence round trip, zero regressions in existing games |
 | 4. Connect | `@ludory/connect-yandex`, `@ludory/connect-vk`, feature/capability detection and per-platform entrypoints | SDK integration tests; isolated builds; real platform runtime observations |
-| 5. AI (native foundation in progress) | Portable native run/event store and CLI, then actual agent execution with one clear next action | Native tests without installed CEOS; dirty development/relocation supported, no false Release PASS |
+| 5. AI (bounded Codex executor MVP in progress) | Portable native run/event store and opt-in Codex CLI task execution; later richer execution/recovery | No CEOS dependency; preview no side effects; only new Studio-created games launch Codex; success remains unverified until independent evidence |
 | 6. Release | Consolidate updater/build validation, compliance, artifact/signature checks and publication workflows | Independent Yandex and VK gates, real uploaded builds, publish requires owner authorization |
 | 7. Optional fresh adoption (later) | Owner-selected attachment of an old game to a new Ludory run, **without importing CEOS history** | Explicit consent, read-only preview, frozen old source intact, rollback; no adoption while games are frozen |
 

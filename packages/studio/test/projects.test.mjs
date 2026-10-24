@@ -226,8 +226,10 @@ test('directory symlink substitution at write boundary cannot redirect manifest 
   let swapped = false;
   fs.writeFileSync = function (file, ...args) {
     if (!swapped && String(file).endsWith('ludory.project.json')) {
+      process.chdir(path.dirname(dir));
       fs.renameSync(dir, parked);
       fs.symlinkSync(other, dir, 'dir');
+      process.chdir(parked);
       swapped = true;
     }
     return originalWrite.call(this, file, ...args);
