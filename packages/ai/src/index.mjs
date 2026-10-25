@@ -4,3 +4,4 @@ export { planNewRun, commitNewRun, readNativeRun, listNativeRuns, planNativeEven
 export { planWorkflow, executeWorkflow } from './workflows.mjs';
 export { prepareCodexExecution, checkCodexAvailable, runCodexExecution, hasStudioCreationReceipt } from './executor.mjs';
 export { planTaskRoute } from './task-routing.mjs';
+export { discoverTaskCapabilities } from './capabilities.mjs';

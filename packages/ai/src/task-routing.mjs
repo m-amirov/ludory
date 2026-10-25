@@ -1,5 +1,6 @@
 import { inspectNativeProject } from './source.mjs';
 import { hasStudioCreationReceipt } from './executor.mjs';
+import { discoverTaskCapabilities, isVerifiedCapability } from './capabilities.mjs';
 
 const PREFERRED_ROUTES = Object.freeze({
   mechanics: 'codex',
@@ -10,7 +11,7 @@ const PREFERRED_ROUTES = Object.freeze({
 });
 
 /** A read-only dispatch explanation. Actual model adapters are separate slices. */
-export function planTaskRoute(projectDir, options = {}, { discover } = {}) {
+export function planTaskRoute(projectDir, options = {}, { discover = discoverTaskCapabilities } = {}) {
   if (!options || typeof options !== 'object' || Array.isArray(options) ||
       Object.keys(options).some(key => !['taskKind', 'model'].includes(key))) {
     throw new Error('AI_ROUTING_INVALID_OPTIONS');
@@ -31,7 +32,29 @@ export function planTaskRoute(projectDir, options = {}, { discover } = {}) {
       reasonCode: 'AI_ROUTING_STUDIO_GAME_REQUIRED',
       nextAction: { kind: 'STOP_FROZEN_GAME', executable: false } };
   }
-  return { ...base, status: 'NEEDS_USER_ACTION', selectedRoute: 'manual',
-    reasonCode: 'AI_ROUTING_CAPABILITY_UNVERIFIED',
+  let capabilities;
+  try { capabilities = discover(project); }
+  catch { capabilities = null; }
+  const items = capabilities && typeof capabilities === 'object' ? capabilities : {};
+  let route = null;
+  if (preferredRoute === 'codex') {
+    if (isVerifiedCapability(items.codex, 'codex')) route = 'codex';
+  } else if (preferredRoute === 'web-dev') {
+    if (isVerifiedCapability(items.webDev, 'webDev')) route = 'web-dev';
+  } else if (taskKind === 'image') {
+    if (model !== 'sol' && isVerifiedCapability(items.imageTerra, 'imageTerra')) route = 'image-terra';
+    else if (model !== 'terra' && isVerifiedCapability(items.imageSol, 'imageSol')) route = 'image-sol';
+  }
+  if (route) {
+    const capability = route === 'codex' ? items.codex : route === 'web-dev' ? items.webDev
+      : route === 'image-terra' ? items.imageTerra : items.imageSol;
+    return { ...base, status: 'READY', selectedRoute: route, reasonCode: 'AI_ROUTING_ROUTE_VERIFIED',
+      ...(capability.modelObserved && { modelObserved: capability.modelObserved }),
+      nextAction: { kind: 'REVIEW_ROUTE', executable: false } };
+  }
+  const reasonCode = taskKind === 'image'
+    ? model === 'auto' ? 'AI_ROUTING_IMAGE_GEN_UNAVAILABLE' : 'AI_ROUTING_PINNED_MODEL_UNAVAILABLE'
+    : preferredRoute === 'web-dev' ? 'AI_ROUTING_WEB_DEV_UNAVAILABLE' : 'AI_ROUTING_CODEX_UNAVAILABLE';
+  return { ...base, status: 'NEEDS_USER_ACTION', selectedRoute: 'manual', reasonCode,
     nextAction: { kind: 'MANUAL_HANDOFF', executable: false } };
 }
