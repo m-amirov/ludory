@@ -22,7 +22,7 @@ LUDORY is a modular game-development toolkit. `@ludory/core` must remain platfor
 
 ## Git worktrees
 
-- Create every new worktree outside the repository, exclusively under `D:\HardWork\LUDORY.worktrees\<name>`.
+- Create every additional worktree inside the repository, exclusively under `D:\HardWork\LUDORY\.worktrees\<name>`.
 - Use `git worktree add` and `git worktree move` for worktree lifecycle operations; do not move worktree directories with filesystem commands.
 - Before moving or removing a worktree, verify that no Codex or other process is using it and preserve its branch, commits, local changes and Git references.
-- `/.worktrees/` is ignored as a defensive fallback, but it is not an alternative to the external standard location above.
+- Keep `/.worktrees/` ignored so nested worktrees remain outside normal repository tracking.
