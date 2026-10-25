@@ -260,7 +260,9 @@ function withAnchoredParent(project, name, rootIdentity, operation) {
     }
     if (process.platform === 'linux') {
       parentFd = fs.openSync('.', fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | (fs.constants.O_NOFOLLOW || 0));
-      if (directoryIdentity(`/proc/self/fd/${parentFd}`) !== directoryIdentity('.')) {
+      const held = fs.fstatSync(parentFd, { bigint: true });
+      const current = fs.lstatSync('.', { bigint: true });
+      if (held.dev !== current.dev || held.ino !== current.ino || !held.isDirectory()) {
         throw new Error(`Changed component directory: ${name}`);
       }
     }
