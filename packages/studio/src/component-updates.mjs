@@ -240,10 +240,13 @@ function assertManifestUnchanged(project, expectedSha256) {
 }
 
 // Operate on a basename relative to a directory inode verified on entry.
-// If an ancestor is renamed while we operate, a newly introduced symbolic
-// path at its former name cannot redirect the file operation outside the game.
+// Linux resolves /proc/self/fd/<directory-fd>/name through the held directory
+// descriptor, even when an attacker replaces its visible project pathname.
+// Windows prevents that directory replacement while it is our CWD, so retain
+// the CWD fallback there rather than weakening its existing fail-closed path.
 function withAnchoredParent(project, name, rootIdentity, operation) {
   const previous = process.cwd();
+  let parentFd = null;
   try {
     process.chdir(project);
     if (directoryIdentity('.') !== rootIdentity) throw new Error('Project root changed during component transaction');
@@ -255,14 +258,24 @@ function withAnchoredParent(project, name, rootIdentity, operation) {
       process.chdir(component);
       if (directoryIdentity('.') !== `${stat.dev}:${stat.ino}`) throw new Error(`Changed component directory: ${name}`);
     }
-    const output = operation(basename);
+    if (process.platform === 'linux') {
+      parentFd = fs.openSync('.', fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | (fs.constants.O_NOFOLLOW || 0));
+      if (directoryIdentity(`/proc/self/fd/${parentFd}`) !== directoryIdentity('.')) {
+        throw new Error(`Changed component directory: ${name}`);
+      }
+    }
+    const anchoredName = parentFd === null ? basename : `/proc/self/fd/${parentFd}/${basename}`;
+    const output = operation(anchoredName);
     // The anchored old directory remains safe, but a new link replacing its
     // pathname makes the published game path unsafe and must block success.
     if (name === stateName) {
       if (directoryIdentity(project) !== rootIdentity) throw new Error('Project root moved during state publish');
     } else checkedParent(project, name);
     return output;
-  } finally { process.chdir(previous); }
+  } finally {
+    if (parentFd !== null) fs.closeSync(parentFd);
+    process.chdir(previous);
+  }
 }
 
 /** Guarded synchronous multi-file update. The backup survives any failed rollback. */

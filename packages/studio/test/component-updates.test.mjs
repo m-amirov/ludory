@@ -332,7 +332,7 @@ test('swapped nested directory cannot redirect a managed replacement outside the
   let swapped = false;
   let outsideTemporarilyMoved = false;
   fs.renameSync = function (source, destination, ...args) {
-    if (!swapped && (String(source).endsWith(path.join('src', 'main.js')) || source === 'main.js')) {
+    if (!swapped && (String(source).endsWith(path.join('src', 'main.js')) || /[\\/]main\.js$/.test(String(source)) || source === 'main.js')) {
       swapped = true;
       originalRename.call(this, path.join(f.project, 'src'), path.join(f.project, 'src-saved'));
       fs.symlinkSync(outside, path.join(f.project, 'src'), 'dir');
@@ -347,7 +347,12 @@ test('swapped nested directory cannot redirect a managed replacement outside the
   assert.equal(outsideTemporarilyMoved, false, 'No external file may be temporarily moved, even when rollback restores it');
   assert.equal(fs.readFileSync(path.join(outside, 'main.js'), 'utf8'), 'outside user code\n');
   assert.equal(JSON.parse(fs.readFileSync(f.state)).template.version, '1.0.0');
-  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), false);
+  const substitutionApplied = fs.lstatSync(path.join(f.project, 'src')).isSymbolicLink();
+  // Windows can refuse the directory rename before the substitution exists.
+  // Once a symlink exists, recovery cannot safely republish the retained
+  // original, so the lock must prevent a second update from claiming success.
+  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), substitutionApplied);
+  assert.equal(planComponentUpdate(f.project, { catalog: f.catalog }).status, substitutionApplied ? 'CONFLICT' : 'READY');
 });
 
 test('open editor descriptor modifying an original during apply cannot lose the edit', t => {
