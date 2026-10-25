@@ -416,7 +416,7 @@ test('rollback must not delete user changes arriving between verification and re
   };
   fs.readFileSync = function (filename, ...args) {
     const bytes = originalRead.call(this, filename, ...args);
-    if (rollback && !userEdit && filename === 'main.js') {
+    if (rollback && !userEdit && anchoredBasename(filename, 'main.js')) {
       userEdit = true;
       fs.writeFileSync(filename, 'USER EDIT DURING ROLLBACK\n');
     }
