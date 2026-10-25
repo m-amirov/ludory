@@ -13,7 +13,8 @@ function normalizeHost(record, kind) {
   if (kind === 'webDev') {
     if (record.routeObserved !== 'web-dev') return unavailable('AI_ROUTING_HOST_UNVERIFIED');
   } else if (record.imageGenCallable !== true ||
-      !record.modelObserved.toLowerCase().match(kind === 'imageTerra' ? /(?:^|-)terra$/ : /(?:^|-)sol$/)) {
+      !(kind === 'imageTerra' ? /^gpt-\d+(?:\.\d+)?-terra$/i
+        : /^gpt-\d+(?:\.\d+)?-sol$/i).test(record.modelObserved)) {
     return unavailable('AI_ROUTING_IMAGE_GEN_UNVERIFIED');
   }
   return { available: true, reasonCode: 'AVAILABLE', modelObserved: record.modelObserved,

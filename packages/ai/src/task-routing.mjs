@@ -17,7 +17,9 @@ export function planTaskRoute(projectDir, options = {}, { discover = discoverTas
     throw new Error('AI_ROUTING_INVALID_OPTIONS');
   }
   const { taskKind, model = 'auto' } = options;
-  if (!Object.hasOwn(PREFERRED_ROUTES, taskKind)) throw new Error('AI_ROUTING_INVALID_TASK');
+  if (typeof taskKind !== 'string' || !Object.hasOwn(PREFERRED_ROUTES, taskKind)) {
+    throw new Error('AI_ROUTING_INVALID_TASK');
+  }
   if (typeof model !== 'string' ||
       (taskKind === 'image' ? !['auto', 'terra', 'sol'].includes(model) : model !== 'auto')) {
     throw new Error('AI_ROUTING_INVALID_MODEL');

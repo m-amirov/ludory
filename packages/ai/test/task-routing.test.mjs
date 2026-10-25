@@ -29,7 +29,7 @@ test('the five task kinds preserve their selected preferred executors in read-on
     ['functional-check', 'codex'],
   ];
   for (const [taskKind, preferredRoute] of expected) {
-    const result = planTaskRoute(project, { taskKind });
+    const result = planTaskRoute(project, { taskKind }, { discover: () => ({}) });
     assert.equal(result.taskKind, taskKind);
     assert.equal(result.preferredRoute, preferredRoute);
     assert.equal(result.status, 'NEEDS_USER_ACTION');
@@ -44,6 +44,8 @@ test('the router rejects arbitrary task kinds, non-image model pins and unrecogn
   const project = freshStudioGame(t);
   assert.throws(() => planTaskRoute(project, { taskKind: 'unknown' }), /AI_ROUTING_INVALID_TASK/);
   assert.throws(() => planTaskRoute(project, { taskKind: '' }), /AI_ROUTING_INVALID_TASK/);
+  assert.throws(() => planTaskRoute(project, { taskKind: ['mechanics'] }), /AI_ROUTING_INVALID_TASK/);
+  assert.throws(() => planTaskRoute(project, { taskKind: new String('mechanics') }), /AI_ROUTING_INVALID_TASK/);
   assert.throws(() => planTaskRoute(project, { taskKind: 'mechanics', model: 'terra' }), /AI_ROUTING_INVALID_MODEL/);
   assert.throws(() => planTaskRoute(project, { taskKind: 'image', model: 'web-dev' }), /AI_ROUTING_INVALID_MODEL/);
   assert.throws(() => planTaskRoute(project, { taskKind: 'image', unexpected: true }), /AI_ROUTING_INVALID_OPTIONS/);
@@ -153,8 +155,12 @@ test('capability discovery fails closed on malformed evidence and throwing probe
     { imageTerra: { ...verifiedTerra, transportVerified: false } },
     { imageTerra: { ...verifiedTerra, imageGenCallable: 'true' } },
     { imageTerra: { ...verifiedTerra, modelObserved: 'not-terra-model' } },
+    { imageTerra: { ...verifiedTerra, modelObserved: 'not-terra' } },
+    { imageTerra: { ...verifiedTerra, modelObserved: 'terra' } },
     { imageTerra: { ...verifiedTerra, entitlementVerified: undefined } },
     { imageSol: { ...verifiedSol, modelObserved: 'gpt-5.6-terra' } },
+    { imageSol: { ...verifiedSol, modelObserved: 'unapproved-provider-sol' } },
+    { imageSol: { ...verifiedSol, modelObserved: 'sol' } },
   ];
   for (const record of invalidRecords) {
     const capabilities = discoverTaskCapabilities(project, { checkCodex: () => ({ ok: false }),
