@@ -119,6 +119,82 @@ test('non-terminal error events followed by turn.completed remain unverified exe
   assert.equal(result.completed, true);
 });
 
+test('cycle requires an exact, machine-observed passing test command in Codex JSONL', () => {
+  const command = 'node --test src/main.test.js';
+  const plan = prepareCodexExecution('/games/new', scope, 'EVIDENCE_COLLECTED', { requiredCommand: command });
+  assert.equal(plan.requiredCommand, command);
+  assert.match(plan.input, /node --test src\/main\.test\.js/);
+  const result = runCodexExecution(plan, { spawn: () => ({ status: 0, stderr: '', stdout: [
+    JSON.stringify({ type: 'item.completed', item: { type: 'command_execution', command, exit_code: 0 } }),
+    '{"type":"turn.completed"}',
+  ].join('\n') }) });
+  assert.equal(result.code, 'EXECUTED_UNVERIFIED');
+  assert.equal(result.ok, true);
+});
+
+test('Windows PowerShell command wrappers preserve the exact machine-observed test', { skip: process.platform !== 'win32' }, () => {
+  const command = 'node --test src/main.test.js';
+  const wrapped = String.raw`"C:\Users\user\.cache\codex-runtimes\codex-primary-runtime\dependencies\native\powershell\pwsh.exe" -Command '${command}'`;
+  const plan = prepareCodexExecution('/games/new', scope, 'EVIDENCE_COLLECTED', { requiredCommand: command });
+  const stdout = [
+    { type: 'item.started', item: { type: 'command_execution', command: wrapped, exit_code: null, status: 'in_progress' } },
+    { type: 'item.completed', item: { type: 'command_execution', command: wrapped, exit_code: 0, status: 'completed' } },
+    { type: 'turn.completed' },
+  ].map(event => JSON.stringify(event)).join('\n');
+  const result = runCodexExecution(plan, { spawn: () => ({ status: 0, stdout, stderr: '' }) });
+  assert.equal(result.code, 'EXECUTED_UNVERIFIED');
+  assert.equal(result.ok, true);
+});
+
+test('missing, failed, echoed, or merely started commands cannot pass cycle verification', () => {
+  const command = 'node --test src/main.test.js';
+  const plan = prepareCodexExecution('/games/new', scope, 'EVIDENCE_COLLECTED', { requiredCommand: command });
+  const events = [
+    [],
+    [{ type: 'item.completed', item: { type: 'command_execution', command, exit_code: 1 } }],
+    [{ type: 'item.completed', item: { type: 'command_execution', command: `echo ${command}`, exit_code: 0 } }],
+    [{ type: 'item.started', item: { type: 'command_execution', command, exit_code: 0 } }],
+    [{ type: 'item.completed', item: { type: 'agent_message', text: `Passed ${command}`, exit_code: 0 } }],
+  ];
+  for (const sequence of events) {
+    const stdout = [...sequence, { type: 'turn.completed' }].map(item => JSON.stringify(item)).join('\n');
+    const result = runCodexExecution(plan, { spawn: () => ({ status: 0, stdout, stderr: '' }) });
+    assert.equal(result.code, 'EXECUTOR_CHECKS_FAILED');
+    assert.equal(result.ok, false);
+  }
+});
+
+test('repair prompt explains previous failed check without storing output or reopening the stage', () => {
+  const plan = prepareCodexExecution('/games/new', scope, 'EVIDENCE_COLLECTED', {
+    requiredCommand: 'node --test src/main.test.js', repairAttempt: 1,
+  });
+  assert.match(plan.input, /previous attempt|prior attempt/i);
+  assert.match(plan.input, /failed|missing/i);
+  assert.match(plan.input, /inspect.*test|test.*inspect/i);
+  assert.equal(plan.stage, 'EVIDENCE_COLLECTED');
+});
+
+test('changes or commands after a passing check invalidate that check until it passes again', () => {
+  const command = 'node --test src/main.test.js';
+  const plan = prepareCodexExecution('/games/new', scope, 'EVIDENCE_COLLECTED', { requiredCommand: command });
+  const events = [
+    { type: 'item.completed', item: { type: 'command_execution', command, exit_code: 0 } },
+    { type: 'item.completed', item: { type: 'file_change', changes: [] } },
+    { type: 'turn.completed' },
+  ];
+  const run = list => runCodexExecution(plan, { spawn: () => ({ status: 0, stderr: '',
+    stdout: list.map(event => JSON.stringify(event)).join('\n') }) });
+  assert.equal(run(events).code, 'EXECUTOR_CHECKS_FAILED');
+  assert.equal(run([...events.slice(0, 2), events[0], events[2]]).code, 'EXECUTED_UNVERIFIED');
+  assert.equal(run([events[0], { type: 'item.completed', item: {
+    type: 'command_execution', command: 'node -v', exit_code: 0 } }, events[2]]).code,
+  'EXECUTOR_CHECKS_FAILED');
+  assert.equal(run([events[0], { type: 'item.started', item: {
+    type: 'command_execution', command: 'node -v', exit_code: null } }, events[2]]).code,
+  'EXECUTOR_CHECKS_FAILED');
+  assert.equal(run([events[2], events[0]]).code, 'EXECUTOR_MALFORMED_JSONL');
+});
+
 test('nonzero, malformed, timeout and oversized stdout have distinct failure codes', () => {
   const plan = prepareCodexExecution('/games/new', scope, 'AUDITED', { gitRoot: null });
   const cases = [

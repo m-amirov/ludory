@@ -1,13 +1,16 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { inspectNativeProject, verifyNativeSource } from './source.mjs';
 import { getPipeline } from './pipelines.mjs';
 import { planNewRun, commitNewRun, readNativeRun, listNativeRuns, planNativeEvent, commitNativeEvent } from './store.mjs';
 import { prepareCodexExecution, checkCodexAvailable, runCodexExecution, hasStudioCreationReceipt,
   EMPTY_TRANSCRIPT_SHA256 } from './executor.mjs';
 
-const OPERATIONS = new Set(['doctor', 'status', 'next', 'start', 'continue', 'checkpoint', 'recover']);
+const OPERATIONS = new Set(['doctor', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover']);
 const READ_ONLY = new Set(['doctor', 'status', 'next']);
 const OPTS = {
   doctor: [], status: ['run'], next: ['run'], continue: ['run', 'executor'],
+  cycle: ['run', 'test', 'repairs'],
   start: ['pipeline', 'target', 'inScope', 'outOfScope', 'acceptance', 'mutationBoundary'],
   checkpoint: ['run', 'stage', 'artifact', 'outcome'],
   recover: ['run', 'confirmNoExecutor'],
@@ -28,6 +31,35 @@ function list(value, label, required = true) {
 function blocked(project, operation, problem) {
   return { engine: 'ludory-ai', project, operation, status: 'BLOCKED', writes: [],
     conflicts: [problem], nativeStatus: 'BLOCKED' };
+}
+
+function cycleTestCommand(project, relative) {
+  if (typeof relative !== 'string' ||
+      !/^(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_-]+\.test\.(?:[cm]?js)$/.test(relative)) {
+    throw new Error('NATIVE_CYCLE_UNSAFE_TEST_PATH');
+  }
+  // Prevent an existing symlinked ancestor or test from escaping Codex's project.
+  let current = project;
+  const segments = relative.split('/');
+  for (let index = 0; index < segments.length; index++) {
+    current = path.join(current, segments[index]);
+    let st;
+    try { st = fs.lstatSync(current); }
+    catch (error) { if (error.code === 'ENOENT') break; throw error; }
+    if (st.isSymbolicLink() || (index === segments.length - 1 ? !st.isFile() : !st.isDirectory())) {
+      throw new Error('NATIVE_CYCLE_UNSAFE_TEST_PATH');
+    }
+  }
+  return `node --test ${relative}`;
+}
+
+function cycleRepairs(value) {
+  const normalized = value === undefined ? 2 : value;
+  if (!(Number.isInteger(normalized) && normalized >= 0 && normalized <= 2) &&
+      !(typeof normalized === 'string' && /^[012]$/.test(normalized))) {
+    throw new Error('NATIVE_CYCLE_INVALID_REPAIRS');
+  }
+  return Number(normalized);
 }
 
 function fromRun(project, operation, current) {
@@ -96,6 +128,26 @@ export function planWorkflow(projectDir, operation, options = {}) {
   if (operation === 'continue' && options.executor === 'codex' && !hasStudioCreationReceipt(project)) {
     return blocked(project, operation, 'NATIVE_EXECUTOR_STUDIO_CREATION_REQUIRED: frozen/legacy game');
   }
+  if (operation === 'cycle') {
+    if (!hasStudioCreationReceipt(project)) {
+      return blocked(project, operation, 'NATIVE_EXECUTOR_STUDIO_CREATION_REQUIRED: frozen/legacy game');
+    }
+    if (!['ACTIVE', 'EXECUTION_FAILED'].includes(current.status) || current.pendingExecutor) {
+      return blocked(project, operation, 'NATIVE_CYCLE_ACTION_ALREADY_REQUESTED');
+    }
+    let requiredCommand, repairs;
+    try {
+      requiredCommand = cycleTestCommand(project, options.test);
+      repairs = cycleRepairs(options.repairs);
+    } catch (error) {
+      return blocked(project, operation, error.message);
+    }
+    return { engine: 'ludory-ai', project, operation, status: 'READY', conflicts: [],
+      writes: [`up to ${repairs + 1} Codex request/result pairs in .ludory/ai`],
+      runId: current.run.runId, nextStage: current.nextStage, runHeadSha256: current.headSha256,
+      test: options.test, requiredCommand, repairs, executor: 'codex',
+      warning: 'Test execution is observed only via Codex sandbox JSONL, not independently verified. No automatic checkpoint, stage advancement or Release PASS.' };
+  }
   if (operation === 'recover' && current.pendingExecutor !== 'codex') {
     return blocked(project, operation, 'NATIVE_RECOVERY_NO_PENDING_EXECUTOR');
   }
@@ -147,7 +199,50 @@ export function executeWorkflow(plan, { apply = false, executor } = {}) {
       runId: plan.runId, requiresConfirmation: true, warning: plan.warning,
       nextAction: { kind: 'CONFIRM_EXECUTOR_STOPPED', stage: plan.nextStage, executable: false } };
   }
+  if (plan.operation === 'cycle') {
+    const current = readNativeRun(plan.project, plan.runId);
+    const expectedCommand = cycleTestCommand(plan.project, plan.test);
+    if (plan.runId !== current.run.runId || plan.runHeadSha256 !== current.headSha256 ||
+        plan.nextStage !== current.nextStage || plan.requiredCommand !== expectedCommand ||
+        !Number.isInteger(plan.repairs) || plan.repairs < 0 || plan.repairs > 2 ||
+        !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status) || current.pendingExecutor ||
+        !hasStudioCreationReceipt(plan.project)) {
+      throw new Error('NATIVE_CYCLE_PLAN_TAMPERED_OR_STALE');
+    }
+    let result;
+    for (let index = 0; index <= plan.repairs; index++) {
+      // A prior Codex attempt may have replaced the test or its parent with a link.
+      try {
+        if (cycleTestCommand(plan.project, plan.test) !== expectedCommand) {
+          throw new Error('NATIVE_CYCLE_TEST_PATH_CHANGED');
+        }
+      } catch (error) {
+        return { ...blocked(plan.project, 'cycle', error.message), runId: plan.runId,
+          attempts: index };
+      }
+      const attempt = planWorkflow(plan.project, 'continue', { run: plan.runId, executor: 'codex' });
+      if (attempt.status !== 'READY') {
+        return { ...attempt, operation: 'cycle', attempts: index };
+      }
+      result = executeCodexAttempt(attempt, executor, expectedCommand, index);
+      const attempts = index + (result.executorCode ? 1 : 0);
+      if (result.executorCode !== 'EXECUTOR_CHECKS_FAILED') {
+        return { ...result, operation: 'cycle', attempts };
+      }
+      if (index === plan.repairs) return { ...result, operation: 'cycle', status: 'FAILED_CHECKS', attempts,
+        nextAction: { kind: 'REVIEW_OR_RETRY', stage: result.nextStage, executable: false } };
+    }
+  }
   if (plan.operation === 'continue' && plan.executor === 'codex') {
+    return executeCodexAttempt(plan, executor);
+  }
+  const current = plan.operation === 'start' ? commitNewRun(plan.nativePlan) : commitNativeEvent(plan.nativePlan);
+  return { ...plan, nativePlan: undefined, status: 'APPLIED', writes: plan.writes,
+    runId: current.run.runId, nextStage: current.nextStage, nativeStatus: current.status,
+    nextAction: fromRun(plan.project, plan.operation, current).nextAction };
+}
+
+function executeCodexAttempt(plan, executor, requiredCommand = null, repairAttempt = 0) {
     // The executable's cwd and input must come from the hash-checked run,
     // never from a caller-mutated preview object.
     const run = readNativeRun(plan.project, plan.runId);
@@ -166,13 +261,16 @@ export function executeWorkflow(plan, { apply = false, executor } = {}) {
         JSON.stringify(expected) !== JSON.stringify(plan.executorPlan)) {
       throw new Error('NATIVE_EXECUTOR_PLAN_TAMPERED_OR_STALE');
     }
+    const executablePlan = requiredCommand
+      ? prepareCodexExecution(plan.project, run.run.scope, run.nextStage,
+        { gitRoot: source.gitRoot, requiredCommand, repairAttempt }) : expected;
     const impl = executor ?? { check: checkCodexAvailable, run: runCodexExecution };
-    const available = impl.check(expected);
+    const available = impl.check(executablePlan);
     if (!available.ok) return { ...blocked(plan.project, 'continue', available.code),
       runId: plan.runId, executor: 'codex' };
     commitNativeEvent(plan.nativePlan); // Publish intent before running the external process.
     let execution;
-    try { execution = impl.run(expected); }
+    try { execution = impl.run(executablePlan); }
     catch { execution = { ok: false, code: 'EXECUTOR_SPAWN_FAILED', exitCode: null,
       transcriptSha256: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
       eventCount: 0, completed: false }; }
@@ -186,9 +284,4 @@ export function executeWorkflow(plan, { apply = false, executor } = {}) {
       conflicts: execution.ok ? [] : [execution.code],
       nextStage: finished.nextStage,
       nextAction: fromRun(plan.project, plan.operation, finished).nextAction };
-  }
-  const current = plan.operation === 'start' ? commitNewRun(plan.nativePlan) : commitNativeEvent(plan.nativePlan);
-  return { ...plan, nativePlan: undefined, status: 'APPLIED', writes: plan.writes,
-    runId: current.run.runId, nextStage: current.nextStage, nativeStatus: current.status,
-    nextAction: fromRun(plan.project, plan.operation, current).nextAction };
 }

@@ -23,6 +23,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow start --project <game-directory> --pipeline <audit-repair-loop|production-art> --target <text> --in-scope <a;b> --acceptance <text> --mutation-boundary <text> [--out-of-scope <a;b>] [--apply] [--json]
   ludory workflow continue --project <game-directory> [--run <run-id|latest>] [--executor codex] [--apply] [--json]
+  ludory workflow cycle --project <new-studio-game> --test <relative.test.js> [--run <run-id|latest>] [--repairs <0|1|2>] [--apply] [--json]
   ludory workflow recover --project <game-directory> [--run <run-id|latest>] [--confirm-no-executor] [--apply] [--json]
   ludory workflow checkpoint --project <game-directory> --stage <STAGE> [--run <run-id|latest>] [--artifact <path;path>] [--outcome <CONTINUE|PASS|FAIL|BLOCKED|ESCALATE>] [--apply] [--json]
   ludory help
@@ -32,6 +33,8 @@ create --apply only creates new template files, manifest and Studio receipt in a
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
 workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
 Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.
+workflow cycle checks Codex-observed Node test execution with at most two repairs; it never automatically advances a stage.
+Codex tool telemetry is not independent QA and cannot establish Release PASS.
 Codex workspace-write may edit game files; in-scope paths are instructions, not enforced allowlists.
 Without --executor, continue --apply still records a manual action request only.
 workflow recover previews a failed interrupted result and requires --confirm-no-executor --apply.
@@ -49,6 +52,7 @@ function argumentsFor(command, argv) {
       : command === 'workflow-status' || command === 'workflow-next' ? [...workflowCommon, '--run']
           : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
             : command === 'workflow-continue' ? [...workflowCommon, '--run', '--executor', '--apply']
+              : command === 'workflow-cycle' ? [...workflowCommon, '--run', '--test', '--repairs', '--apply']
               : command === 'workflow-recover' ? [...workflowCommon, '--run', '--confirm-no-executor', '--apply']
               : [...workflowCommon, '--run', '--stage', '--artifact', '--outcome', '--apply'])
     : command === 'init'
@@ -90,6 +94,7 @@ function workflowOptions(flags) {
     acceptance: flags.get('--acceptance'), mutationBoundary: flags.get('--mutation-boundary'),
     stage: flags.get('--stage'), artifact: flags.get('--artifact'), outcome: flags.get('--outcome'),
     executor: flags.get('--executor'),
+    test: flags.get('--test'), repairs: flags.get('--repairs'),
     confirmNoExecutor: flags.has('--confirm-no-executor') ? true : undefined,
   };
 }
@@ -180,14 +185,15 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'workflow') {
       const [operation, ...args] = rest;
-      if (!['doctor', 'status', 'next', 'start', 'continue', 'checkpoint', 'recover'].includes(operation)) {
+      if (!['doctor', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
         throw new Error(`Unknown workflow operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`workflow-${operation}`, args);
       const plan = planWorkflow(flags.get('--project'), operation, workflowOptions(flags));
       const result = executeWorkflow(plan, { apply: flags.has('--apply'), executor });
       displayWorkflow(result, flags.has('--json'), out);
-      return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : result.status === 'ESCALATE' ? 3 : result.status === 'FAILED' ? 1 : 0;
+      return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : result.status === 'ESCALATE' ? 3
+        : ['FAILED', 'FAILED_CHECKS'].includes(result.status) ? 1 : 0;
     }
     if (command === 'profiles' || command === 'templates') {
       const [operation, ...args] = rest;
