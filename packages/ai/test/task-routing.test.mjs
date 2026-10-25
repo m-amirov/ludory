@@ -91,6 +91,21 @@ test('Codex preflight checks only availability and can make mechanics route read
   assert.equal(fs.existsSync(path.join(project, '.ludory')), false);
 });
 
+test('narrative and image discovery never spawn an irrelevant Codex availability check', t => {
+  const project = freshStudioGame(t);
+  let codexChecks = 0;
+  const checkCodex = () => { codexChecks++; return { ok: true, code: 'AVAILABLE' }; };
+  for (const taskKind of ['episode-script', 'art-concept', 'image']) {
+    const cap = discoverTaskCapabilities(project, { taskKind, checkCodex });
+    assert.equal(cap.codex.available, false);
+    assert.equal(cap.codex.reasonCode, 'AI_ROUTING_CODEX_NOT_REQUESTED');
+  }
+  assert.equal(codexChecks, 0);
+  const mechanic = discoverTaskCapabilities(project, { taskKind: 'mechanics', checkCodex });
+  assert.equal(mechanic.codex.available, true);
+  assert.equal(codexChecks, 1);
+});
+
 test('missing Codex and absent Web DEV host evidence produce honest manual handoff', t => {
   const project = freshStudioGame(t);
   const capabilities = discoverTaskCapabilities(project, { checkCodex: () => ({ ok: false, code: 'EXECUTOR_UNAVAILABLE' }) });

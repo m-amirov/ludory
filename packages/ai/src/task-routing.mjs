@@ -35,7 +35,7 @@ export function planTaskRoute(projectDir, options = {}, { discover = discoverTas
       nextAction: { kind: 'STOP_FROZEN_GAME', executable: false } };
   }
   let capabilities;
-  try { capabilities = discover(project); }
+  try { capabilities = discover(project, { taskKind }); }
   catch { capabilities = null; }
   const items = capabilities && typeof capabilities === 'object' ? capabilities : {};
   let route = null;

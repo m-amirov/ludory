@@ -1,6 +1,7 @@
 import { checkCodexAvailable } from './executor.mjs';
 
 const unavailable = reasonCode => ({ available: false, reasonCode });
+const checkCodexVersion = plan => checkCodexAvailable(plan, { timeoutMs: 5_000 });
 const validModelId = value => typeof value === 'string' &&
   /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(value);
 
@@ -29,13 +30,18 @@ export function isVerifiedCapability(record, kind) {
 }
 
 /** Read-only capability preflight. No DEV/Image Gen adapter is installed in this slice. */
-export function discoverTaskCapabilities(project, { checkCodex = checkCodexAvailable, hostProbe = null } = {}) {
+export function discoverTaskCapabilities(project, { taskKind, checkCodex = checkCodexVersion,
+  hostProbe = null } = {}) {
   let codex;
-  try {
-    const check = checkCodex({ project });
-    codex = check?.ok === true ? { available: true, reasonCode: 'AVAILABLE' }
-      : unavailable(check?.code ?? 'AI_ROUTING_CODEX_UNVERIFIED');
-  } catch { codex = unavailable('AI_ROUTING_CODEX_PROBE_FAILED'); }
+  if (taskKind && !['mechanics', 'functional-check'].includes(taskKind)) {
+    codex = unavailable('AI_ROUTING_CODEX_NOT_REQUESTED');
+  } else {
+    try {
+      const check = checkCodex({ project });
+      codex = check?.ok === true ? { available: true, reasonCode: 'AVAILABLE' }
+        : unavailable(check?.code ?? 'AI_ROUTING_CODEX_UNVERIFIED');
+    } catch { codex = unavailable('AI_ROUTING_CODEX_PROBE_FAILED'); }
+  }
   let host = null;
   try { if (typeof hostProbe === 'function') host = hostProbe(project); }
   catch { host = null; }
