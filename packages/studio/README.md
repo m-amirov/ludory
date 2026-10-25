@@ -73,7 +73,10 @@ node packages/studio/bin/ludory.mjs create --project /path/to/empty-dir \
 
 `create` requires an **existing empty** directory. It writes
 `ludory.project.json`, template files and `ludory.studio.json`, a receipt
-containing source versions and output SHA-256 hashes. It never updates an
+containing source versions and output SHA-256 hashes. New games also receive
+`ludory.components.json`, explicitly registering only the generated template
+assets as updateable (project-owned `package.json`, `AGENTS.md` and
+`game-spec.yaml` are excluded). `create` never updates an
 existing game. Previews are read-only, and apply rechecks directory identity,
 catalog source checksums and output collisions. In-flight failures trigger
 best-effort rollback only of unchanged files created by the current command.
@@ -84,6 +87,45 @@ static assets named in the template descriptor. JSON schema version is `1`.
 The CLI validates references, paths, uniqueness and symlinks, and external
 catalog entries cannot replace built-ins. Nothing is downloaded or executed
 while browsing templates. The receipt is **not** an updater authority.
+
+## Safe updates of Studio-owned components
+
+Only **new games created with the updated Studio** have the separate
+`ludory.components.json` ownership state. Older creation receipts alone do
+not authorize updates. CEOS/Starter Kit games remain frozen.
+
+```sh
+# Both commands below are read-only:
+node packages/studio/bin/ludory.mjs components status --project /path/to/new-game --json
+node packages/studio/bin/ludory.mjs components update --project /path/to/new-game --json
+
+# After reviewing READY and every planned file:
+node packages/studio/bin/ludory.mjs components update --project /path/to/new-game --apply --json
+```
+
+Supply `--catalog /path/to/catalog` for a local externally defined template.
+An update requires a newer compatible template SemVer. All managed files must
+still match their original SHA-256, **including unchanged assets**. One edited,
+missing, hardlinked or symbolic file blocks the entire update. Same-version
+source drift, downgrade, changed template paths, incompatible targets and
+new-file collisions also block. Studio never merges changes, overwrites
+user-created files, deletes old assets, updates project-owned configurations,
+or creates additional parent folders.
+
+`--apply` revalidates the entire preview and catalog, takes an exclusive lock,
+stages changed bytes and backs up originals during publication. To protect
+edits written through already-open file handles, original inodes remain in
+`.ludory-components-backup-*` archives after both successful updates and
+completed rollbacks. These archives consume disk space and are not removed
+automatically; `backup-index.json` maps archive slots to original paths for
+manual inspection. Review the archives before any cleanup. On a synchronous failure
+Studio attempts a safe rollback; if another writer changed a published file,
+Studio retains the transaction files and lock for manual recovery. An abrupt
+crash can also leave `.ludory-components.lock` and
+`.ludory-components-update-*` artifacts, which must be inspected by the owner
+before retrying. Avoid simultaneous edits while applying an update: this MVP
+cannot guarantee crash-atomic multi-file updates or fully serialize other
+processes, and is not Release PASS.
 
 ## Applying profiles to existing games
 

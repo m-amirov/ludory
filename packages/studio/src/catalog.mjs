@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 const builtin = fileURLToPath(new URL('../catalog/', import.meta.url));
 const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-const reserved = new Set(['ludory.project.json', 'ludory.studio.json']);
+const reserved = new Set(['ludory.project.json', 'ludory.studio.json', 'ludory.components.json', '.ludory']);
+const projectOwned = new Set(['AGENTS.md', 'game-spec.yaml', 'package.json']);
+/** A template may create project configuration, but Studio never claims it for updates. */
+export const isStudioComponentPath = filename => !reserved.has(filename.split('/')[0]) && !projectOwned.has(filename.split('/')[0]);
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 
 function exactKeys(obj, fields, label) {

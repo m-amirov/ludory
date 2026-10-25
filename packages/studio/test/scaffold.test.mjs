@@ -41,7 +41,7 @@ test('creation preview never writes and explicit apply creates runnable files an
   const cwd = process.cwd();
   const plan = planCreate(root, params);
   assert.equal(plan.status, 'READY', plan.conflicts.join(' '));
-  assert.deepEqual(plan.writes, ['ludory.project.json', 'index.html', 'src/main.js', 'ludory.studio.json']);
+  assert.deepEqual(plan.writes, ['ludory.project.json', 'index.html', 'src/main.js', 'ludory.components.json', 'ludory.studio.json']);
   assert.deepEqual(fs.readdirSync(root), []);
   const outcome = applyCreatePlan(plan);
   assert.equal(outcome.status, 'APPLIED');
@@ -58,6 +58,40 @@ test('creation preview never writes and explicit apply creates runnable files an
     assert.equal(hash(fs.readFileSync(path.join(root, name))), sha);
   }
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/main.js'), 'utf8'), /<script>/);
+});
+
+test('new games record explicit updater ownership only for Studio template assets', t => {
+  const project = empty(t);
+  applyCreatePlan(planCreate(project, params));
+  const state = JSON.parse(fs.readFileSync(path.join(project, 'ludory.components.json'), 'utf8'));
+  assert.equal(state.schemaVersion, 1);
+  assert.deepEqual(state.template, {
+    id: 'narrative-basic', version: '1.0.0', profile: 'narrative-game', origin: 'builtin',
+    sourceSha256: JSON.parse(fs.readFileSync(path.join(project, 'ludory.studio.json'))).catalog.templateSha256,
+  });
+  assert.deepEqual(Object.keys(state.files), ['index.html', 'src/main.js']);
+  for (const [relative, digest] of Object.entries(state.files)) {
+    assert.equal(hash(fs.readFileSync(path.join(project, relative))), digest);
+  }
+  assert.equal(Object.hasOwn(state.files, 'ludory.project.json'), false);
+  assert.equal(Object.hasOwn(state.files, 'ludory.studio.json'), false);
+});
+
+test('template package.json can be created but is never claimed as an updateable component', t => {
+  const project = empty(t);
+  const catalog = custom(t);
+  const descriptor = path.join(catalog, 'templates', 'custom-basic', 'template.json');
+  const config = JSON.parse(fs.readFileSync(descriptor));
+  config.files.push('package.json');
+  fs.writeFileSync(descriptor, JSON.stringify(config));
+  fs.writeFileSync(path.join(catalog, 'templates', 'custom-basic', 'package.json'), '{"private":true}\n');
+  const plan = planCreate(project, { ...params, profile: 'custom-game', template: 'custom-basic',
+    targets: ['vk-games'], catalog });
+  assert.equal(plan.status, 'READY', plan.conflicts.join(' '));
+  applyCreatePlan(plan);
+  assert.equal(fs.readFileSync(path.join(project, 'package.json'), 'utf8'), '{"private":true}\n');
+  const state = JSON.parse(fs.readFileSync(path.join(project, 'ludory.components.json')));
+  assert.equal(Object.hasOwn(state.files, 'package.json'), false);
 });
 
 test('nonempty and nonexistent project roots are never overwritten', t => {
