@@ -6,6 +6,8 @@ import path from 'node:path';
 import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { planComponentUpdate, componentStatus, applyComponentPlan } from '../src/component-updates.mjs';
 
+const transactionPath = value => /\.ludory-components-(?:update|backup)-/.test(String(value));
+
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-components-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -216,7 +218,7 @@ test('failed second managed replacement rolls back first and retains user data',
   const originalLink = fs.linkSync;
   let count = 0;
   fs.linkSync = function (src, dst, ...args) {
-    if (String(src).includes('.ludory-components-update-') && ++count === 2) {
+    if (transactionPath(src) && ++count === 2) {
       throw new Error('injected second link failure');
     }
     return originalLink.call(this, src, dst, ...args);
@@ -237,7 +239,7 @@ test('completed rollback retains the original inode for later edits through an o
   const originalLink = fs.linkSync;
   let failed = false;
   fs.linkSync = function (src, dst, ...args) {
-    if (!failed && String(src).includes('.ludory-components-update-') && dst === 'main.js') {
+    if (!failed && transactionPath(src) && dst === 'main.js') {
       failed = true;
       throw new Error('simulated publish failure');
     }
@@ -255,7 +257,68 @@ test('completed rollback retains the original inode for later edits through an o
   const entries = JSON.parse(fs.readFileSync(path.join(archive, 'backup-index.json'), 'utf8')).entries;
   const original = entries.find(item => item.path === 'index.html');
   assert.match(fs.readFileSync(path.join(archive, original.backup), 'utf8'), /LATE HANDLE EDIT/);
+  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), false);
   assert.equal(planComponentUpdate(f.project, { catalog: f.catalog }).status, 'READY');
+});
+
+test('secondary finalization failure retains the original publish error and lock', t => {
+  const f = fixture(t);
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const originalLink = fs.linkSync;
+  const originalUnlink = fs.unlinkSync;
+  fs.linkSync = function (src, dst, ...args) {
+    if (transactionPath(src) && dst === 'main.js') {
+      throw new Error('simulated publish failure');
+    }
+    return originalLink.call(this, src, dst, ...args);
+  };
+  fs.unlinkSync = function (filename, ...args) {
+    if (filename === path.join(f.project, '.ludory-components.lock')) {
+      throw new Error('simulated final lock release failure');
+    }
+    return originalUnlink.call(this, filename, ...args);
+  };
+  let error;
+  try { assert.throws(() => applyComponentPlan(plan), caught => (error = caught, /simulated publish failure/.test(caught.message))); }
+  finally { fs.linkSync = originalLink; fs.unlinkSync = originalUnlink; }
+  assert.match(error.message, /finalization blocked/i);
+  assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 1;\n');
+  assert.equal(JSON.parse(fs.readFileSync(f.state)).template.version, '1.0.0');
+  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true);
+  assert.equal(planComponentUpdate(f.project, { catalog: f.catalog }).status, 'CONFLICT');
+  assert.equal(fs.readdirSync(f.project).some(name => name.startsWith('.ludory-components-backup-')), true);
+});
+
+test('restore failure retains the original backup and lock for manual recovery', t => {
+  const f = fixture(t);
+  version2(f);
+  fs.writeFileSync(path.join(f.project, 'user.txt'), 'owner data');
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const originalLink = fs.linkSync;
+  const originalCopy = fs.copyFileSync;
+  fs.linkSync = function (src, dst, ...args) {
+    if (transactionPath(src) && dst === 'ludory.components.json') {
+      throw new Error('simulated state publish failure');
+    }
+    return originalLink.call(this, src, dst, ...args);
+  };
+  fs.copyFileSync = function (source, destination, ...args) {
+    if (String(source).includes(`${path.sep}backup${path.sep}`) && destination === 'main.js') {
+      throw new Error('simulated restore failure');
+    }
+    return originalCopy.call(this, source, destination, ...args);
+  };
+  try { assert.throws(() => applyComponentPlan(plan), /simulated state publish failure; incomplete component rollback:.*simulated restore failure/i); }
+  finally { fs.linkSync = originalLink; fs.copyFileSync = originalCopy; }
+  const archive = fs.readdirSync(f.project).find(name => name.startsWith('.ludory-components-backup-'));
+  assert.ok(archive);
+  const index = JSON.parse(fs.readFileSync(path.join(f.project, archive, 'backup-index.json'), 'utf8'));
+  const original = index.entries.find(item => item.path === 'src/main.js');
+  assert.equal(fs.readFileSync(path.join(f.project, archive, original.backup), 'utf8'), 'export const version = 1;\n');
+  assert.equal(fs.readFileSync(path.join(f.project, 'user.txt'), 'utf8'), 'owner data');
+  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true);
+  assert.equal(planComponentUpdate(f.project, { catalog: f.catalog }).status, 'CONFLICT');
 });
 
 test('swapped nested directory cannot redirect a managed replacement outside the game', t => {
@@ -278,12 +341,13 @@ test('swapped nested directory cannot redirect a managed replacement outside the
     if (swapped && !fs.existsSync(path.join(outside, 'main.js'))) outsideTemporarilyMoved = true;
     return output;
   };
-  try { assert.throws(() => applyComponentPlan(plan), /changed|unsafe|rollback|conflict|symbolic/i); }
+  try { assert.throws(() => applyComponentPlan(plan), /changed|unsafe|rollback|conflict|symbolic|resource busy|EBUSY|EPERM/i); }
   finally { fs.renameSync = originalRename; }
   assert.equal(swapped, true);
   assert.equal(outsideTemporarilyMoved, false, 'No external file may be temporarily moved, even when rollback restores it');
   assert.equal(fs.readFileSync(path.join(outside, 'main.js'), 'utf8'), 'outside user code\n');
   assert.equal(JSON.parse(fs.readFileSync(f.state)).template.version, '1.0.0');
+  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), false);
 });
 
 test('open editor descriptor modifying an original during apply cannot lose the edit', t => {
@@ -294,7 +358,7 @@ test('open editor descriptor modifying an original during apply cannot lose the 
   const originalLink = fs.linkSync;
   let wrote = false;
   fs.linkSync = function (source, dest, ...args) {
-    if (!wrote && String(source).includes('.ludory-components-update-') && dest === 'main.js') {
+    if (!wrote && transactionPath(source) && dest === 'main.js') {
       wrote = true;
       const edit = Buffer.from('USER WRITING THROUGH OLD HANDLE\n');
       fs.writeSync(fd, edit, 0, edit.length, 0);
@@ -338,7 +402,7 @@ test('rollback must not delete user changes arriving between verification and re
   let rollback = false;
   let userEdit = false;
   fs.linkSync = function (source, dest, ...args) {
-    if (!rollback && String(source).includes('.ludory-components-update-') && dest === 'ludory.components.json') {
+    if (!rollback && transactionPath(source) && dest === 'ludory.components.json') {
       rollback = true;
       throw new Error('simulated publish failure');
     }
@@ -356,4 +420,6 @@ test('rollback must not delete user changes arriving between verification and re
   finally { fs.linkSync = originalLink; fs.readFileSync = originalRead; }
   assert.equal(userEdit, true);
   assert.match(fs.readFileSync(f.gameApp, 'utf8'), /USER EDIT DURING ROLLBACK/);
+  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true);
+  assert.equal(planComponentUpdate(f.project, { catalog: f.catalog }).status, 'CONFLICT');
 });

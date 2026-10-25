@@ -286,6 +286,7 @@ export function applyComponentPlan(plan) {
   let stageIdentity = null;
   let rollbackComplete = true;
   let retainedBackup = null;
+  let outcomeError = null;
   const operations = [];
   try {
     // Revalidate every game byte after the exclusive transaction lock is held.
@@ -306,8 +307,12 @@ export function applyComponentPlan(plan) {
     for (const [name, expected] of Object.entries(installed.state.files)) {
       if (hash(checkedFile(project, name)) !== expected) throw new Error(`Managed file changed after preview: ${name}`);
     }
-    stage = fs.mkdtempSync(path.join(project, stagingPrefix));
+    // The archive must already have its final name. Windows may reject
+    // renaming a directory that contains a moved original still referenced
+    // by an editor handle, even though the file itself was safely moved.
+    stage = fs.mkdtempSync(path.join(project, backupPrefix));
     stageIdentity = directoryIdentity(stage);
+    retainedBackup = stage;
     fs.mkdirSync(path.join(stage, 'new'));
     fs.mkdirSync(path.join(stage, 'backup'));
     fs.mkdirSync(path.join(stage, 'quarantine'));
@@ -387,7 +392,6 @@ export function applyComponentPlan(plan) {
         fs.unlinkSync(item.staged);
       });
     }
-    retainedBackup = path.join(project, `${backupPrefix}${path.basename(stage).slice(stagingPrefix.length)}`);
     return { ...fresh, status: 'APPLIED', applied: true, backupDirectory: retainedBackup };
   } catch (error) {
     const problems = [];
@@ -425,23 +429,32 @@ export function applyComponentPlan(plan) {
     }
     rollbackComplete = problems.length === 0;
     if (problems.length) {
-      throw new Error(`${error.message}; incomplete component rollback: ${problems.join('; ')}; recover from ${stage}`,
+      outcomeError = new Error(`${error.message}; incomplete component rollback: ${problems.join('; ')}; recover from ${stage}`,
         { cause: error });
+      throw outcomeError;
     }
+    outcomeError = error;
     throw error;
   } finally {
     if (rollbackComplete) {
-      // Never delete a moved original inode: an editor may still have its
-      // handle open and write AFTER our final hash check. Retain every
-      // transaction, successful or rolled back, under a non-active prefix.
-      if (stage && directoryIdentity(stage) === stageIdentity) {
-        const archive = retainedBackup || path.join(project, `${backupPrefix}${path.basename(stage).slice(stagingPrefix.length)}`);
-        try { fs.lstatSync(archive); throw new Error(`Backup archive collision: ${archive}`); }
-        catch (error) { if (error.code !== 'ENOENT') throw error; }
-        fs.renameSync(stage, archive);
+      try {
+        // Never delete a moved original inode: an editor may still have its
+        // handle open and write AFTER our final hash check. The archive was
+        // created under its durable non-active name before publication, so no
+        // directory rename can invalidate Windows open handles here.
+        if (stage && directoryIdentity(stage) !== stageIdentity) {
+          throw new Error('Component backup archive changed before completion');
+        }
+        const currentLock = fs.lstatSync(lockPath, { bigint: true });
+        if (currentLock.dev === lockStat.dev && currentLock.ino === lockStat.ino) fs.unlinkSync(lockPath);
+      } catch (finalizationError) {
+        // A finalization failure must keep the lock for recovery. If the
+        // operation already failed, preserve that causal error rather than
+        // allowing cleanup to replace it.
+        if (outcomeError) {
+          outcomeError.message += `; finalization blocked (lock retained): ${finalizationError.message}`;
+        } else throw finalizationError;
       }
-      const currentLock = fs.lstatSync(lockPath, { bigint: true });
-      if (currentLock.dev === lockStat.dev && currentLock.ino === lockStat.ino) fs.unlinkSync(lockPath);
     }
   }
 }
