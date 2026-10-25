@@ -19,3 +19,10 @@ LUDORY is a modular game-development toolkit. `@ludory/core` must remain platfor
 - For Core or Studio changes run `npm test`, `npm run check` and `node examples/core-session.mjs`.
 - Studio's existing metadata-only migration command is retained for compatibility, but must not be run on frozen games. Do not add CEOS history import or legacy config rewrites. In new games, dirty/unversioned Git and ordinary source changes must not block development workflows; Release gates remain strict.
 - Preserve failing and blocked outcomes; never convert missing browser/device/platform evidence into PASS.
+
+## Git worktrees
+
+- Create every new worktree outside the repository, exclusively under `D:\HardWork\LUDORY.worktrees\<name>`.
+- Use `git worktree add` and `git worktree move` for worktree lifecycle operations; do not move worktree directories with filesystem commands.
+- Before moving or removing a worktree, verify that no Codex or other process is using it and preserve its branch, commits, local changes and Git references.
+- `/.worktrees/` is ignored as a defensive fallback, but it is not an alternative to the external standard location above.
