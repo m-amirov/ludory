@@ -130,6 +130,57 @@ test('create generates files only with --apply and preserves legacy commands', t
   assert.equal(JSON.parse(cli('inspect', '--project', project, '--json').stdout).status, 'CURRENT');
 });
 
+test('components status/update use preview by default and block user-edited assets', t => {
+  const project = temporary(t);
+  const args = ['create', '--project', project, '--id', 'owned-web', '--title', 'Owned', '--lang', 'en',
+    '--profile', 'web-game', '--template', 'web-basic', '--targets', 'vk-games', '--apply', '--json'];
+  assert.equal(cli(...args).status, 0);
+  const status = cli('components', 'status', '--project', project, '--json');
+  assert.equal(status.status, 0, status.stderr);
+  assert.equal(JSON.parse(status.stdout).status, 'IN_SYNC');
+  assert.equal(JSON.parse(cli('components', 'update', '--project', project, '--json').stdout).status, 'IN_SYNC');
+  assert.equal(cli('components', 'status', '--project', project, '--apply').status, 1);
+  fs.writeFileSync(path.join(project, 'src', 'main.js'), '// user edit\n');
+  const blocked = cli('components', 'update', '--project', project, '--apply', '--json');
+  assert.equal(blocked.status, 2, blocked.stderr);
+  assert.equal(JSON.parse(blocked.stdout).status, 'CONFLICT');
+  assert.equal(fs.readFileSync(path.join(project, 'src', 'main.js'), 'utf8'), '// user edit\n');
+});
+
+test('components update CLI applies a compatible external template upgrade only with --apply', t => {
+  const project = temporary(t);
+  const catalog = temporary(t);
+  fs.mkdirSync(path.join(catalog, 'profiles'));
+  fs.mkdirSync(path.join(catalog, 'templates', 'custom-web', 'src'), { recursive: true });
+  fs.writeFileSync(path.join(catalog, 'profiles', 'custom-game.json'), JSON.stringify({
+    schemaVersion: 1, id: 'custom-game', version: '1.0.0', description: 'test',
+    engine: 'web', targets: ['vk-games'], templates: ['custom-web'],
+  }));
+  const descriptor = path.join(catalog, 'templates', 'custom-web', 'template.json');
+  fs.writeFileSync(descriptor, JSON.stringify({
+    schemaVersion: 1, id: 'custom-web', version: '1.0.0', description: 'test',
+    profile: 'custom-game', engine: 'web', targets: ['vk-games'], files: ['src/main.js'],
+  }));
+  const source = path.join(catalog, 'templates', 'custom-web', 'src', 'main.js');
+  fs.writeFileSync(source, 'export const value = 1;\n');
+  const created = cli('create', '--project', project, '--id', 'safe-game', '--title', 'Safe', '--lang', 'en',
+    '--profile', 'custom-game', '--template', 'custom-web', '--targets', 'vk-games',
+    '--catalog', catalog, '--apply', '--json');
+  assert.equal(created.status, 0, created.stderr);
+  const next = JSON.parse(fs.readFileSync(descriptor));
+  next.version = '1.1.0';
+  fs.writeFileSync(descriptor, JSON.stringify(next));
+  fs.writeFileSync(source, 'export const value = 2;\n');
+  const cmd = ['components', 'update', '--project', project, '--catalog', catalog, '--json'];
+  assert.equal(JSON.parse(cli(...cmd).stdout).status, 'READY');
+  assert.equal(fs.readFileSync(path.join(project, 'src', 'main.js'), 'utf8'), 'export const value = 1;\n');
+  const applied = cli(...cmd, '--apply');
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.equal(JSON.parse(applied.stdout).status, 'APPLIED');
+  assert.equal(fs.readFileSync(path.join(project, 'src', 'main.js'), 'utf8'), 'export const value = 2;\n');
+  assert.equal(JSON.parse(cli(...cmd).stdout).status, 'IN_SYNC');
+});
+
 test('create validates profile/template flags and rejects conflicting options', t => {
   const project = temporary(t);
   const args = ['create', '--project', project, '--id', 'my-demo', '--title', 'Demo', '--lang', 'en',

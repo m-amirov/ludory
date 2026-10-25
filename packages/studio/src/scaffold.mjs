@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { defineGame } from '@ludory/core';
-import { loadCatalog } from './catalog.mjs';
+import { loadCatalog, isStudioComponentPath } from './catalog.mjs';
 import { planInit, directoryIdentity, isOriginalDirectory } from './projects.mjs';
 
 const digest = b => crypto.createHash('sha256').update(b).digest('hex');
@@ -12,11 +12,13 @@ function filesFor(manifest, profile, template) {
   const manifestBytes = serialize(manifest);
   const entries = [['ludory.project.json', manifestBytes]];
   const tracked = Object.create(null);
+  const managed = Object.create(null);
   tracked['ludory.project.json'] = digest(manifestBytes);
   for (const filename of template.files) {
     const bytes = template.assets.get(filename).bytes;
     entries.push([filename, bytes]);
     tracked[filename] = digest(bytes);
+    if (isStudioComponentPath(filename)) managed[filename] = digest(bytes);
   }
   const receipt = {
     schemaVersion: 1,
@@ -29,6 +31,12 @@ function filesFor(manifest, profile, template) {
     },
     files: tracked,
   };
+  entries.push(['ludory.components.json', serialize({
+    schemaVersion: 1,
+    template: { id: template.id, version: template.version, profile: template.profile,
+      origin: template.origin, sourceSha256: template.sourceSha256 },
+    files: managed,
+  })]);
   entries.push(['ludory.studio.json', serialize(receipt)]);
   return { entries, receipt };
 }

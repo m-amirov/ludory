@@ -2,6 +2,7 @@ import { defineGame } from '@ludory/core';
 import { inspectProject, planInit, planMigration, applyPlan } from './projects.mjs';
 import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
+import { planComponentUpdate, componentStatus, applyComponentPlan } from './component-updates.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
 import { planWorkflow, executeWorkflow } from '@ludory/ai';
 
@@ -18,6 +19,8 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory templates list [--catalog <directory>] [--json]
   ludory templates show --name <id> [--catalog <directory>] [--json]
   ludory create --project <empty-directory> --id <slug> --title <name> --lang <locale> --profile <id> --template <id> --targets <comma-separated> [--version <semver>] [--catalog <directory>] [--apply] [--json]
+  ludory components status --project <new-studio-game> [--catalog <directory>] [--json]
+  ludory components update --project <new-studio-game> [--catalog <directory>] [--apply] [--json]
   ludory workflow doctor --project <game-directory> [--json]
   ludory workflow status --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
@@ -30,6 +33,8 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
 
 No writes by default. init/migrate --apply only create ludory.project.json;
 create --apply only creates new template files, manifest and Studio receipt in an empty directory.
+components update --apply changes only explicit Studio-managed template assets when none were user-edited.
+An edited managed asset blocks the entire update; historical creation receipts do not grant update authority.
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
 workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
 Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.
@@ -59,6 +64,8 @@ function argumentsFor(command, argv) {
     ? new Set([...common, '--id', '--title', '--lang', '--engine', '--targets', '--version', '--apply'])
     : command === 'create'
       ? new Set([...common, '--id', '--title', '--lang', '--profile', '--template', '--targets', '--version', '--catalog', '--apply'])
+      : command === 'components-update' ? new Set([...common, '--catalog', '--apply'])
+        : command === 'components-status' ? new Set([...common, '--catalog'])
       : command === 'migrate' ? new Set([...common, '--apply'])
         : command === 'profiles-list' || command === 'templates-list' ? new Set(['--json', '--catalog'])
           : command === 'profiles-show' || command === 'templates-show' ? new Set(['--json', '--catalog', '--name'])
@@ -165,8 +172,8 @@ function display(result, json, out) {
   out(`${result.status} · ${result.project}\n`);
   for (const item of result.writes) {
     const action = result.status === 'APPLIED'
-      ? result.mode.startsWith('profile-') ? 'applied' : 'created'
-      : result.mode === 'profile-update' ? 'would update' : 'would create';
+      ? result.mode.startsWith('component-') ? 'updated' : result.mode.startsWith('profile-') ? 'applied' : 'created'
+      : ['profile-update', 'component-update', 'component-status'].includes(result.mode) ? 'would update' : 'would create';
     out(`  ${action}: ${item}\n`);
   }
   for (const problem of result.conflicts) out(`  blocked: ${problem}\n`);
@@ -194,6 +201,17 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       displayWorkflow(result, flags.has('--json'), out);
       return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : result.status === 'ESCALATE' ? 3
         : ['FAILED', 'FAILED_CHECKS'].includes(result.status) ? 1 : 0;
+    }
+    if (command === 'components') {
+      const [operation, ...args] = rest;
+      if (!['status', 'update'].includes(operation)) throw new Error(`Unknown components operation: ${operation || '(missing)'}`);
+      const flags = argumentsFor(`components-${operation}`, args);
+      const preview = operation === 'status' ? componentStatus(flags.get('--project'), { catalog: flags.get('--catalog') })
+        : planComponentUpdate(flags.get('--project'), { catalog: flags.get('--catalog') });
+      const result = operation === 'update' && flags.has('--apply') && preview.status === 'READY'
+        ? applyComponentPlan(preview) : preview;
+      display(result, flags.has('--json'), out);
+      return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : 0;
     }
     if (command === 'profiles' || command === 'templates') {
       const [operation, ...args] = rest;

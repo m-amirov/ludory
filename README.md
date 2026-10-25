@@ -73,7 +73,7 @@ node packages/studio/bin/ludory.mjs migrate --project /path/to/game --apply --js
 node packages/studio/bin/ludory.mjs init --project /path/to/empty --id my-game --title 'Моя игра' --lang ru --engine phaser --targets yandex-games,vk-games --json
 ```
 
-For `init` and `migrate`, `--apply` exclusively creates one file (`ludory.project.json`); neither command modifies existing game code, assets, saves, `AGENTS.md` or platform settings. Mature games require a committed, clean Git worktree and unambiguous metadata. `BLOCKED` and `CONFLICT` require owner intervention. Read [Studio's first-slice contract](docs/superpowers/specs/2026-10-24-studio-foundation-design.md) for limitations; the ownership-aware updater and CEOS orchestration have not been ported yet.
+For `init` and `migrate`, `--apply` exclusively creates one file (`ludory.project.json`); neither command modifies existing game code, assets, saves, `AGENTS.md` or platform settings. Mature games require a committed, clean Git worktree and unambiguous metadata. `BLOCKED` and `CONFLICT` require owner intervention. Read [Studio's first-slice contract](docs/superpowers/specs/2026-10-24-studio-foundation-design.md) for limitations. CEOS orchestration is not used.
 
 Studio also supports versioned profiles and templates for **new empty projects**:
 
@@ -85,10 +85,24 @@ node packages/studio/bin/ludory.mjs create --project /path/to/empty-game --id my
 ```
 
 The new `create` command exclusively generates a playable browser demo, the
-Core-compatible manifest and a SHA-256 creation receipt. Its targets denote
+Core-compatible manifest, a SHA-256 creation receipt, and a separate
+`ludory.components.json` ownership record for template assets. Its targets denote
 intended platforms, **not** a production-ready VK/Yandex integration. The
-Starter Kit updater, full CEOS automation and host release gates remain unmigrated.
+Full Starter Kit updater parity, CEOS automation and host release gates remain unmigrated.
 See [Studio's guide](packages/studio/README.md).
+
+Studio can safely update template assets explicitly registered in **new** games.
+Preview first; user edits to any managed file block the entire update:
+
+```sh
+node packages/studio/bin/ludory.mjs components status --project /path/to/new-game --json
+node packages/studio/bin/ludory.mjs components update --project /path/to/new-game --json
+# Only once READY and reviewed:
+node packages/studio/bin/ludory.mjs components update --project /path/to/new-game --apply --json
+```
+
+Old creation receipts and frozen game repositories are not automatically enrolled.
+There is no three-way merge, automatic conflict repair or production platform assurance.
 
 For **existing games** with a canonical manifest, Studio now supports an
 opt-in, read-only-by-default profile association and updates:
