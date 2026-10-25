@@ -181,3 +181,17 @@ Read-only operations reject `--apply`. All other workflow mutations require it, 
 **Controlled cycle (next AI slice):** `workflow cycle --test src/main.test.js [--repairs 2]` runs Codex for the current stage and requests the exact `node --test src/main.test.js` command from **within Codex's sandbox**, avoiding unrestricted host execution of newly generated code. Test path must be a safe, relative JS test path; existing symlinked test/ancestor paths are rejected. The result must contain a completed `command_execution` event with that exact command and exit code 0. If no passing command is observed, the run records `EXECUTOR_CHECKS_FAILED` and may retry up to the declared budget (zero to two retries). Other executor failures stop immediately. No raw prompt, transcript or test output is persisted. This telemetry is **not** an independent security or correctness attestation; a passing cycle remains `EXECUTED_UNVERIFIED`, and manual checkpointing must still supply evidence. A failed-check budget exits `FAILED_CHECKS` (CLI exit 1), leaving explicit retry available. There is no background agent, added orchestrator, automatic promotion or Release PASS. Windows actual Codex command telemetry requires later host observation.
 
 **Foundation limitations:** Without `--executor`, `continue --apply` still only records a manual action request. Terminal `PASS` is blocked (`EVIDENCE_VERIFIER_NOT_READY`) until native Release verification is implemented. Strict current-artifact checks belong to Release, not mutable development history. Historical CEOS runs will **not** be imported. Node and fake-project tests do not establish Windows-host, VK/Yandex runtime or release readiness.
+
+## AI task route preview (Slice A)
+
+The new read-only command explains which executor is eligible **before** any model execution:
+
+```sh
+node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task mechanics --json
+node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task episode-script --json
+node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task image --model auto --json
+```
+
+Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` and `art-concept` require the authenticated Web DEV host; `image` prefers Terra with SOL as preflight-only fallback. Explicit `--model terra` or `--model sol` prevents automatic substitution. Missing or unverifiable host evidence produces `NEEDS_USER_ACTION` and `MANUAL_HANDOFF`, not fake successful generation. Web DEV and Image Gen host adapters are **not connected in Slice A**, so those tasks currently receive manual handoff until the adapters are implemented. An installed Codex CLI can be probed with `--version`, but this command does not execute Codex tasks.
+
+`workflow route` never writes project files or workflow events; it rejects `--apply`. Exit code `0` covers a valid preview, including a manual handoff; `2` means the project is blocked (for example, no Studio creation receipt); `1` means invalid arguments or inspection error. Historical games stay frozen. No image, script, art review, independent acceptance, or Release PASS is produced by a route preview.
