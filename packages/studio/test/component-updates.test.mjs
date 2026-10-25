@@ -7,6 +7,7 @@ import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { planComponentUpdate, componentStatus, applyComponentPlan } from '../src/component-updates.mjs';
 
 const transactionPath = value => /\.ludory-components-(?:update|backup)-/.test(String(value));
+const anchoredBasename = (value, name) => String(value) === name || /[\\/]([^\\/]+)$/.exec(String(value))?.[1] === name;
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-components-'));
@@ -239,7 +240,7 @@ test('completed rollback retains the original inode for later edits through an o
   const originalLink = fs.linkSync;
   let failed = false;
   fs.linkSync = function (src, dst, ...args) {
-    if (!failed && transactionPath(src) && dst === 'main.js') {
+    if (!failed && transactionPath(src) && anchoredBasename(dst, 'main.js')) {
       failed = true;
       throw new Error('simulated publish failure');
     }
@@ -268,7 +269,7 @@ test('secondary finalization failure retains the original publish error and lock
   const originalLink = fs.linkSync;
   const originalUnlink = fs.unlinkSync;
   fs.linkSync = function (src, dst, ...args) {
-    if (transactionPath(src) && dst === 'main.js') {
+    if (transactionPath(src) && anchoredBasename(dst, 'main.js')) {
       throw new Error('simulated publish failure');
     }
     return originalLink.call(this, src, dst, ...args);
@@ -298,13 +299,13 @@ test('restore failure retains the original backup and lock for manual recovery',
   const originalLink = fs.linkSync;
   const originalCopy = fs.copyFileSync;
   fs.linkSync = function (src, dst, ...args) {
-    if (transactionPath(src) && dst === 'ludory.components.json') {
+    if (transactionPath(src) && anchoredBasename(dst, 'ludory.components.json')) {
       throw new Error('simulated state publish failure');
     }
     return originalLink.call(this, src, dst, ...args);
   };
   fs.copyFileSync = function (source, destination, ...args) {
-    if (String(source).includes(`${path.sep}backup${path.sep}`) && destination === 'main.js') {
+    if (String(source).includes(`${path.sep}backup${path.sep}`) && anchoredBasename(destination, 'main.js')) {
       throw new Error('simulated restore failure');
     }
     return originalCopy.call(this, source, destination, ...args);
@@ -363,7 +364,7 @@ test('open editor descriptor modifying an original during apply cannot lose the 
   const originalLink = fs.linkSync;
   let wrote = false;
   fs.linkSync = function (source, dest, ...args) {
-    if (!wrote && transactionPath(source) && dest === 'main.js') {
+    if (!wrote && transactionPath(source) && anchoredBasename(dest, 'main.js')) {
       wrote = true;
       const edit = Buffer.from('USER WRITING THROUGH OLD HANDLE\n');
       fs.writeSync(fd, edit, 0, edit.length, 0);
@@ -407,7 +408,7 @@ test('rollback must not delete user changes arriving between verification and re
   let rollback = false;
   let userEdit = false;
   fs.linkSync = function (source, dest, ...args) {
-    if (!rollback && transactionPath(source) && dest === 'ludory.components.json') {
+    if (!rollback && transactionPath(source) && anchoredBasename(dest, 'ludory.components.json')) {
       rollback = true;
       throw new Error('simulated publish failure');
     }
