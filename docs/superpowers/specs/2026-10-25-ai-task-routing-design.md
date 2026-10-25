@@ -1,6 +1,6 @@
 # Ludory AI Task Routing: Codex, Web DEV, and Image Producers
 
-**Status:** Proposed design; requires owner approval before implementation.
+**Status:** Approved by project owner on 2026-10-25; implementation proceeds in separate reviewed slices.
 **Date:** 2026-10-25
 **Decisions already confirmed:** Prefer automatic, authenticated DEV execution when genuinely available, with an explicit manual handoff when it is not. For unpinned image tasks, prefer Terra and use SOL only if preflight cannot establish Terra availability; record the actual effective model. No CEOS runtime dependency.
 
