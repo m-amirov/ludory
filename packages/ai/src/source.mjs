@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { defineGame } from '@ludory/core';
+import { defineGame, canonicalPhysicalDirectory } from '@ludory/core';
 
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
@@ -17,11 +17,14 @@ function directoryIdentity(dir) {
 }
 
 function nativeRoot(projectDir) {
-  const resolved = path.resolve(projectDir);
-  const canonical = fs.realpathSync.native(resolved);
-  if (!samePath(resolved, canonical)) throw new Error('SOURCE_PROJECT_DIRECTORY_SYMBOLIC');
-  directoryIdentity(resolved);
-  return resolved;
+  let canonical;
+  try { canonical = canonicalPhysicalDirectory(projectDir); }
+  catch (error) {
+    if (error.message === 'DIRECTORY_NOT_PHYSICAL') throw new Error('SOURCE_PROJECT_DIRECTORY_SYMBOLIC');
+    throw error;
+  }
+  directoryIdentity(canonical);
+  return canonical;
 }
 
 function git(project, ...args) {
@@ -85,17 +88,20 @@ export function verifyNativeSource(binding) {
 }
 
 /** Hash file bytes from the verified game root without following symbolic entries. */
-export function snapshotArtifact(projectDir, relativePath) {
+export function snapshotArtifact(projectDir, relativePath, { maxBytes = Number.MAX_SAFE_INTEGER } = {}) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new Error('SOURCE_ARTIFACT_LIMIT_INVALID');
   const project = nativeRoot(projectDir);
   const file = regularFile(project, relativePath);
-  const fd = fs.openSync(file, 'r');
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
   const hash = crypto.createHash('sha256');
   const buffer = Buffer.allocUnsafe(64 * 1024);
   let size = 0;
   try {
+    if (fs.fstatSync(fd).size > maxBytes) throw new Error('SOURCE_ARTIFACT_TOO_LARGE');
     let count;
     while ((count = fs.readSync(fd, buffer, 0, buffer.length, null)) !== 0) {
       size += count;
+      if (size > maxBytes) throw new Error('SOURCE_ARTIFACT_TOO_LARGE');
       hash.update(buffer.subarray(0, count));
     }
     if (!fs.fstatSync(fd).isFile() || !samePath(fs.realpathSync.native(file), file)) {

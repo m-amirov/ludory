@@ -260,7 +260,7 @@ test('directory replacement before chdir is detected without off-target writes',
   const originalChdir = process.chdir;
   let swapped = false;
   process.chdir = function (target) {
-    if (!swapped && target === dir) {
+    if (!swapped && target === plan.project) {
       fs.renameSync(dir, parked);
       fs.symlinkSync(other, dir, 'dir');
       swapped = true;

@@ -6,11 +6,12 @@ on:
 
 jobs:
   core:
-    name: Core / Node ${{ matrix.node }}
-    runs-on: ubuntu-latest
+    name: Core / ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         node: [22, 24]
     steps:
       - uses: actions/checkout@v4

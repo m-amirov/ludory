@@ -181,3 +181,92 @@ Read-only operations reject `--apply`. All other workflow mutations require it, 
 **Controlled cycle (next AI slice):** `workflow cycle --test src/main.test.js [--repairs 2]` runs Codex for the current stage and requests the exact `node --test src/main.test.js` command from **within Codex's sandbox**, avoiding unrestricted host execution of newly generated code. Test path must be a safe, relative JS test path; existing symlinked test/ancestor paths are rejected. The result must contain a completed `command_execution` event with that exact command and exit code 0. If no passing command is observed, the run records `EXECUTOR_CHECKS_FAILED` and may retry up to the declared budget (zero to two retries). Other executor failures stop immediately. No raw prompt, transcript or test output is persisted. This telemetry is **not** an independent security or correctness attestation; a passing cycle remains `EXECUTED_UNVERIFIED`, and manual checkpointing must still supply evidence. A failed-check budget exits `FAILED_CHECKS` (CLI exit 1), leaving explicit retry available. There is no background agent, added orchestrator, automatic promotion or Release PASS. Windows actual Codex command telemetry requires later host observation.
 
 **Foundation limitations:** Without `--executor`, `continue --apply` still only records a manual action request. Terminal `PASS` is blocked (`EVIDENCE_VERIFIER_NOT_READY`) until native Release verification is implemented. Strict current-artifact checks belong to Release, not mutable development history. Historical CEOS runs will **not** be imported. Node and fake-project tests do not establish Windows-host, VK/Yandex runtime or release readiness.
+
+## AI task route preview (Slice A)
+
+The new read-only command explains which executor is eligible **before** any model execution:
+
+```sh
+node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task mechanics --json
+node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task episode-script --json
+node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task image --json
+```
+
+Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` prefers authenticated **GPT-6 Sol (Web)** DEV; `art-concept` prefers that same Web DEV **only if** the primary agent explicitly reviewed four distinct scene/character/location/style references, otherwise the primary model writes the art brief. `image` creates an agent handoff to a **separate Codex image-generator subagent**, inheriting the primary model and invoking built-in `$imagegen`. It returns `NEEDS_AGENT_ACTION`/`SPAWN_IMAGE_AGENT`, never a claimed automatic spawn or invocation. Programmatic `terra` and `sol` are retained only for explicitly pinned historical in-process adapters. Read-only routing invokes no provider.
+
+`workflow route` never writes project files or workflow events; it rejects `--apply`. Exit code `0` covers a valid preview, including a manual handoff; `2` means the project is blocked (for example, no Studio creation receipt); `1` means invalid arguments or inspection error. Historical games stay frozen. No image, script, art review, independent acceptance, or Release PASS is produced by a route preview.
+JSON previews preserve `reasonCode` and, when available, `capabilityReasonCode`. The built-in ImageGen route uses `modelSelection: provider-default`, `qualityPreference: highest-available` and `modelObserved: null`; it cannot set or attest a hidden execution model. Historical in-process routes retain their Terra/SOL evidence fields.
+
+## Web DEV reviewable drafts (Slice B, experimental)
+
+For `--task art-concept`, selected source text files must be distinct and labeled with the four roles `scene:path`, `characters:path`, `location:path`, `style:path` in `--source` (separated by semicolons). A role that is not applicable can have a file explaining why. After the primary agent assesses that the selected contents are sufficient, it supplies `--context-reviewed`. This is an explicit **USER_DECLARED** assessment, not automatic semantic QA; absent/duplicated roles or omitted review cause a read-only primary-model handoff and never an automatic Web DEV call. Existing `episode-script` sources remain untyped.
+
+For a game created with `ludory create` and an active native workflow run:
+
+```sh
+# Read-only preview, including a source-hash-bound handoff packet. Does not start DEV.
+node packages/studio/bin/ludory.mjs workflow draft --project /path/to/new-studio-game \
+  --run RUN_ID --task episode-script --brief narrative/episode-brief.md \
+  --source narrative/graph.json --json
+
+# Explicit execution. Invokes DEV only if the installed isolated helper attests
+# actual authenticated transport, effective selected GPT-6 Sol (Web), and browser-only mode.
+node packages/studio/bin/ludory.mjs workflow draft --project /path/to/new-studio-game \
+  --run RUN_ID --task art-concept --brief narrative/art-brief.md \
+  --source 'scene:narrative/scene.txt;characters:narrative/characters.txt;location:narrative/location.txt;style:narrative/art-style.txt' \
+  --context-reviewed --apply --json
+
+# No supported DEV host? Prepare the draft yourself, then import by user declaration.
+node packages/studio/bin/ludory.mjs workflow draft-import --project /path/to/new-studio-game \
+  --run RUN_ID --task episode-script --brief narrative/episode-brief.md \
+  --file narrative/my-draft.md --json
+node packages/studio/bin/ludory.mjs workflow draft-import --project /path/to/new-studio-game \
+  --run RUN_ID --task episode-script --brief narrative/episode-brief.md \
+  --file narrative/my-draft.md --apply --json
+```
+
+The optional host is a separate user-installed DEV browser-helper with an isolated profile and a protocol that **observes** transport authorization and the actually selected model. Merely launching a helper, reading the configured model, or seeing it submit a prompt does not establish model provenance. The older helper without a capabilities/route observation frame is unsupported and returns `DEV_ROUTE_UNVERIFIED`. Ludory does not read or copy the Stable browser profile, acquire ChatGPT cookies, or expose local tools to Web DEV. It does not bundle a DEV executable.
+
+`workflow draft` preview never writes files or starts a host. `--apply` journals an immutable `web-dev` request **before** the helper call; an observed response becomes a SHA-256-bound draft under `.ludory/ai/runs/<id>/drafts/` with `HOST_OBSERVED` provenance. Unexpected exit or timeout leaves the request pending, blocks duplicates and checkpoints, and requires `workflow recover --run RUN_ID --confirm-no-executor --apply` only after confirming that the old DEV helper is no longer active. No hidden retry or route downgrade occurs.
+
+Only deliberately named UTF-8 `--brief` and `--source` files are sent as text to the external DEV session. The complete bounded prompt must fit 64 KiB; an oversized or binary reference blocks before any external call. Review these files for credentials and private content before using `--apply`. A helper failure *after intent was committed* is surfaced as `PENDING_RECOVERY` (CLI exit 3), not as proven non-execution. The helper runs with an allowlisted environment and strict isolation from any Stable profile path, including symlink/junction aliases.
+
+`workflow draft-import` accepts an existing safe project-relative UTF-8 text file, records a separate `DRAFT_IMPORTED` event with `USER_DECLARED` provenance and copies immutable bytes into the native run. It never claims DEV execution. All automatically generated or imported drafts remain `PENDING_REVIEW`; neither route advances the workflow stage, rewrites gameplay scenes, validates narrative consistency, nor establishes release readiness. Source files, symlinks, game receipts, stale hashes and pending executors are checked fail-closed. Each task kind permits a single declared manual import per run.
+
+An interrupted import can leave an unreferenced uniquely named draft in the private run directory. It is not treated as an accepted import or used by runtime; a later explicit import may safely create a new file. Orphan cleanup is manual after inspecting provenance and contents. `workflow status/next` advertises `REVIEW_DRAFT` while review-only evidence exists; narrative review completion remains a separate future gate.
+
+CLI `--apply` without an authenticated compatible DEV helper produces a manual handoff (`NEEDS_USER_ACTION`, exit 2) without game writes. In that case the **primary model already executing the task** should use the project's scene/character/style context to author the brief and supply a source-bound file; a standalone Ludory process has no truthful way to impersonate that active model. Local mock-host tests are not evidence of successful real Windows DEV model selection. Live Windows DEV host and NTFS acceptance are still required.
+
+## Codex built-in ImageGen originals (Slice C, experimental)
+
+These commands require an active native run in a newly created Studio game:
+
+```sh
+# Step 1: prepare a source-aware artistic brief through the preceding Web DEV draft path,
+# or let the active primary task model author one from selected story/style files.
+# Step 2: read-only preview. The response includes a source-bound $imagegen prompt.
+node packages/studio/bin/ludory.mjs workflow image --project /path/to/new-studio-game \
+  --run RUN_ID --brief narrative/scene-art-brief.md --json
+
+# Step 3: request an agent handoff (this does not invoke any external provider).
+node packages/studio/bin/ludory.mjs workflow image --project /path/to/new-studio-game \
+  --run RUN_ID --brief narrative/scene-art-brief.md --apply --json
+
+# Step 4: the primary Codex agent delegates the packet to a separate image-generator
+# subagent inheriting the primary model. That subagent invokes $imagegen with the
+# prompt and references, then saves the generated original inside the game.
+
+# Step 5: preview and explicitly import the checked original as USER_DECLARED.
+node packages/studio/bin/ludory.mjs workflow image-import --project /path/to/new-studio-game \
+  --run RUN_ID --brief narrative/scene-art-brief.md --file art/candidate.webp \
+  --handoff-sha256 PACKET_HANDOFF_SHA256 --json
+node packages/studio/bin/ludory.mjs workflow image-import --project /path/to/new-studio-game \
+  --run RUN_ID --brief narrative/scene-art-brief.md --file art/candidate.webp \
+  --handoff-sha256 PACKET_HANDOFF_SHA256 --apply --json
+```
+
+`$imagegen` is a **built-in Codex tool**, not a programmatic API provided to Node.js. The CLI cannot spawn agents or call it directly: the primary Codex agent receives `manualPacket`, spawns a separate image-generator subagent with the inherited model, and supplies the prompt and selected references. That subagent must invoke the skill, save the original and report its location. The primary agent explicitly imports it. Missing subagent or tool access blocks generation; there is no direct-primary-agent or HTTP fallback. No authentication secret, separate provider endpoint or key is required by Ludory. This integration is an **agent handoff**, not unattended generation by the CLI.
+
+The built-in tool has no visible model/quality selection parameter. `qualityPreference: highest-available` is an instruction to pursue the best available result using a precise brief, **not an SDK setting or a verified model ID**; the actual model is left unobserved. Model availability, generation limits and reference support depend on the active Codex session. Selected external visual references are not currently part of the image handoff hash and therefore cannot be claimed as cryptographically bound by Ludory. A text packet alone cannot assert that an image has been generated. Recheck story fidelity, composition and technical quality after seeing the output.
+
+Imported originals are stored exclusively under `.ludory/ai/runs/<id>/images/`. Import requires `handoffSha256` from the original `workflow image` packet and rejects a changed brief, project source binding, run head or stage before staging. The native image receipt records this token as declared attribution. Signatures, PNG integrity, JPEG/WebP structure and **full JPEG/WebP pixel decode with sharp**, dimensions, byte limits and SHA-256 receipts are verified before staging. Imports reject symlinks, hardlinks, parent aliases and content/extension mismatches; orphan files from interruptions remain untrusted. Provenance is `USER_DECLARED`: the CLI cannot independently attest that the tool ran. Neither operation publishes runtime assets, updates rights manifests or grants art/release PASS. Tests do not establish real Codex tool invocation or real Windows-host completion.

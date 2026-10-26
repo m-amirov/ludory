@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { canonicalPhysicalDirectory } from '@ludory/core';
 
 const builtin = fileURLToPath(new URL('../catalog/', import.meta.url));
 const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -36,11 +37,8 @@ function uniqueIds(items, label) {
 
 function realDirectory(dir) {
   const absolute = path.resolve(dir);
-  const stat = fs.lstatSync(absolute);
-  if (!stat.isDirectory() || stat.isSymbolicLink() || fs.realpathSync.native(absolute) !== absolute) {
-    throw new Error(`Catalog directory must be a real directory: ${absolute}`);
-  }
-  return absolute;
+  try { return canonicalPhysicalDirectory(absolute); }
+  catch { throw new Error(`Catalog directory must be a real directory: ${absolute}`); }
 }
 
 function directoriesOnly(dir) {

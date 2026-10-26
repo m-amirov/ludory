@@ -90,6 +90,18 @@ intended platforms, **not** a production-ready VK/Yandex integration. The
 Starter Kit updater, full CEOS automation and host release gates remain unmigrated.
 See [Studio's guide](packages/studio/README.md).
 
+The experimental **Slice C** art workflow separates prompt authorship from image generation:
+Web DEV prepares a source-bound brief when given sufficient narrative/style context;
+otherwise the primary Codex model prepares it. `workflow image` prepares a
+source-bound handoff to a **dedicated Codex image-generator subagent** (inheriting the
+primary agent's model) which invokes the built-in `$imagegen` skill, without a separate API,
+API key, model pin, network call or journal write. The skill currently exposes no model/
+quality selector: request the highest available fidelity in the prompt and honestly
+record the image provider's model as unknown. After the subagent saves the generated
+PNG/JPEG/WebP, `workflow image-import --apply` validates and stores the original with
+`USER_DECLARED` provenance for review, never automatically publishing or approving it.
+See [Studio's built-in ImageGen instructions](packages/studio/README.md#codex-built-in-imagegen-originals-slice-c-experimental).
+
 For **existing games** with a canonical manifest, Studio now supports an
 opt-in, read-only-by-default profile association and updates:
 

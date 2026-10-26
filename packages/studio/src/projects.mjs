@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { spawnSync } from 'node:child_process';
-import { defineGame } from '@ludory/core';
+import { defineGame, canonicalPhysicalDirectory } from '@ludory/core';
 import { readLegacyGameSpec, readSourceFile } from './legacy.mjs';
 
 const manifestName = 'ludory.project.json';
@@ -15,7 +15,7 @@ export function directoryIdentity(dir) {
 
 export function isOriginalDirectory(project, identity) {
   try {
-    const canonical = fs.realpathSync.native(project);
+    const canonical = canonicalPhysicalDirectory(project);
     const pathMatches = process.platform === 'win32'
       ? canonical.toLowerCase() === project.toLowerCase() : canonical === project;
     return pathMatches && directoryIdentity(project) === identity;
@@ -26,13 +26,11 @@ export function isOriginalDirectory(project, identity) {
 
 export function projectRoot(projectDir) {
   const project = path.resolve(projectDir);
-  const stat = fs.lstatSync(project);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Project must be an existing, real directory');
-  const canonical = fs.realpathSync.native(project);
-  if (process.platform === 'win32' ? canonical.toLowerCase() !== project.toLowerCase() : canonical !== project) {
-    throw new Error('Project directory must not traverse symbolic links');
+  try { return canonicalPhysicalDirectory(project); }
+  catch (error) {
+    if (error.message === 'DIRECTORY_NOT_PHYSICAL') throw new Error('Project directory must not traverse symbolic links');
+    throw error;
   }
-  return project;
 }
 
 function currentManifest(project) {
