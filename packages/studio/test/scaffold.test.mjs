@@ -269,7 +269,7 @@ test('rollback rechecks root inode after chdir to avoid deleting a matching outs
     return originalOpen.call(this, filename, flags, ...args);
   };
   process.chdir = function (target) {
-    if (failWrite && !swapped && target === project) {
+    if (failWrite && !swapped && target === plan.project) {
       originalChdir.call(process, path.dirname(project));
       fs.renameSync(project, parked);
       fs.symlinkSync(outside, project, 'dir');

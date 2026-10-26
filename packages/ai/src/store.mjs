@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { getPipeline, checkTransition } from './pipelines.mjs';
 import { inspectNativeProject, verifyNativeSource, snapshotArtifact } from './source.mjs';
 import { inspectGeneratedImage, readProjectImageInput } from './image-artifacts.mjs';
+import { canonicalPhysicalDirectory } from '@ludory/core';
 
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const serial = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -419,7 +420,7 @@ export function listNativeRuns(projectDir) {
 }
 
 export function readNativeRun(projectDir, runRef = 'latest') {
-  const project = path.resolve(projectDir);
+  const project = canonicalPhysicalDirectory(projectDir);
   let runId = runRef;
   if (!runRef || runRef === 'latest') {
     const runs = activeRunIds(project);

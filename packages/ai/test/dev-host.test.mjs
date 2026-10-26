@@ -172,8 +172,8 @@ test('isolated DEV process receives only a constrained environment, not ambient 
   cleanupHost(t, root, host);
   const capability = await host.probe();
   assert.equal(capability.available, true);
-  assert.equal(childCwd, home, 'helper must not inherit the game or invoking CLI directory');
-  assert.equal(environment.CODEX_WEB_GPT_DEV_HOME, home);
+  assert.equal(childCwd, fs.realpathSync.native(home), 'helper must not inherit the game or invoking CLI directory');
+  assert.equal(environment.CODEX_WEB_GPT_DEV_HOME, fs.realpathSync.native(home));
   const allowed = new Set(['PATH', 'Path', 'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT',
     'TMP', 'TEMP', 'TMPDIR', 'USERPROFILE', 'HOME', 'APPDATA', 'LOCALAPPDATA',
     'ProgramFiles', 'ProgramFiles(x86)', 'LANG', 'LC_ALL', 'XDG_RUNTIME_DIR',
@@ -282,11 +282,15 @@ rl.createInterface({input:process.stdin}).on('line', line => {
   transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',
   modelObserved:'gpt-6-sol',localToolsEnabled:false});
  if(item.type==='run') {
-  send({type:'event',id:item.id,event:'prepared_selected'});
-  send({type:'event',id:item.id,event:'send_activated'});
-  send({type:'event',id:item.id,event:'submitted'});
-  send({type:'result',id:item.id,text:'Fake',modelObserved:'gpt-6-sol',
-   transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',localToolsEnabled:false});
+  // Deliver all premature frames in one transport batch: separate writes can
+  // race the parent's ACK write on slower CI runners and become post-ACK frames.
+  process.stdout.write([
+   {type:'event',id:item.id,event:'prepared_selected'},
+   {type:'event',id:item.id,event:'send_activated'},
+   {type:'event',id:item.id,event:'submitted'},
+   {type:'result',id:item.id,text:'Fake',modelObserved:'gpt-6-sol',
+    transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',localToolsEnabled:false}
+  ].map(frame => JSON.stringify(frame)).join('\\n')+'\\n');
  }
 });`;
   const { home, stableHome, root } = fixture(premature);
