@@ -54,6 +54,13 @@ readline.createInterface({input:process.stdin}).on('line', line => {
 });
 `;
 
+function cleanupHost(t, root, host) {
+  t.after(async () => {
+    await host.close?.();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+}
+
 test('missing DEV profile and identical Stable home deny all execution', async t => {
   const absent = discoverDevHost({ devHome: path.join(os.tmpdir(), 'ludory-dev-host-no-such-home'),
     stableHome: path.join(os.tmpdir(), 'ludory-dev-host-no-such-stable') });
@@ -104,9 +111,8 @@ test('DEV symlink alias to Stable or symlinked ancestor is rejected without spaw
 
 test('witnessed helper route permits one source-bound browser-only text turn', async t => {
   const { home, stableHome, root } = fixture(helper());
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const host = discoverDevHost({ devHome: home, stableHome });
-  t.after(() => host.close?.());
+  cleanupHost(t, root, host);
   assert.equal(host.available, false); // Installation is not entitlement.
   const cap = await host.probe();
   assert.equal(cap.available, true);
@@ -119,9 +125,8 @@ test('witnessed helper route permits one source-bound browser-only text turn', a
 
 test('helper without model-entitlement observation never becomes runnable', async t => {
   const { home, stableHome, root } = fixture(helper({ observed: false }));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const host = discoverDevHost({ devHome: home, stableHome });
-  t.after(() => host.close?.());
+  cleanupHost(t, root, host);
   const cap = await host.probe();
   assert.equal(cap.available, false);
   assert.equal(cap.reasonCode, 'DEV_ROUTE_UNVERIFIED');
@@ -136,9 +141,8 @@ test('legacy helper without capability handshake is closed after a bounded probe
     readline.createInterface({input:process.stdin}).on('line', () => {});
   `;
   const { home, stableHome, root } = fixture(olderHelper);
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const host = discoverDevHost({ devHome: home, stableHome, probeTimeoutMs: 75 });
-  t.after(() => host.close?.());
+  cleanupHost(t, root, host);
   const cap = await host.probe();
   assert.equal(cap.available, false);
   assert.equal(cap.reasonCode, 'DEV_ROUTE_UNVERIFIED');
@@ -147,7 +151,6 @@ test('legacy helper without capability handshake is closed after a bounded probe
 
 test('isolated DEV process receives only a constrained environment, not ambient service credentials', async t => {
   const { home, stableHome, root } = fixture(helper());
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   let environment;
   let childCwd;
   const host = discoverDevHost({ devHome: home, stableHome,
@@ -156,7 +159,7 @@ test('isolated DEV process receives only a constrained environment, not ambient 
       childCwd = options.cwd;
       return spawn(exe, args, options);
     } });
-  t.after(() => host.close?.());
+  cleanupHost(t, root, host);
   const capability = await host.probe();
   assert.equal(capability.available, true);
   assert.equal(childCwd, home, 'helper must not inherit the game or invoking CLI directory');
@@ -184,9 +187,8 @@ readline.createInterface({input:process.stdin}).on('line', line => {
   }
 });`;
   const { home, stableHome, root } = fixture(flood);
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const dev = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 3000 });
-  t.after(() => dev.close?.());
+  cleanupHost(t, root, dev);
   assert.equal((await dev.probe()).available, true);
   await assert.rejects(dev.turn({ prompt: 'source-bound test', taskId: 'overflow' }), /DEV_HELPER_OUTPUT_LIMIT/);
   assert.equal(dev.child, null);
@@ -196,9 +198,8 @@ test('turn timeout terminates the helper instead of retaining an unresponsive ch
   const neverCompletes = helper().replace("send({ type:'result', id:message.id, text:'# Draft\\nA new scene',",
     "return; /* no result */ send({ type:'result', id:message.id, text:'# Draft\\nA new scene',");
   const { home, stableHome, root } = fixture(neverCompletes);
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const dev = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 100 });
-  t.after(() => dev.close?.());
+  cleanupHost(t, root, dev);
   assert.equal((await dev.probe()).available, true);
   await assert.rejects(dev.turn({ prompt: 'source-bound test', taskId: 'timeout' }), /DEV_HELPER_TIMEOUT/);
   assert.equal(dev.child, null);
@@ -219,9 +220,8 @@ rl.on('line', line => {
   }
 });`;
   const { home, stableHome, root } = fixture(blockedStdin);
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const dev = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 150 });
-  t.after(() => dev.close?.());
+  cleanupHost(t, root, dev);
   assert.equal((await dev.probe()).available, true);
   // Deterministically model an unresolved child stdin callback (pipe backpressure).
   const originalWrite = dev.child.stdin.write;
@@ -254,9 +254,8 @@ rl.createInterface({input:process.stdin}).on('line', line => {
   }
 });`;
   const { home, stableHome, root } = fixture(skippedHandshake);
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const dev = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 300 });
-  t.after(() => dev.close?.());
+  cleanupHost(t, root, dev);
   assert.equal((await dev.probe()).available, true);
   await assert.rejects(dev.turn({ prompt: 'source-bound prompt never sent', taskId: 'fake' }),
     /DEV_HELPER_PROTOCOL_INVALID|DEV_ROUTE_UNVERIFIED/);
@@ -281,9 +280,8 @@ rl.createInterface({input:process.stdin}).on('line', line => {
  }
 });`;
   const { home, stableHome, root } = fixture(premature);
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const dev = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 300 });
-  t.after(() => dev.close?.());
+  cleanupHost(t, root, dev);
   assert.equal((await dev.probe()).available, true);
   await assert.rejects(dev.turn({ prompt: 'source-bound', taskId: 'premature' }),
     /DEV_HELPER_PROTOCOL_INVALID/);
@@ -307,9 +305,8 @@ rl.createInterface({input:process.stdin}).on('line', line => {
  }
 });`;
     const { home, stableHome, root } = fixture(source);
-    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const dev = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 250 });
-    t.after(() => dev.close?.());
+    cleanupHost(t, root, dev);
     const cap = await dev.probe();
     if (cap.available) await assert.rejects(dev.turn({ prompt: 'source-bound', taskId: 'closed' }),
       /DEV_HELPER_/);

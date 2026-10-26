@@ -100,6 +100,7 @@ class BrowserDevHost {
     this.turnTimeoutMs = turnTimeoutMs;
     this.child = null;
     this.starting = null;
+    this.closing = null;
     this.pending = new Map();
     this.capability = null;
     this.active = false;
@@ -305,12 +306,16 @@ class BrowserDevHost {
   }
 
   async close() {
+    if (this.closing) return this.closing;
     this.failPending('DEV_HELPER_CLOSED');
     const child = this.child;
     this.child = null;
     this.starting = null;
     this.capability = null;
-    if (child) {
+    if (!child) return;
+    this.closing = (async () => {
+      const exited = child.exitCode !== null || child.signalCode !== null ? Promise.resolve()
+        : new Promise(resolve => child.once('exit', resolve));
       try { child.stdin.end(); } catch { /* Already closed. */ }
       try { child.kill('SIGTERM'); } catch { /* Already exited. */ }
       const force = setTimeout(() => {
@@ -318,8 +323,11 @@ class BrowserDevHost {
           try { child.kill('SIGKILL'); } catch { /* Already exited. */ }
         }
       }, 500);
-      force.unref();
-    }
+      await exited;
+      clearTimeout(force);
+    })();
+    try { await this.closing; }
+    finally { this.closing = null; }
   }
 }
 
