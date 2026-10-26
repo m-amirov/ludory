@@ -6,7 +6,7 @@ import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } 
 import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNativeRun,
   planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport,
   planImageTask,
-  planImageImport, executeImageImport } from '@ludory/ai';
+  planImageImport, executeImageImport, planArtReview, executeArtReview } from '@ludory/ai';
 
 const usage = `Ludory Studio 0.1.0 — native game-development workflows
 
@@ -27,6 +27,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory workflow draft-import --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> --file <relative-draft> [--apply] [--json]
   ludory workflow image --project <new-studio-game> --run <id> --brief <relative-art-brief> [--apply] [--json]
   ludory workflow image-import --project <new-studio-game> --run <id> --brief <relative-text> --file <relative-image> --handoff-sha256 <sha256> [--apply] [--json]
+  ludory workflow art-review --project <new-studio-game> --run <id> --image <imported-original> --source <scene:...;characters:...;location:...;style:...> --context-reviewed [--apply] [--json]
   ludory workflow status --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow start --project <game-directory> --pipeline <audit-repair-loop|production-art> --target <text> --in-scope <a;b> --acceptance <text> --mutation-boundary <text> [--out-of-scope <a;b>] [--apply] [--json]
@@ -52,6 +53,9 @@ the provider-selected model, whose identity cannot be attested by this CLI.
 workflow image --apply returns a source-bound agent handoff only; the CLI cannot call Codex tools.
 The primary agent imports the subagent's original with --handoff-sha256 from the generation packet.
 image-import stores checked original PNG/JPEG/WebP bytes as USER_DECLARED; neither route grants art, rights or release PASS.
+art-review --apply requires independent GPT-6 Sol(Web), source-locked references and an attested visual upload.
+P0/P1 requires REWORK, P2 alone does not; after two REWORK receipts the task ESCALATES to the owner.
+Artistic PASS_ART is never human, rights, platform or release acceptance. Actual Web host smoke is owner-operated.
 Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.
 workflow cycle checks Codex-observed Node test execution with at most two repairs; it never automatically advances a stage.
 Codex tool telemetry is not independent QA and cannot establish Release PASS.
@@ -73,6 +77,7 @@ function argumentsFor(command, argv) {
       : command === 'workflow-draft-import' ? [...workflowCommon, '--run', '--task', '--brief', '--file', '--apply']
       : command === 'workflow-image' ? [...workflowCommon, '--run', '--brief', '--apply']
       : command === 'workflow-image-import' ? [...workflowCommon, '--run', '--brief', '--file', '--handoff-sha256', '--apply']
+      : command === 'workflow-art-review' ? [...workflowCommon, '--run', '--image', '--source', '--context-reviewed', '--apply']
       : command === 'workflow-doctor' ? workflowCommon
       : command === 'workflow-status' || command === 'workflow-next' ? [...workflowCommon, '--run']
           : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
@@ -141,6 +146,8 @@ function displayWorkflow(result, json, out) {
   if (result.warning) out(`  warning: ${result.warning}\n`);
   if (result.executorCode) out(`  result: ${result.executorCode}\n`);
   if (result.provenance) out(`  provenance: ${result.provenance}\n`);
+  if (result.verdict) out(`  art verdict: ${result.verdict}\n`);
+  if (result.receiptPath) out(`  receipt: ${result.receiptPath}\n`);
   if (result.manualPacket?.skill === '$imagegen') {
     out('  imagegen: delegate to a separate Codex image-generator subagent inheriting the parent model\n');
     out('  subagent: invoke $imagegen using the source-bound packet; stop if delegation or skill is unavailable\n');
@@ -203,6 +210,31 @@ async function runImageCommand(operation, flags, { out }) {
   }
   displayWorkflow(result, flags.has('--json'), out);
   return result.status === 'BLOCKED' || (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
+}
+
+async function runArtReviewCommand(flags, { out, devHost }) {
+  const project = flags.get('--project');
+  const context = { run: flags.get('--run'), image: flags.get('--image'),
+    sources: flags.has('--source') ? flags.get('--source').split(';') : [],
+    contextReviewed: flags.has('--context-reviewed') };
+  let result = planArtReview(project, context);
+  if (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') {
+    const host = devHost();
+    if (host?.probe && host?.turn) {
+      try {
+        const capability = await host.probe();
+        const ready = planArtReview(project, context, { discover: () => capability });
+        result = await executeArtReview(ready, { apply: true, host });
+      } finally {
+        if (typeof host.close === 'function') {
+          try { await host.close(); } catch { /* Review ledger is authoritative. */ }
+        }
+      }
+    }
+  }
+  displayWorkflow(result, flags.has('--json'), out);
+  return result.status === 'ESCALATE' ? 3
+    : result.status === 'BLOCKED' || (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
 }
 
 function parsedTargets(flags) {
@@ -278,7 +310,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'workflow') {
       const [operation, ...args] = rest;
-      if (!['doctor', 'route', 'draft', 'draft-import', 'image', 'image-import', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
+      if (!['doctor', 'route', 'draft', 'draft-import', 'image', 'image-import', 'art-review', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
         throw new Error(`Unknown workflow operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`workflow-${operation}`, args);
@@ -317,6 +349,15 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
           if (flags.has('--json') || pending) displayWorkflow(result, flags.has('--json'), out);
           else err(`Ludory: ${error.message}\n`);
           return pending ? 3 : 1;
+        });
+      }
+      if (operation === 'art-review') {
+        return runArtReviewCommand(flags, { out, devHost }).catch(error => {
+          const result = { engine: 'ludory-ai', operation, status: 'FAILED',
+            project: flags.get('--project'), writes: [], conflicts: [error.message] };
+          if (flags.has('--json')) displayWorkflow(result, true, out);
+          else err(`Ludory: ${error.message}\n`);
+          return 1;
         });
       }
       if (operation === 'route') {

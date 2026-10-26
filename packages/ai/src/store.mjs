@@ -567,6 +567,113 @@ export function readNativeRun(projectDir, runRef = 'latest') {
     integrity: { ok: true, issues: [] } };
 }
 
+/** A separate, append-only artistic ledger. Review receipts do not advance workflow stages. */
+export function readNativeArtReviews(projectDir, runRef) {
+  const project = canonicalPhysicalDirectory(projectDir);
+  const current = readNativeRun(project, runRef);
+  const runId = current.run.runId;
+  const root = checkedRunDir(project, runId);
+  const directory = path.join(root, 'reviews');
+  try { fs.lstatSync(directory); }
+  catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw new Error('ART_REVIEW_INTEGRITY_DIRECTORY');
+  }
+  safeDir(directory);
+  const files = fs.readdirSync(directory).sort();
+  if (files.length % 2) throw new Error('ART_REVIEW_INTEGRITY_SEQUENCE');
+  const history = [];
+  let previous = null;
+  for (let i = 1; i <= files.length / 2; i++) {
+    const prefix = String(i).padStart(6, '0');
+    if (files[(i - 1) * 2] !== `${prefix}.commit.json` ||
+        files[(i - 1) * 2 + 1] !== `${prefix}.json`) throw new Error('ART_REVIEW_INTEGRITY_SEQUENCE');
+    let receipt, marker, bytes;
+    try {
+      ({ data: receipt, bytes } = readJsonBounded(path.join(directory, `${prefix}.json`)));
+      ({ data: marker } = readJsonBounded(path.join(directory, `${prefix}.commit.json`)));
+    } catch { throw new Error('ART_REVIEW_INTEGRITY_FILE'); }
+    if (marker.schemaVersion !== 1 || marker.index !== i || marker.sha256 !== sha256(bytes) ||
+        receipt.schemaVersion !== 1 || receipt.index !== i ||
+        receipt.projectId !== current.run.projectId || receipt.runId !== runId ||
+        !/^[a-f0-9]{64}$/.test(receipt.runHeadSha256 ?? '') ||
+        receipt.prevSha256 !== (previous ?? receipt.runHeadSha256) ||
+        receipt.provenance !== 'HOST_OBSERVED' || receipt.modelObserved !== 'gpt-6-sol' ||
+        receipt.visualInputObserved !== true ||
+        !['PASS_ART', 'REWORK', 'BLOCKED'].includes(receipt.verdict) ||
+        !['ART_REPORT_STRUCTURED', 'ART_IMAGE_NOT_VISIBLE', 'ART_REPORT_INVALID'].includes(receipt.reasonCode) ||
+        !receipt.image || !/^[a-f0-9]{64}$/.test(receipt.image.sha256 ?? '') ||
+        !receipt.brief || !/^[a-f0-9]{64}$/.test(receipt.brief.sha256 ?? '') ||
+        !Array.isArray(receipt.sources) || receipt.sources.length !== 4 ||
+        receipt.sources.map(x => x.role).join(',') !== 'scene,characters,location,style' ||
+        receipt.sources.some(x => !/^[a-f0-9]{64}$/.test(x.sha256 ?? '')) ||
+        !Array.isArray(receipt.findings) || typeof receipt.summary !== 'string') {
+      throw new Error('ART_REVIEW_INTEGRITY_RECEIPT');
+    }
+    previous = sha256(bytes);
+    history.push(receipt);
+  }
+  return history;
+}
+
+/** Atomically commit a witnessed review; refuse stale inputs and foreign filesystem entries. */
+export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, report) {
+  const source = inspectNativeProject(projectDir);
+  if (!report || report.provenance !== 'HOST_OBSERVED' ||
+      report.modelObserved !== 'gpt-6-sol' || report.visualInputObserved !== true ||
+      !['PASS_ART', 'REWORK', 'BLOCKED'].includes(report.verdict) ||
+      !['ART_REPORT_STRUCTURED', 'ART_IMAGE_NOT_VISIBLE', 'ART_REPORT_INVALID'].includes(report.reasonCode) ||
+      typeof report.summary !== 'string' || report.summary.length > 3000 ||
+      !Array.isArray(report.findings) || report.findings.length > 12 ||
+      !report.image || !report.brief || !Array.isArray(report.sources) ||
+      report.sources.length !== 4) throw new Error('ART_REVIEW_INVALID');
+  return withLock(source.project, source, () => {
+    const current = readNativeRun(source.project, runRef);
+    if (current.headSha256 !== expectedHeadSha256 || current.pendingExecutor || current.terminal ||
+        !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status)) throw new Error('ART_REVIEW_STALE');
+    const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED')?.manual;
+    if (!imported || imported.output.outputPath !== report.image.path ||
+        imported.output.outputSha256 !== report.image.sha256 ||
+        imported.output.outputSize !== report.image.size ||
+        imported.output.mediaType !== report.image.mediaType ||
+        JSON.stringify(imported.brief) !== JSON.stringify(report.brief)) throw new Error('ART_REVIEW_STALE');
+    verifyStoredImage(source.project, current.run.runId, imported.output);
+    verifyDraftInputs(source.project, [report.brief, ...report.sources]);
+    const history = readNativeArtReviews(source.project, current.run.runId);
+    if (history.some(item => item.verdict === 'PASS_ART')) throw new Error('ART_ALREADY_ACCEPTED');
+    if (history.filter(item => item.verdict === 'REWORK').length >= 2) throw new Error('ART_REWORK_LIMIT');
+    if (history.some(item => JSON.stringify(item.image) !== JSON.stringify(report.image) ||
+        JSON.stringify(item.brief) !== JSON.stringify(report.brief) ||
+        JSON.stringify(item.sources) !== JSON.stringify(report.sources))) {
+      throw new Error('ART_REVIEW_CONTEXT_CHANGED');
+    }
+    const index = history.length + 1;
+    const receipt = { schemaVersion: 1, index, projectId: current.run.projectId,
+      runId: current.run.runId, runHeadSha256: expectedHeadSha256,
+      prevSha256: history.length ? sha256(serial(history.at(-1))) : expectedHeadSha256,
+      at: new Date().toISOString(), provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
+      visualInputObserved: true, image: report.image, brief: report.brief,
+      sources: report.sources, verdict: report.verdict, reasonCode: report.reasonCode,
+      summary: report.summary, findings: report.findings };
+    checkedRunDir(source.project, current.run.runId);
+    withinDirectory(current.run.runId, false, () => withinDirectory('reviews', true, () => {
+      if (fs.readdirSync('.').length !== index * 2 - 2) throw new Error('ART_REVIEW_INTEGRITY_SEQUENCE');
+      const prefix = String(index).padStart(6, '0');
+      const bytes = serial(receipt);
+      const marker = serial({ schemaVersion: 1, index, sha256: sha256(bytes) });
+      const fd = fs.openSync(`${prefix}.json`, EXCLUSIVE, 0o600);
+      try { fs.writeFileSync(fd, bytes); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+      const committed = fs.openSync(`${prefix}.commit.json`, EXCLUSIVE, 0o600);
+      try { fs.writeFileSync(committed, marker); fs.fsyncSync(committed); }
+      finally { fs.closeSync(committed); }
+    }));
+    const verified = readNativeArtReviews(source.project, current.run.runId);
+    if (verified.length !== index) throw new Error('ART_REVIEW_INTEGRITY_SEQUENCE');
+    return { ...receipt, receiptPath: `.ludory/ai/runs/${current.run.runId}/reviews/${String(index).padStart(6, '0')}.json`,
+      receiptSha256: sha256(serial(receipt)) };
+  });
+}
+
 export function planNativeEvent(projectDir, runRef, input) {
   const project = path.resolve(projectDir);
   const current = readNativeRun(project, runRef);

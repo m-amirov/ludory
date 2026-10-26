@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { discoverDevHost } from '../src/dev-host.mjs';
 
 function fixture(helperSource, mutate = () => {}) {
@@ -326,4 +327,56 @@ rl.createInterface({input:process.stdin}).on('line', line => {
       /DEV_HELPER_/);
     else assert.equal(cap.available, false);
   }
+});
+
+test('visual DEV turn submits the exact binary and requires a witnessed image receipt', async t => {
+  const payload = Buffer.from('fixture-image-binary-not-rendered');
+  const expectedHash = createHash('sha256').update(payload).digest('hex');
+  const script = `
+const readline = require('node:readline');
+const crypto = require('node:crypto');
+const send = value => process.stdout.write(JSON.stringify(value)+'\\n');
+send({type:'ready',protocolVersion:1});
+let observed;
+readline.createInterface({input:process.stdin}).on('line', line => {
+ const item=JSON.parse(line);
+ if(item.type==='capabilities') send({type:'capabilities',id:item.id,
+  transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',
+  modelObserved:'gpt-6-sol',localToolsEnabled:false,imageInputVerified:true});
+ if(item.type==='run') send({type:'event',id:item.id,event:'prepared_selected'});
+ if(item.type==='prepared_selected_ack') {
+  const image=item.prepared.images[0];
+  if(!image || image.detail!=='high' || !image.imageUrl.startsWith('data:image/png;base64,')) process.exit(7);
+  observed={ref:image.ref,sha256:crypto.createHash('sha256').update(Buffer.from(image.imageUrl.split(',')[1],'base64')).digest('hex')};
+  send({type:'event',id:item.id,event:'image_attached',imageRef:observed.ref,imageSha256:observed.sha256});
+  send({type:'event',id:item.id,event:'send_activated'});
+ }
+ if(item.type==='send_activation_ack') {
+  send({type:'event',id:item.id,event:'submitted'});
+  send({type:'result',id:item.id,text:'review payload',transportVerified:true,
+   entitlementVerified:true,routeObserved:'web-dev',modelObserved:'gpt-6-sol',
+   localToolsEnabled:false,imageInputObserved:true,imageRef:observed.ref,imageSha256:observed.sha256});
+ }
+});`;
+  const { home, stableHome, root } = fixture(script);
+  const host = discoverDevHost({ devHome: home, stableHome });
+  cleanupHost(t, root, host);
+  assert.equal((await host.probe()).imageInputVerified, true);
+  const result = await host.turn({ prompt: 'source-bound visual task', taskId: 'art-review-1',
+    images: [{ ref: 'candidate-1', mimeType: 'image/png', bytes: payload, sha256: expectedHash }] });
+  assert.equal(result.imageInputObserved, true);
+  assert.equal(result.imageSha256, expectedHash);
+  assert.equal(result.imageRef, 'candidate-1');
+  assert.equal(result.modelObserved, 'gpt-6-sol');
+});
+
+test('visual DEV turn rejects helper without witnessed attachment support', async t => {
+  const { home, stableHome, root } = fixture(helper());
+  const host = discoverDevHost({ devHome: home, stableHome });
+  cleanupHost(t, root, host);
+  assert.equal((await host.probe()).available, true);
+  const payload = Buffer.from('image');
+  await assert.rejects(host.turn({ prompt: 'visual', taskId: 'needs-image',
+    images: [{ ref: 'candidate', mimeType: 'image/png', bytes: payload,
+      sha256: createHash('sha256').update(payload).digest('hex') }] }), /DEV_IMAGE_INPUT_UNVERIFIED/);
 });

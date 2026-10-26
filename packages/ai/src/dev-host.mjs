@@ -3,13 +3,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { ownData } from './capabilities.mjs';
 import { canonicalPhysicalDirectory } from '@ludory/core';
 
 const MAX_PROFILE_BYTES = 128 * 1024;
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const MAX_TEXT_BYTES = 2 * 1024 * 1024;
+const MAX_INPUT_IMAGE_BYTES = 10 * 1024 * 1024;
 const WEB_DEV_MODEL = 'gpt-6-sol';
 const CHILD_ENV_ALLOWLIST = ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT',
   'TMP', 'TEMP', 'TMPDIR', 'USERPROFILE', 'HOME', 'APPDATA', 'LOCALAPPDATA',
@@ -76,7 +77,27 @@ function observedRoute(value) {
       ownData(value, 'localToolsEnabled') !== false ||
       model !== WEB_DEV_MODEL) return null;
   return { available: true, reasonCode: 'AVAILABLE', modelObserved: model,
-    transportVerified: true, entitlementVerified: true, routeObserved: 'web-dev' };
+    transportVerified: true, entitlementVerified: true, routeObserved: 'web-dev',
+    imageInputVerified: ownData(value, 'imageInputVerified') === true };
+}
+
+function validatedImages(images) {
+  if (images === undefined) return [];
+  if (!Array.isArray(images) || images.length !== 1) throw errorWithCode('DEV_IMAGE_INPUT_INVALID');
+  const image = images[0];
+  if (!image || typeof image !== 'object' || Array.isArray(image) ||
+      typeof image.ref !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(image.ref) ||
+      !['image/png', 'image/jpeg', 'image/webp'].includes(image.mimeType) ||
+      !Buffer.isBuffer(image.bytes) || image.bytes.length < 1 ||
+      image.bytes.length > MAX_INPUT_IMAGE_BYTES ||
+      typeof image.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(image.sha256)) {
+    throw errorWithCode('DEV_IMAGE_INPUT_INVALID');
+  }
+  const bytes = Buffer.from(image.bytes);
+  if (createHash('sha256').update(bytes).digest('hex') !== image.sha256) {
+    throw errorWithCode('DEV_IMAGE_INPUT_INVALID');
+  }
+  return [{ ref: image.ref, mimeType: image.mimeType, bytes, sha256: image.sha256 }];
 }
 
 function isolatedHelperEnv(home) {
@@ -197,11 +218,20 @@ class BrowserDevHost {
       if (event === 'prepared_selected' && pending.phase === 'AWAIT_PREPARED') {
         pending.phase = 'PREPARED_ACK_PENDING';
         void this.send({ type: 'prepared_selected_ack', id,
-          prepared: { text: pending.prompt, images: [] } }).then(() => {
+          prepared: { text: pending.prompt, images: (pending.images ?? []).map(image => ({
+            ref: image.ref,
+            imageUrl: `data:${image.mimeType};base64,${image.bytes.toString('base64')}`,
+            detail: 'high',
+          })) } }).then(() => {
           if (this.pending.get(id) === pending && pending.phase === 'PREPARED_ACK_PENDING') {
             pending.phase = 'AWAIT_ACTIVATED';
           }
         }).catch(() => this.rejectPending(id, 'DEV_HELPER_SEND_FAILED'));
+      } else if (event === 'image_attached' && pending.phase === 'AWAIT_ACTIVATED' &&
+          pending.images?.length === 1 && pending.imageAcknowledged !== true &&
+          ownData(message, 'imageRef') === pending.images[0].ref &&
+          ownData(message, 'imageSha256') === pending.images[0].sha256) {
+        pending.imageAcknowledged = true;
       } else if (event === 'send_activated' && pending.phase === 'AWAIT_ACTIVATED') {
         pending.phase = 'ACTIVATION_ACK_PENDING';
         void this.send({ type: 'send_activation_ack', id }).then(() => {
@@ -210,6 +240,10 @@ class BrowserDevHost {
           }
         }).catch(() => this.rejectPending(id, 'DEV_HELPER_SEND_FAILED'));
       } else if (event === 'submitted' && pending.phase === 'AWAIT_SUBMITTED') {
+        if (pending.images?.length && !pending.imageAcknowledged) {
+          this.rejectPending(id, 'DEV_IMAGE_INPUT_UNVERIFIED');
+          return;
+        }
         pending.phase = 'SUBMITTED';
         pending.submitted = true;
       } else this.rejectPending(id, 'DEV_HELPER_PROTOCOL_INVALID');
@@ -284,24 +318,35 @@ class BrowserDevHost {
     return observed;
   }
 
-  async turn({ prompt, taskId }) {
+  async turn({ prompt, taskId, images }) {
     if (!this.capability) throw errorWithCode('DEV_ROUTE_UNVERIFIED');
     if (this.active) throw errorWithCode('DEV_HELPER_BUSY');
     if (typeof prompt !== 'string' || !prompt.trim() || Buffer.byteLength(prompt) > 64 * 1024 ||
         typeof taskId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,179}$/.test(taskId)) {
       throw errorWithCode('DEV_TASK_INVALID');
     }
+    const visualInputs = validatedImages(images);
+    if (visualInputs.length && this.capability.imageInputVerified !== true) {
+      throw errorWithCode('DEV_IMAGE_INPUT_UNVERIFIED');
+    }
     this.active = true;
     try {
-      const response = await this.request('run', { prompt }, this.turnTimeoutMs);
+      const response = await this.request('run', { prompt, images: visualInputs }, this.turnTimeoutMs);
       const observation = observedRoute(response);
       if (!observation || observation.modelObserved !== this.capability.modelObserved || !response.submitted) {
         throw errorWithCode('DEV_ROUTE_UNVERIFIED');
       }
+      if (visualInputs.length && (ownData(response, 'imageInputObserved') !== true ||
+          ownData(response, 'imageRef') !== visualInputs[0].ref ||
+          ownData(response, 'imageSha256') !== visualInputs[0].sha256)) {
+        throw errorWithCode('DEV_IMAGE_INPUT_UNVERIFIED');
+      }
       if (typeof response.text !== 'string' || !response.text.trim() ||
           Buffer.byteLength(response.text) > MAX_TEXT_BYTES) throw errorWithCode('DEV_RESPONSE_INVALID');
       return { status: 'HOST_OBSERVED', text: response.text,
-        modelObserved: observation.modelObserved, routeObserved: 'web-dev' };
+        modelObserved: observation.modelObserved, routeObserved: 'web-dev',
+        ...(visualInputs.length && { imageInputObserved: true,
+          imageRef: visualInputs[0].ref, imageSha256: visualInputs[0].sha256 }) };
     } catch (error) {
       await this.close();
       throw error;

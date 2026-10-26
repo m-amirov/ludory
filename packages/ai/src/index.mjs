@@ -5,6 +5,7 @@ export { discoverDevHost } from './dev-host.mjs';
 export { discoverImageHost, validateImageCapability } from './image-host.mjs';
 export { inspectGeneratedImage, decodeGeneratedImage } from './image-artifacts.mjs';
 export { planImageTask, verifyImagePlan, executeImageTask, planImageImport, executeImageImport } from './image-tasks.mjs';
+export { planArtReview, verifyArtReviewPlan, interpretArtReview, executeArtReview } from './art-review.mjs';
 export { planDevDraft, verifyDevDraftPlan, executeDevDraft,
   planDevDraftImport, executeDevDraftImport } from './draft-tasks.mjs';
 export { planWorkflow, executeWorkflow } from './workflows.mjs';

@@ -102,6 +102,15 @@ PNG/JPEG/WebP, `workflow image-import --apply` validates and stores the original
 `USER_DECLARED` provenance for review, never automatically publishing or approving it.
 See [Studio's built-in ImageGen instructions](packages/studio/README.md#codex-built-in-imagegen-originals-slice-c-experimental).
 
+The experimental `workflow art-review` accepts an imported image original and
+four checked scene/character/location/style references. An independent **GPT-6
+Sol (Web)** DEV session must actually receive the image; Ludory refuses to
+infer visual acceptance from text or from a configured model label. Explicit
+`--apply` writes append-only hash-bound artistic receipts, with P0/P1 rework,
+P2-only nonblocking notes, and an escalation after two serious rework reports.
+`PASS_ART` is **visual model feedback**, never copyright, owner, runtime, VK,
+Yandex or Release PASS. See [Web artistic review instructions](packages/studio/README.md#independent-web-art-review-experimental).
+
 For **existing games** with a canonical manifest, Studio now supports an
 opt-in, read-only-by-default profile association and updates:
 

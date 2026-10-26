@@ -270,3 +270,59 @@ node packages/studio/bin/ludory.mjs workflow image-import --project /path/to/new
 The built-in tool has no visible model/quality selection parameter. `qualityPreference: highest-available` is an instruction to pursue the best available result using a precise brief, **not an SDK setting or a verified model ID**; the actual model is left unobserved. Model availability, generation limits and reference support depend on the active Codex session. Selected external visual references are not currently part of the image handoff hash and therefore cannot be claimed as cryptographically bound by Ludory. A text packet alone cannot assert that an image has been generated. Recheck story fidelity, composition and technical quality after seeing the output.
 
 Imported originals are stored exclusively under `.ludory/ai/runs/<id>/images/`. Import requires `handoffSha256` from the original `workflow image` packet and rejects a changed brief, project source binding, run head or stage before staging. The native image receipt records this token as declared attribution. Signatures, PNG integrity, JPEG/WebP structure and **full JPEG/WebP pixel decode with sharp**, dimensions, byte limits and SHA-256 receipts are verified before staging. Imports reject symlinks, hardlinks, parent aliases and content/extension mismatches; orphan files from interruptions remain untrusted. Provenance is `USER_DECLARED`: the CLI cannot independently attest that the tool ran. Neither operation publishes runtime assets, updates rights manifests or grants art/release PASS. Tests do not establish real Codex tool invocation or real Windows-host completion.
+
+## Independent Web art review (experimental)
+
+After `workflow image-import --apply` in a new Studio game, ask the primary Codex
+agent to review four selected text references and approve their sufficiency.
+These are project-relative UTF-8 files, not inferred from an image caption;
+an absent character or prop should be explicitly explained in its reference.
+
+```sh
+# Read-only preview: no helper launch and no writes. Copy the `image` value
+# from image-import's `output.outputPath`, NOT the source candidate filename.
+node packages/studio/bin/ludory.mjs workflow art-review --project /path/to/new-studio-game \
+  --run RUN_ID --image .ludory/ai/runs/RUN_ID/images/IMPORTED_ORIGINAL.png \
+  --source 'scene:narrative/scene.md;characters:narrative/characters.md;location:art/location.md;style:art/style.md' \
+  --context-reviewed --json
+
+# The primary Codex agent must run this in its real authenticated DEV environment.
+node packages/studio/bin/ludory.mjs workflow art-review --project /path/to/new-studio-game \
+  --run RUN_ID --image .ludory/ai/runs/RUN_ID/images/IMPORTED_ORIGINAL.png \
+  --source 'scene:narrative/scene.md;characters:narrative/characters.md;location:art/location.md;style:art/style.md' \
+  --context-reviewed --apply --json
+```
+
+Only a capability-verified isolated `chatgpt-web/gpt-6-sol` helper (`reasoning: high`)
+may evaluate the image. Ludory passes the **actual PNG/JPEG/WebP bytes**, max
+10 MiB, in the helper's `prepared.images` envelope and requires a witnessed
+`image_attached` event plus `imageInputObserved`, image reference and matching
+SHA-256 on the final result. The compatibility helper must emit `ready` with
+`protocolVersion: 1`, a verified `capabilities` frame including
+`imageInputVerified: true`, and those attachment observations from its browser
+worker. **The upstream unmodified `codex-chatgpt-web` browser helper currently
+does not supply that complete Ludory attestation protocol.** Its binary-image
+support alone does not satisfy the gate. An incompatible/older helper yields
+`NEEDS_USER_ACTION` or `BLOCKED`: a real Codex + DEV Web smoke is required after
+installing a protocol-compatible helper. Do not report a successful real visual
+test based only on the CI fake helper.
+
+The independent model must return strict JSON with `schemaVersion: 1`,
+`imageSha256`, `imageVisible`, `verdict`, `summary` and evidence-bearing findings.
+P0/P1 covers wrong people, story facts, locations, important props, bad cropping
+and significant composition errors and requires `REWORK`. P2-only cosmetic
+notes are recorded but do not force revision. A hidden image, malformed output,
+stale source, absent visual evidence or unknown model is `BLOCKED` (no acceptance).
+Two serious `REWORK` receipts in the **same run** cause `ESCALATE` with no third
+automatic attempt; the agent must stop and ask the owner how to proceed. The
+current run schema permits only one `IMAGE_IMPORTED` original: a corrected
+candidate requires a new native run, not a silent replacement of stored bytes.
+The two-attempt guard is per run, not a cross-run/global scene budget.
+
+With `--apply`, confirmed host observations are recorded in exclusive numbered
+JSON and commit-hash files under `.ludory/ai/runs/<RUN_ID>/reviews/`. Existing
+original image bytes and game runtime files are never rewritten; a changed
+receipt/hash or symlinked review namespace fails closed. The receipt means only
+`HOST_OBSERVED` Web artistic feedback. **`PASS_ART` does not confer human art
+approval, asset rights, provenance of ImageGen, integration, platform release or
+production deployment.** No review automatically moves the native workflow stage.
