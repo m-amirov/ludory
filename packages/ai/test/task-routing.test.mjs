@@ -201,3 +201,96 @@ test('a direct planner discovery hook cannot elevate bare availability claims in
       'NEEDS_USER_ACTION');
   }
 });
+
+test('inherited host attestations and host candidate entries never make a route ready', t => {
+  const project = freshStudioGame(t);
+  const inheritedTerra = Object.create(verifiedTerra);
+  const inheritedDev = Object.create({ ...verifiedDev, reasonCode: 'AVAILABLE' });
+  const capabilities = discoverTaskCapabilities(project, { taskKind: 'image',
+    hostProbe: () => ({ imageTerra: inheritedTerra, webDev: inheritedDev }) });
+  assert.equal(capabilities.imageTerra.available, false);
+  assert.equal(capabilities.webDev.available, false);
+  assert.equal(planTaskRoute(project, { taskKind: 'image' },
+    { discover: () => capabilities }).status, 'NEEDS_USER_ACTION');
+  assert.equal(planTaskRoute(project, { taskKind: 'episode-script' },
+    { discover: () => ({ webDev: inheritedDev }) }).status, 'NEEDS_USER_ACTION');
+
+  const inheritedCandidate = Object.create({ imageTerra: verifiedTerra });
+  assert.equal(discoverTaskCapabilities(project, { taskKind: 'image',
+    hostProbe: () => inheritedCandidate }).imageTerra.available, false);
+
+  const inheritedCodex = Object.create({ available: true, reasonCode: 'AVAILABLE' });
+  assert.equal(planTaskRoute(project, { taskKind: 'mechanics' },
+    { discover: () => ({ codex: inheritedCodex }) }).status, 'NEEDS_USER_ACTION');
+});
+
+test('accessor-based attestation fields are not read or trusted', t => {
+  const project = freshStudioGame(t);
+  let reads = 0;
+  const accessorHost = { ...verifiedTerra };
+  Object.defineProperty(accessorHost, 'modelObserved', { enumerable: true, get() {
+    reads++;
+    return 'gpt-5.6-terra';
+  } });
+  const accessorCandidates = {};
+  Object.defineProperty(accessorCandidates, 'imageTerra', { enumerable: true, get() {
+    reads++;
+    return verifiedTerra;
+  } });
+  assert.equal(discoverTaskCapabilities(project, { taskKind: 'image',
+    hostProbe: () => ({ imageTerra: accessorHost }) }).imageTerra.available, false);
+  assert.equal(discoverTaskCapabilities(project, { taskKind: 'image',
+    hostProbe: () => accessorCandidates }).imageTerra.available, false);
+  assert.equal(reads, 0);
+});
+
+test('host rejection records distinguish transport, entitlement, model and Image Gen failure', t => {
+  const project = freshStudioGame(t);
+  const invalid = [
+    [{ ...verifiedTerra, transportVerified: false }, 'AI_ROUTING_TRANSPORT_UNVERIFIED'],
+    [{ ...verifiedTerra, entitlementVerified: false }, 'AI_ROUTING_ENTITLEMENT_UNVERIFIED'],
+    [{ ...verifiedTerra, modelObserved: 'gpt-6-sol' }, 'AI_ROUTING_MODEL_UNVERIFIED'],
+    [{ ...verifiedTerra, imageGenCallable: false }, 'AI_ROUTING_IMAGE_GEN_UNVERIFIED'],
+  ];
+  for (const [candidate, reason] of invalid) {
+    const capabilities = discoverTaskCapabilities(project, { taskKind: 'image',
+      hostProbe: () => ({ imageTerra: candidate }) });
+    assert.equal(capabilities.imageTerra.reasonCode, reason);
+    const plan = planTaskRoute(project, { taskKind: 'image', model: 'terra' },
+      { discover: () => capabilities });
+    assert.equal(plan.status, 'NEEDS_USER_ACTION');
+    assert.equal(plan.reasonCode, 'AI_ROUTING_PINNED_MODEL_UNAVAILABLE');
+    assert.equal(plan.capabilityReasonCode, reason);
+    assert.equal(plan.capabilityReasons.terra, reason);
+  }
+});
+
+test('automatic SOL fallback records why Terra preflight was rejected', t => {
+  const project = freshStudioGame(t);
+  const capabilities = discoverTaskCapabilities(project, { taskKind: 'image',
+    hostProbe: () => ({ imageTerra: { ...verifiedTerra, entitlementVerified: false },
+      imageSol: verifiedSol }) });
+  const plan = planTaskRoute(project, { taskKind: 'image' }, { discover: () => capabilities });
+  assert.equal(plan.status, 'READY');
+  assert.equal(plan.selectedRoute, 'image-sol');
+  assert.equal(plan.capabilityReasons.terra, 'AI_ROUTING_ENTITLEMENT_UNVERIFIED');
+  assert.equal(plan.capabilityReasons.sol, 'AVAILABLE');
+  assert.equal(Object.hasOwn(plan, 'capabilityReasonCode'), false);
+});
+
+test('Codex and Web DEV previews retain bounded failure evidence', t => {
+  const project = freshStudioGame(t);
+  const timeout = discoverTaskCapabilities(project, { taskKind: 'mechanics',
+    checkCodex: () => ({ ok: false, code: 'EXECUTOR_TIMEOUT' }) });
+  const mechanics = planTaskRoute(project, { taskKind: 'mechanics' }, { discover: () => timeout });
+  assert.equal(mechanics.reasonCode, 'AI_ROUTING_CODEX_UNAVAILABLE');
+  assert.equal(mechanics.capabilityReasonCode, 'EXECUTOR_TIMEOUT');
+  const invalidDev = discoverTaskCapabilities(project, { taskKind: 'episode-script',
+    hostProbe: () => ({ webDev: { ...verifiedDev, entitlementVerified: false } }) });
+  const script = planTaskRoute(project, { taskKind: 'episode-script' }, { discover: () => invalidDev });
+  assert.equal(script.reasonCode, 'AI_ROUTING_WEB_DEV_UNAVAILABLE');
+  assert.equal(script.capabilityReasonCode, 'AI_ROUTING_ENTITLEMENT_UNVERIFIED');
+  const spoofed = planTaskRoute(project, { taskKind: 'mechanics' },
+    { discover: () => ({ codex: { available: false, reasonCode: 'UNTRUSTED\nMESSAGE' } }) });
+  assert.equal(spoofed.capabilityReasonCode, 'AI_ROUTING_CODEX_UNVERIFIED');
+});

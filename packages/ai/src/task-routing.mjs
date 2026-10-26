@@ -10,6 +10,27 @@ const PREFERRED_ROUTES = Object.freeze({
   'functional-check': 'codex',
 });
 
+const FAILURE_REASONS = new Set([
+  'AI_ROUTING_HOST_UNVERIFIED', 'AI_ROUTING_TRANSPORT_UNVERIFIED',
+  'AI_ROUTING_ENTITLEMENT_UNVERIFIED', 'AI_ROUTING_MODEL_UNVERIFIED',
+  'AI_ROUTING_ROUTE_UNVERIFIED', 'AI_ROUTING_IMAGE_GEN_UNVERIFIED',
+  'AI_ROUTING_CODEX_UNVERIFIED', 'AI_ROUTING_CODEX_PROBE_FAILED',
+  'EXECUTOR_UNAVAILABLE', 'EXECUTOR_TIMEOUT', 'EXECUTOR_OUTPUT_LIMIT',
+  'EXECUTOR_WRAPPER_UNSUPPORTED', 'EXECUTOR_SPAWN_FAILED',
+]);
+
+function capabilityReason(record, kind) {
+  if (isVerifiedCapability(record, kind)) return 'AVAILABLE';
+  try {
+    const descriptor = record && typeof record === 'object' &&
+      Object.getOwnPropertyDescriptor(record, 'reasonCode');
+    if (descriptor && Object.hasOwn(descriptor, 'value') && FAILURE_REASONS.has(descriptor.value)) {
+      return descriptor.value;
+    }
+  } catch { /* Treat malformed discovery as unverifiable. */ }
+  return kind === 'codex' ? 'AI_ROUTING_CODEX_UNVERIFIED' : 'AI_ROUTING_HOST_UNVERIFIED';
+}
+
 /** A read-only dispatch explanation. Actual model adapters are separate slices. */
 export function planTaskRoute(projectDir, options = {}, { discover = discoverTaskCapabilities } = {}) {
   if (!options || typeof options !== 'object' || Array.isArray(options) ||
@@ -38,6 +59,10 @@ export function planTaskRoute(projectDir, options = {}, { discover = discoverTas
   try { capabilities = discover(project, { taskKind }); }
   catch { capabilities = null; }
   const items = capabilities && typeof capabilities === 'object' ? capabilities : {};
+  const capabilityReasons = taskKind === 'image' ? {
+    terra: capabilityReason(items.imageTerra, 'imageTerra'),
+    sol: capabilityReason(items.imageSol, 'imageSol'),
+  } : null;
   let route = null;
   if (preferredRoute === 'codex') {
     if (isVerifiedCapability(items.codex, 'codex')) route = 'codex';
@@ -52,11 +77,18 @@ export function planTaskRoute(projectDir, options = {}, { discover = discoverTas
       : route === 'image-terra' ? items.imageTerra : items.imageSol;
     return { ...base, status: 'READY', selectedRoute: route, reasonCode: 'AI_ROUTING_ROUTE_VERIFIED',
       ...(capability.modelObserved && { modelObserved: capability.modelObserved }),
+      ...(capabilityReasons && { capabilityReasons }),
       nextAction: { kind: 'REVIEW_ROUTE', executable: false } };
   }
   const reasonCode = taskKind === 'image'
     ? model === 'auto' ? 'AI_ROUTING_IMAGE_GEN_UNAVAILABLE' : 'AI_ROUTING_PINNED_MODEL_UNAVAILABLE'
     : preferredRoute === 'web-dev' ? 'AI_ROUTING_WEB_DEV_UNAVAILABLE' : 'AI_ROUTING_CODEX_UNAVAILABLE';
+  const capabilityReasonCode = taskKind === 'image' ? model === 'auto' ? null
+    : capabilityReasons[model]
+    : capabilityReason(items[preferredRoute === 'codex' ? 'codex' : 'webDev'],
+      preferredRoute === 'codex' ? 'codex' : 'webDev');
   return { ...base, status: 'NEEDS_USER_ACTION', selectedRoute: 'manual', reasonCode,
+    ...(capabilityReasons && { capabilityReasons }),
+    ...(capabilityReasonCode && { capabilityReasonCode }),
     nextAction: { kind: 'MANUAL_HANDOFF', executable: false } };
 }

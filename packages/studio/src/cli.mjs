@@ -113,6 +113,10 @@ function displayWorkflow(result, json, out) {
   if (result.preferredRoute) out(`  preferred route: ${result.preferredRoute}\n`);
   if (result.selectedRoute) out(`  selected route: ${result.selectedRoute}\n`);
   if (result.reasonCode) out(`  reason: ${result.reasonCode}\n`);
+  if (result.capabilityReasonCode) out(`  capability: ${result.capabilityReasonCode}\n`);
+  for (const [producer, reason] of Object.entries(result.capabilityReasons ?? {})) {
+    out(`  ${producer} capability: ${reason}\n`);
+  }
   if (result.warning) out(`  warning: ${result.warning}\n`);
   if (result.executorCode) out(`  result: ${result.executorCode}\n`);
   if (result.nextAction?.kind) out(`  next: ${result.nextAction.kind}\n`);

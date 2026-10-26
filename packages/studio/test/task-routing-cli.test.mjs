@@ -80,10 +80,15 @@ test('workflow route pinned Terra never silently changes model when hosts are ab
   assert.equal(plan.status, 'NEEDS_USER_ACTION');
   assert.equal(plan.selectedRoute, 'manual');
   assert.equal(plan.reasonCode, 'AI_ROUTING_PINNED_MODEL_UNAVAILABLE');
+  assert.equal(plan.capabilityReasonCode, 'AI_ROUTING_HOST_UNVERIFIED');
   assert.equal(Object.hasOwn(plan, 'modelObserved'), false);
   const printed = cli('workflow', 'route', '--project', project, '--task', 'image');
   assert.equal(printed.code, 0);
   assert.match(printed.stdout, /MANUAL_HANDOFF/);
+  assert.match(printed.stdout, /terra capability: AI_ROUTING_HOST_UNVERIFIED/);
+  assert.match(printed.stdout, /sol capability: AI_ROUTING_HOST_UNVERIFIED/);
+  const pinnedText = cli('workflow', 'route', '--project', project, '--task', 'image', '--model', 'terra');
+  assert.match(pinnedText.stdout, /capability: AI_ROUTING_HOST_UNVERIFIED/);
 });
 
 test('workflow route returns a blocker for a frozen game without updating its files', t => {
