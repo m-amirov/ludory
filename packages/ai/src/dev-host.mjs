@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { ownData } from './capabilities.mjs';
+import { canonicalPhysicalDirectory } from '@ludory/core';
 
 const MAX_PROFILE_BYTES = 128 * 1024;
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
@@ -21,10 +22,11 @@ const sameCanonical = (a, b) => process.platform === 'win32'
 
 function isolatedHome(home, stable) {
   if (sameCanonical(home, stable)) throw errorWithCode('DEV_PROFILE_NOT_ISOLATED');
-  // Reject symlink/junction aliases anywhere in the DEV path before reading its files.
-  const canonical = fs.realpathSync.native(home);
-  const stat = fs.lstatSync(home);
-  if (!sameCanonical(home, canonical) || !stat.isDirectory() || stat.isSymbolicLink()) {
+  // Resolve NTFS short names, but reject symbolic links and junctions in every ancestor.
+  let canonical;
+  try { canonical = canonicalPhysicalDirectory(home); }
+  catch (error) {
+    if (error.code === 'ENOENT') throw error;
     throw errorWithCode('DEV_PROFILE_NOT_ISOLATED');
   }
   try {
@@ -39,17 +41,18 @@ function isolatedHome(home, stable) {
 
 function safeFile(file, base) {
   if (typeof file !== 'string' || !path.isAbsolute(file)) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
+  // The path may contain 8.3 NTFS names. Canonicalize its real, non-junction
+  // parent before checking containment; lstat keeps final-file symlinks out.
+  let real;
+  try {
+    const parent = canonicalPhysicalDirectory(path.dirname(file));
+    const candidate = path.join(parent, path.basename(file));
+    const stat = fs.lstatSync(candidate);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
+    real = fs.realpathSync.native(candidate);
+  } catch { throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED'); }
   if (base) {
-    const lexical = path.relative(path.resolve(base), path.resolve(file));
-    if (!lexical || lexical === '..' || lexical.startsWith(`..${path.sep}`) || path.isAbsolute(lexical)) {
-      throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
-    }
-  }
-  const real = fs.realpathSync(file);
-  const stat = fs.statSync(real);
-  if (!stat.isFile()) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
-  if (base) {
-    const inside = path.relative(fs.realpathSync(base), real);
+    const inside = path.relative(canonicalPhysicalDirectory(base), real);
     if (!inside || inside === '..' || inside.startsWith(`..${path.sep}`) || path.isAbsolute(inside)) {
       throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
     }
@@ -336,10 +339,10 @@ export function discoverDevHost({ devHome = process.env.CODEX_WEB_GPT_DEV_HOME |
   path.join(os.homedir(), '.codex-chatgpt-web-dev'),
 stableHome = process.env.CODEX_CHATGPT_WEB_HOME || path.join(os.homedir(), '.codex-chatgpt-web'),
 spawnImpl = spawn, startupTimeoutMs = 15_000, probeTimeoutMs = 3_000, turnTimeoutMs = 1_800_000 } = {}) {
-  const home = path.resolve(devHome);
+  const requestedHome = path.resolve(devHome);
   const stable = path.resolve(stableHome);
   try {
-    isolatedHome(home, stable);
+    const home = isolatedHome(requestedHome, stable);
     const config = readProfileJson(path.join(home, 'config.json'), home);
     if (config.version !== 3 || config.mode !== 'browser-only' ||
         typeof config.releaseVersion !== 'string') return unavailable('DEV_DESCRIPTOR_UNTRUSTED');

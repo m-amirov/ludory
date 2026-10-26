@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { defineGame } from '@ludory/core';
+import { defineGame, canonicalPhysicalDirectory } from '@ludory/core';
 
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
@@ -17,11 +17,14 @@ function directoryIdentity(dir) {
 }
 
 function nativeRoot(projectDir) {
-  const resolved = path.resolve(projectDir);
-  const canonical = fs.realpathSync.native(resolved);
-  if (!samePath(resolved, canonical)) throw new Error('SOURCE_PROJECT_DIRECTORY_SYMBOLIC');
-  directoryIdentity(resolved);
-  return resolved;
+  let canonical;
+  try { canonical = canonicalPhysicalDirectory(projectDir); }
+  catch (error) {
+    if (error.message === 'DIRECTORY_NOT_PHYSICAL') throw new Error('SOURCE_PROJECT_DIRECTORY_SYMBOLIC');
+    throw error;
+  }
+  directoryIdentity(canonical);
+  return canonical;
 }
 
 function git(project, ...args) {

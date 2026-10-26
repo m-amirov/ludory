@@ -10,7 +10,7 @@ export function runGit(project, ...args) {
 }
 
 export function nativeProject(t) {
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-native-ai-'));
+  const project = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-native-ai-')));
   t.after(() => fs.rmSync(project, { recursive: true, force: true }));
   fs.writeFileSync(path.join(project, 'ludory.project.json'), `${JSON.stringify({
     schemaVersion: 1, id: 'native-game', version: '0.1.0', title: { en: 'Native Game' },
