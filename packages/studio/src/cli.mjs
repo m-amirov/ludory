@@ -3,7 +3,7 @@ import { inspectProject, planInit, planMigration, applyPlan } from './projects.m
 import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
-import { planWorkflow, executeWorkflow } from '@ludory/ai';
+import { planWorkflow, executeWorkflow, planTaskRoute } from '@ludory/ai';
 
 const usage = `Ludory Studio 0.1.0 — native game-development workflows
 
@@ -19,6 +19,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory templates show --name <id> [--catalog <directory>] [--json]
   ludory create --project <empty-directory> --id <slug> --title <name> --lang <locale> --profile <id> --template <id> --targets <comma-separated> [--version <semver>] [--catalog <directory>] [--apply] [--json]
   ludory workflow doctor --project <game-directory> [--json]
+  ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--model <auto|terra|sol>] [--json]
   ludory workflow status --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow start --project <game-directory> --pipeline <audit-repair-loop|production-art> --target <text> --in-scope <a;b> --acceptance <text> --mutation-boundary <text> [--out-of-scope <a;b>] [--apply] [--json]
@@ -32,6 +33,8 @@ No writes by default. init/migrate --apply only create ludory.project.json;
 create --apply only creates new template files, manifest and Studio receipt in an empty directory.
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
 workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
+workflow route is read-only: it checks executor eligibility; Web DEV and Image Gen require verified host adapters.
+For image tasks, auto prefers Terra then SOL at preflight; pinned models never switch silently.
 Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.
 workflow cycle checks Codex-observed Node test execution with at most two repairs; it never automatically advances a stage.
 Codex tool telemetry is not independent QA and cannot establish Release PASS.
@@ -48,7 +51,8 @@ function argumentsFor(command, argv) {
   const common = new Set(['--project', '--json']);
   const workflowCommon = [...common];
   const allowed = command.startsWith('workflow-')
-    ? new Set(command === 'workflow-doctor' ? workflowCommon
+    ? new Set(command === 'workflow-route' ? [...workflowCommon, '--task', '--model']
+      : command === 'workflow-doctor' ? workflowCommon
       : command === 'workflow-status' || command === 'workflow-next' ? [...workflowCommon, '--run']
           : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
             : command === 'workflow-continue' ? [...workflowCommon, '--run', '--executor', '--apply']
@@ -105,6 +109,14 @@ function displayWorkflow(result, json, out) {
   if (result.engine) out(`  engine: ${result.engine}\n`);
   if (result.nativeStatus) out(`  native status: ${result.nativeStatus}\n`);
   if (result.executor) out(`  executor: ${result.executor}\n`);
+  if (result.taskKind) out(`  task: ${result.taskKind}\n`);
+  if (result.preferredRoute) out(`  preferred route: ${result.preferredRoute}\n`);
+  if (result.selectedRoute) out(`  selected route: ${result.selectedRoute}\n`);
+  if (result.reasonCode) out(`  reason: ${result.reasonCode}\n`);
+  if (result.capabilityReasonCode) out(`  capability: ${result.capabilityReasonCode}\n`);
+  for (const [producer, reason] of Object.entries(result.capabilityReasons ?? {})) {
+    out(`  ${producer} capability: ${reason}\n`);
+  }
   if (result.warning) out(`  warning: ${result.warning}\n`);
   if (result.executorCode) out(`  result: ${result.executorCode}\n`);
   if (result.nextAction?.kind) out(`  next: ${result.nextAction.kind}\n`);
@@ -185,10 +197,17 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'workflow') {
       const [operation, ...args] = rest;
-      if (!['doctor', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
+      if (!['doctor', 'route', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
         throw new Error(`Unknown workflow operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`workflow-${operation}`, args);
+      if (operation === 'route') {
+        const plan = planTaskRoute(flags.get('--project'), {
+          taskKind: flags.get('--task'), model: flags.get('--model') ?? 'auto',
+        });
+        displayWorkflow(plan, flags.has('--json'), out);
+        return plan.status === 'BLOCKED' ? 2 : 0;
+      }
       const plan = planWorkflow(flags.get('--project'), operation, workflowOptions(flags));
       const result = executeWorkflow(plan, { apply: flags.has('--apply'), executor });
       displayWorkflow(result, flags.has('--json'), out);
