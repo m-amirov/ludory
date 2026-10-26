@@ -265,6 +265,26 @@ test('host rejection records distinguish transport, entitlement, model and Image
   }
 });
 
+test('negative aggregate host availability preserves its observed rejection cause', t => {
+  const project = freshStudioGame(t);
+  for (const [changes, reason] of [
+    [{ transportVerified: false }, 'AI_ROUTING_TRANSPORT_UNVERIFIED'],
+    [{ entitlementVerified: false }, 'AI_ROUTING_ENTITLEMENT_UNVERIFIED'],
+    [{ modelObserved: 'gpt-6-sol' }, 'AI_ROUTING_MODEL_UNVERIFIED'],
+    [{ imageGenCallable: false }, 'AI_ROUTING_IMAGE_GEN_UNVERIFIED'],
+  ]) {
+    const capabilities = discoverTaskCapabilities(project, { taskKind: 'image',
+      hostProbe: () => ({ imageTerra: { ...verifiedTerra, ...changes, available: false } }) });
+    const plan = planTaskRoute(project, { taskKind: 'image', model: 'terra' },
+      { discover: () => capabilities });
+    assert.equal(plan.status, 'NEEDS_USER_ACTION');
+    assert.equal(plan.capabilityReasonCode, reason);
+  }
+  const contradictory = discoverTaskCapabilities(project, { taskKind: 'image',
+    hostProbe: () => ({ imageTerra: { ...verifiedTerra, available: false } }) });
+  assert.equal(contradictory.imageTerra.reasonCode, 'AI_ROUTING_HOST_UNVERIFIED');
+});
+
 test('automatic SOL fallback records why Terra preflight was rejected', t => {
   const project = freshStudioGame(t);
   const capabilities = discoverTaskCapabilities(project, { taskKind: 'image',
@@ -293,4 +313,34 @@ test('Codex and Web DEV previews retain bounded failure evidence', t => {
   const spoofed = planTaskRoute(project, { taskKind: 'mechanics' },
     { discover: () => ({ codex: { available: false, reasonCode: 'UNTRUSTED\nMESSAGE' } }) });
   assert.equal(spoofed.capabilityReasonCode, 'AI_ROUTING_CODEX_UNVERIFIED');
+});
+
+test('planner refuses inherited top-level capability candidates from direct discovery', t => {
+  const project = freshStudioGame(t);
+  const cases = [
+    [{ taskKind: 'mechanics' }, { codex: { available: true, reasonCode: 'AVAILABLE' } }],
+    [{ taskKind: 'episode-script' }, { webDev: { ...verifiedDev, reasonCode: 'AVAILABLE' } }],
+    [{ taskKind: 'image' }, { imageTerra: { ...verifiedTerra, reasonCode: 'AVAILABLE' } }],
+  ];
+  for (const [task, inherited] of cases) {
+    const plan = planTaskRoute(project, task, { discover: () => Object.create(inherited) });
+    assert.equal(plan.status, 'NEEDS_USER_ACTION');
+    assert.equal(plan.selectedRoute, 'manual');
+    assert.equal(Object.hasOwn(plan, 'modelObserved'), false);
+  }
+});
+
+test('planner never invokes a mutable getter for candidate capabilities or observed models', t => {
+  const project = freshStudioGame(t);
+  let getterReads = 0;
+  const candidates = {};
+  Object.defineProperty(candidates, 'imageTerra', { enumerable: true, get() {
+    getterReads++;
+    return getterReads < 3 ? { ...verifiedTerra, reasonCode: 'AVAILABLE' }
+      : { available: false, modelObserved: 'forged-model' };
+  } });
+  const plan = planTaskRoute(project, { taskKind: 'image' }, { discover: () => candidates });
+  assert.equal(plan.status, 'NEEDS_USER_ACTION');
+  assert.equal(Object.hasOwn(plan, 'modelObserved'), false);
+  assert.equal(getterReads, 0);
 });

@@ -1,6 +1,6 @@
 import { inspectNativeProject } from './source.mjs';
 import { hasStudioCreationReceipt } from './executor.mjs';
-import { discoverTaskCapabilities, isVerifiedCapability } from './capabilities.mjs';
+import { discoverTaskCapabilities, isVerifiedCapability, ownData } from './capabilities.mjs';
 
 const PREFERRED_ROUTES = Object.freeze({
   mechanics: 'codex',
@@ -58,7 +58,9 @@ export function planTaskRoute(projectDir, options = {}, { discover = discoverTas
   let capabilities;
   try { capabilities = discover(project, { taskKind }); }
   catch { capabilities = null; }
-  const items = capabilities && typeof capabilities === 'object' ? capabilities : {};
+  // Snapshot each candidate once, without invoking inherited or accessor properties.
+  const items = { codex: ownData(capabilities, 'codex'), webDev: ownData(capabilities, 'webDev'),
+    imageTerra: ownData(capabilities, 'imageTerra'), imageSol: ownData(capabilities, 'imageSol') };
   const capabilityReasons = taskKind === 'image' ? {
     terra: capabilityReason(items.imageTerra, 'imageTerra'),
     sol: capabilityReason(items.imageSol, 'imageSol'),
@@ -75,8 +77,9 @@ export function planTaskRoute(projectDir, options = {}, { discover = discoverTas
   if (route) {
     const capability = route === 'codex' ? items.codex : route === 'web-dev' ? items.webDev
       : route === 'image-terra' ? items.imageTerra : items.imageSol;
+    const modelObserved = ownData(capability, 'modelObserved');
     return { ...base, status: 'READY', selectedRoute: route, reasonCode: 'AI_ROUTING_ROUTE_VERIFIED',
-      ...(capability.modelObserved && { modelObserved: capability.modelObserved }),
+      ...(modelObserved && { modelObserved }),
       ...(capabilityReasons && { capabilityReasons }),
       nextAction: { kind: 'REVIEW_ROUTE', executable: false } };
   }

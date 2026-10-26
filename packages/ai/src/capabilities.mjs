@@ -5,7 +5,8 @@ const checkCodexVersion = plan => checkCodexAvailable(plan, { timeoutMs: 5_000 }
 const validModelId = value => typeof value === 'string' &&
   /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(value);
 
-function ownData(record, key) {
+/** Read only a direct data property; inherited values and getters are not attestation. */
+export function ownData(record, key) {
   if (!record || typeof record !== 'object' || Array.isArray(record)) return undefined;
   try {
     const descriptor = Object.getOwnPropertyDescriptor(record, key);
@@ -15,8 +16,9 @@ function ownData(record, key) {
 
 function normalizeHost(record, kind) {
   const modelObserved = ownData(record, 'modelObserved');
+  const available = ownData(record, 'available');
   if (!record || typeof record !== 'object' || Array.isArray(record) ||
-      ownData(record, 'available') !== true) {
+      (available !== true && available !== false)) {
     return unavailable('AI_ROUTING_HOST_UNVERIFIED');
   }
   if (ownData(record, 'transportVerified') !== true) return unavailable('AI_ROUTING_TRANSPORT_UNVERIFIED');
@@ -31,6 +33,7 @@ function normalizeHost(record, kind) {
       return unavailable('AI_ROUTING_MODEL_UNVERIFIED');
     }
   }
+  if (!available) return unavailable('AI_ROUTING_HOST_UNVERIFIED');
   return { available: true, reasonCode: 'AVAILABLE', modelObserved,
     transportVerified: true, entitlementVerified: true,
     ...(kind === 'webDev' ? { routeObserved: 'web-dev' } : { imageGenCallable: true }) };
