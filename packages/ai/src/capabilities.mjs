@@ -4,7 +4,6 @@ const unavailable = reasonCode => ({ available: false, reasonCode });
 const checkCodexVersion = plan => checkCodexAvailable(plan, { timeoutMs: 5_000 });
 const validModelId = value => typeof value === 'string' &&
   /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(value);
-const GPT_IMAGE_IDS = new Set(['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare']);
 
 function isRecord(value) {
   if (!value || typeof value !== 'object') return false;
@@ -45,28 +44,10 @@ function normalizeHost(record, kind) {
     ...(kind === 'webDev' ? { routeObserved: 'web-dev' } : { imageGenCallable: true }) };
 }
 
-function normalizeGptImage(record) {
-  if (ownData(record, 'available') !== true) return unavailable('AI_ROUTING_HOST_UNVERIFIED');
-  if (ownData(record, 'provider') !== 'openai' ||
-      ownData(record, 'routeObserved') !== 'gpt-image' ||
-      ownData(record, 'transportConfigured') !== true ||
-      ownData(record, 'paidAuthorized') !== true ||
-      ownData(record, 'imageGenCallable') !== true ||
-      !GPT_IMAGE_IDS.has(ownData(record, 'modelRequested')) ||
-      ownData(record, 'modelObserved') !== null) {
-    return unavailable('AI_ROUTING_IMAGE_GEN_UNVERIFIED');
-  }
-  return { available: true, reasonCode: 'AVAILABLE', provider: 'openai',
-    routeObserved: 'gpt-image', transportConfigured: true, paidAuthorized: true,
-    imageGenCallable: true, modelRequested: ownData(record, 'modelRequested'), modelObserved: null };
-}
-
 /** Validate even injected preflight results before granting a ready route. */
 export function isVerifiedCapability(record, kind) {
   if (kind === 'codex') return ownData(record, 'available') === true &&
     ownData(record, 'reasonCode') === 'AVAILABLE';
-  if (kind === 'imageGpt') return ownData(record, 'reasonCode') === 'AVAILABLE' &&
-    normalizeGptImage(record).available === true;
   return ownData(record, 'reasonCode') === 'AVAILABLE' && normalizeHost(record, kind).available === true;
 }
 
@@ -88,7 +69,6 @@ export function discoverTaskCapabilities(project, { taskKind, checkCodex = check
   catch { host = null; }
   const candidates = isRecord(host) ? host : {};
   return { codex, webDev: normalizeHost(ownData(candidates, 'webDev'), 'webDev'),
-    imageGpt: normalizeGptImage(ownData(candidates, 'imageGpt')),
     imageTerra: normalizeHost(ownData(candidates, 'imageTerra'), 'imageTerra'),
     imageSol: normalizeHost(ownData(candidates, 'imageSol'), 'imageSol') };
 }

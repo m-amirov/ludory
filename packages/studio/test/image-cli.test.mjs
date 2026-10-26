@@ -29,50 +29,27 @@ async function cli(argv, injection = {}) {
     out: chunk => { stdout += chunk; }, err: chunk => { stderr += chunk; } });
   return { code, stdout, stderr, result: stdout.trim().startsWith('{') ? JSON.parse(stdout) : null };
 }
-const observed = { available: true, transportVerified: true, entitlementVerified: true,
-  imageGenCallable: true, routeObserved: 'image-gen', attestationScope: 'live-execution-context',
-  modelObserved: 'gpt-6-terra' };
-
-test('CLI image preview and missing host are manual-only; route --apply is rejected', async t => {
+test('CLI image preview and apply are built-in agent handoffs; route --apply is rejected', async t => {
   const { project, run } = game(t);
   const args = ['workflow', 'image', '--project', project, '--run', run, '--brief', 'brief.md', '--json'];
   const preview = await cli(args, { imageHost: () => { throw new Error('no discovery during preview'); } });
   assert.equal(preview.code, 0);
-  assert.equal(preview.result.status, 'NEEDS_USER_ACTION');
+  assert.equal(preview.result.status, 'NEEDS_AGENT_ACTION');
   assert.equal(readNativeRun(project, run).events.length, 0);
   const missing = await cli([...args, '--apply']);
-  assert.equal(missing.code, 2);
-  assert.equal(missing.result.selectedRoute, 'manual');
+  assert.equal(missing.code, 0);
+  assert.equal(missing.result.selectedRoute, 'codex-imagegen');
+  assert.equal(missing.result.manualPacket.skill, '$imagegen');
   assert.equal(readNativeRun(project, run).events.length, 0);
   assert.equal((await cli(['workflow', 'route', '--project', project, '--task', 'image', '--apply', '--json'])).code, 1);
 });
 
-test('CLI image uses one trusted live host and never promotes art PASS', async t => {
-  const { project, run } = game(t);
-  let called = 0;
-  const result = await cli(['workflow', 'image', '--project', project, '--run', run,
-    '--brief', 'brief.md', '--model', 'terra', '--apply', '--json'], { imageHost: () => ({
-    probe: async () => ({ terra: observed, sol: null }),
-    generate: async () => { called++; return { status: 'HOST_OBSERVED',
-      routeObserved: 'image-gen', attestationScope: 'live-execution-context', imageGenCalled: true,
-      modelObserved: 'gpt-6-terra', images: [{ bytes: png, mediaType: 'image/png' }] }; },
-    close: async () => {},
-  }) });
-  assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.result.status, 'PENDING_REVIEW');
-  assert.equal(result.result.images.length, 1);
-  assert.equal(called, 1);
-  assert.equal(readNativeRun(project, run).reviewPending, true);
-});
-
-test('CLI pinned model unavailable stays manual; import stores USER_DECLARED and rejects frozen game', async t => {
+test('CLI rejects API model pins; import stores USER_DECLARED and rejects frozen game', async t => {
   const { project, run } = game(t);
   const args = ['workflow', 'image', '--project', project, '--run', run,
-    '--brief', 'brief.md', '--model', 'sol', '--apply', '--json'];
-  const pin = await cli(args, { imageHost: () => ({ probe: async () => ({ terra: observed, sol: null }),
-    generate: async () => { throw new Error('must not call'); } }) });
-  assert.equal(pin.code, 2);
-  assert.equal(pin.result.reasonCode, 'IMAGE_PINNED_MODEL_UNAVAILABLE');
+    '--brief', 'brief.md', '--model', 'flare', '--apply', '--json'];
+  const pin = await cli(args);
+  assert.equal(pin.code, 1);
   const impArgs = ['workflow', 'image-import', '--project', project, '--run', run,
     '--brief', 'brief.md', '--file', 'image.png', '--json'];
   assert.equal((await cli(impArgs)).result.status, 'READY');
@@ -86,13 +63,12 @@ test('CLI pinned model unavailable stays manual; import stores USER_DECLARED and
     '--brief', 'brief.md', '--file', 'image.png', '--apply', '--json'])).code, 2);
 });
 
-test('CLI host uncertainty reports pending recovery and asks for executor confirmation', async t => {
+test('CLI image never records pending host execution on apply', async t => {
   const { project, run } = game(t);
   const result = await cli(['workflow', 'image', '--project', project, '--run', run,
-    '--brief', 'brief.md', '--model', 'terra', '--apply', '--json'], { imageHost: () => ({
-    probe: async () => ({ terra: observed }), generate: async () => { throw new Error('IMAGE_HOST_TIMEOUT'); },
-  }) });
-  assert.equal(result.code, 3);
-  assert.equal(result.result.status, 'PENDING_RECOVERY');
-  assert.equal(readNativeRun(project, run).pendingExecutor, 'image-gen');
+    '--brief', 'brief.md', '--apply', '--json']);
+  assert.equal(result.code, 0);
+  assert.equal(result.result.status, 'NEEDS_AGENT_ACTION');
+  assert.equal(readNativeRun(project, run).pendingExecutor, null);
+  assert.equal(readNativeRun(project, run).events.length, 0);
 });

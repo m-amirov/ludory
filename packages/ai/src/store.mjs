@@ -17,31 +17,33 @@ const DEV_TASKS = new Set(['episode-script', 'art-concept']);
 const DEV_RESULT_CODES = new Set(['HOST_OBSERVED', 'DEV_EXECUTOR_UNVERIFIED', 'DEV_EXECUTOR_INTERRUPTED']);
 const DEV_MODEL = /^gpt-\d+(?:\.\d+)?-sol$/i;
 const IMAGE_MODEL = /^gpt-\d+(?:\.\d+)?-(?:terra|sol)$/i;
-const GPT_IMAGE_REQUESTS = new Map([
+// Read-only compatibility for signed native run events created before the API route
+// was removed. This is a ledger schema, NOT an executable provider or CLI option.
+const ARCHIVED_IMAGE_REQUEST_MODELS = new Map([
   ['auto', 'gpt-image-2.5-sunburst'], ['sunburst', 'gpt-image-2.5-sunburst'],
   ['flare', 'gpt-image-2.5-flare'],
 ]);
 const IMAGE_CODES = new Set(['HOST_OBSERVED', 'IMAGE_EXECUTOR_UNVERIFIED', 'IMAGE_EXECUTOR_INTERRUPTED']);
 
-function validateImageRequest(request) {
-  const isGpt = request?.route === 'gpt-image';
-  const allowed = isGpt ? GPT_IMAGE_REQUESTS.has(request?.requestedModel) &&
-    request.modelRequested === GPT_IMAGE_REQUESTS.get(request.requestedModel) &&
-    request.modelObserved === null
-    : ['image-terra', 'image-sol'].includes(request?.route) &&
+function validateImageRequest(request, { allowArchived = false } = {}) {
+  const archived = allowArchived && request?.route === 'gpt-image' &&
+    ARCHIVED_IMAGE_REQUEST_MODELS.get(request.requestedModel) === request.modelRequested &&
+    request.modelObserved === null;
+  const legacy = ['image-terra', 'image-sol'].includes(request?.route) &&
       ['auto', 'terra', 'sol'].includes(request?.requestedModel) &&
       IMAGE_MODEL.test(request?.modelObserved ?? '') &&
       request.modelObserved.endsWith(request.route.slice(6)) &&
       (request.requestedModel === 'auto' || `image-${request.requestedModel}` === request.route);
   if (!request || typeof request !== 'object' || Array.isArray(request) ||
-      request.taskKind !== 'image' || !allowed ||
+      request.taskKind !== 'image' || !(archived || legacy) ||
       !request.brief || typeof request.brief.path !== 'string' ||
       !/^[a-f0-9]{64}$/.test(request.brief.sha256 ?? '') ||
       !Number.isSafeInteger(request.brief.size) || request.brief.size < 1 ||
       request.brief.size > 64 * 1024) throw new Error('NATIVE_IMAGE_REQUEST_INVALID');
   return { taskKind: 'image', route: request.route, requestedModel: request.requestedModel,
     modelObserved: request.modelObserved,
-    ...(isGpt && { modelRequested: request.modelRequested }), brief: { ...request.brief } };
+    ...(archived && { modelRequested: request.modelRequested }),
+    brief: { ...request.brief } };
 }
 
 function validateImageOutput(image, runId, requestIndex, order, modelObserved) {
@@ -76,11 +78,12 @@ function validateImageResult(result, runId, request) {
       validateImageOutput(img, runId, request?.eventIndex, index, request?.modelObserved)) };
 }
 
-function validateImageManualImport(value, runId, index) {
+function validateImageManualImport(value, runId, index, { allowArchived = false } = {}) {
   if (!value || typeof value !== 'object' || value.taskKind !== 'image' ||
       value.provenance !== 'USER_DECLARED' || value.reviewStatus !== 'PENDING_REVIEW' ||
       !value.brief || !value.source || !value.output ||
-      !['auto', 'sunburst', 'flare', 'terra', 'sol'].includes(value.requestedModel)) throw new Error('NATIVE_IMAGE_IMPORT_INVALID');
+      !(allowArchived ? ['auto', 'terra', 'sol', 'sunburst', 'flare']
+        : ['auto', 'terra', 'sol']).includes(value.requestedModel)) throw new Error('NATIVE_IMAGE_IMPORT_INVALID');
   for (const item of [value.brief, value.source]) {
     if (typeof item.path !== 'string' || !item.path || !/^[a-f0-9]{64}$/.test(item.sha256 ?? '') ||
         !Number.isSafeInteger(item.size) || item.size < 1) throw new Error('NATIVE_IMAGE_IMPORT_INVALID');
@@ -495,7 +498,7 @@ export function readNativeRun(projectDir, runRef = 'latest') {
         catch { throw new Error('NATIVE_INTEGRITY_DEV_REQUEST'); }
       }
       if (event.executor === 'image-gen') {
-        try { pendingImageRequest = { ...validateImageRequest(event.request), eventIndex: event.index }; }
+        try { pendingImageRequest = { ...validateImageRequest(event.request, { allowArchived: true }), eventIndex: event.index }; }
         catch { throw new Error('NATIVE_INTEGRITY_IMAGE_REQUEST'); }
       }
       status = 'WAITING_FOR_EVIDENCE';
@@ -547,7 +550,7 @@ export function readNativeRun(projectDir, runRef = 'latest') {
         throw new Error('NATIVE_INTEGRITY_IMAGE_IMPORT');
       }
       try {
-        const imp = validateImageManualImport(event.manual, runId, event.index);
+        const imp = validateImageManualImport(event.manual, runId, event.index, { allowArchived: true });
         verifyStoredImage(project, runId, imp.output);
         manualImageImported = true;
         reviewPending = true;
@@ -643,6 +646,14 @@ export function commitNativeEvent(plan) {
   if (!plan || plan.kind !== 'NATIVE_EVENT' || plan.status !== 'READY' ||
       sha256(serial(plan.event)) !== plan.fingerprint ||
       plan.project !== plan.source?.project) throw new Error('NATIVE_STALE_EVENT_PLAN');
+  // A handcrafted plan must not create events from a retired producer, even if
+  // the same schema remains readable while replaying signed historical runs.
+  if (plan.event.kind === 'ACTION_REQUESTED' && plan.event.executor === 'image-gen') {
+    validateImageRequest(plan.event.request);
+  }
+  if (plan.event.kind === 'IMAGE_IMPORTED') {
+    validateImageManualImport(plan.event.manual, plan.runId, plan.event.index);
+  }
   const result = verifyNativeSource(plan.source);
   if (!result.ok) throw new Error(`NATIVE_SOURCE_STALE: ${result.code}`);
   return withLock(plan.project, plan.source, () => {

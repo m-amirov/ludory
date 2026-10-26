@@ -25,15 +25,15 @@ test('the five task kinds preserve their selected preferred executors in read-on
   const project = freshStudioGame(t);
   const expected = [
     ['mechanics', 'codex'], ['episode-script', 'web-dev'],
-    ['art-concept', 'web-dev'], ['image', 'gpt-image'],
+    ['art-concept', 'web-dev'], ['image', 'codex-imagegen'],
     ['functional-check', 'codex'],
   ];
   for (const [taskKind, preferredRoute] of expected) {
     const result = planTaskRoute(project, { taskKind }, { discover: () => ({}) });
     assert.equal(result.taskKind, taskKind);
     assert.equal(result.preferredRoute, preferredRoute);
-    assert.equal(result.status, 'NEEDS_USER_ACTION');
-    assert.equal(result.selectedRoute, 'manual');
+    assert.equal(result.status, taskKind === 'image' ? 'NEEDS_AGENT_ACTION' : 'NEEDS_USER_ACTION');
+    assert.equal(result.selectedRoute, taskKind === 'image' ? 'codex-imagegen' : 'manual');
     assert.equal(result.engine, 'ludory-ai');
     assert.deepEqual(result.writes, []);
   }
@@ -128,7 +128,7 @@ test('DEV requires a verified transport, entitlement, and real selected route', 
   assert.equal(planTaskRoute(project, { taskKind: 'episode-script' }, { discover: () => forged }).status, 'NEEDS_USER_ACTION');
 });
 
-test('legacy image routing requires explicit producer pins, while auto remains GPT-only', t => {
+test('legacy image routing requires explicit producer pins, while auto uses built-in ImageGen', t => {
   const project = freshStudioGame(t);
   const capabilitiesFor = host => discoverTaskCapabilities(project, { checkCodex: () => ({ ok: false }),
     hostProbe: () => host });
@@ -144,9 +144,9 @@ test('legacy image routing requires explicit producer pins, while auto remains G
   assert.equal(onlySol.modelObserved, 'gpt-6-sol');
   const absent = planTaskRoute(project, { taskKind: 'image' },
     { discover: () => capabilitiesFor({}) });
-  assert.equal(absent.status, 'NEEDS_USER_ACTION');
-  assert.equal(absent.selectedRoute, 'manual');
-  assert.equal(Object.hasOwn(absent, 'modelObserved'), false);
+  assert.equal(absent.status, 'NEEDS_AGENT_ACTION');
+  assert.equal(absent.selectedRoute, 'codex-imagegen');
+  assert.equal(absent.modelObserved, null);
 });
 
 test('pinned image producer never silently changes despite another model being available', t => {
@@ -180,7 +180,7 @@ test('capability discovery fails closed on malformed evidence and throwing probe
   for (const record of invalidRecords) {
     const capabilities = discoverTaskCapabilities(project, { checkCodex: () => ({ ok: false }),
       hostProbe: () => record });
-    assert.equal(planTaskRoute(project, { taskKind: 'image' }, { discover: () => capabilities }).status, 'NEEDS_USER_ACTION');
+    assert.equal(planTaskRoute(project, { taskKind: 'image', model: 'terra' }, { discover: () => capabilities }).status, 'NEEDS_USER_ACTION');
   }
   const failure = discoverTaskCapabilities(project, {
     checkCodex: () => { throw new Error('codex checker offline'); },
@@ -197,7 +197,7 @@ test('a direct planner discovery hook cannot elevate bare availability claims in
     imageTerra: { available: true, modelObserved: 'terra' },
     imageSol: { available: true, modelObserved: 'sol' } };
   for (const taskKind of ['mechanics', 'episode-script', 'art-concept', 'image', 'functional-check']) {
-    assert.equal(planTaskRoute(project, { taskKind }, { discover: () => unverified }).status,
+    assert.equal(planTaskRoute(project, { taskKind, ...(taskKind === 'image' && { model: 'terra' }) }, { discover: () => unverified }).status,
       'NEEDS_USER_ACTION');
   }
 });
@@ -210,7 +210,7 @@ test('inherited host attestations and host candidate entries never make a route 
     hostProbe: () => ({ imageTerra: inheritedTerra, webDev: inheritedDev }) });
   assert.equal(capabilities.imageTerra.available, false);
   assert.equal(capabilities.webDev.available, false);
-  assert.equal(planTaskRoute(project, { taskKind: 'image' },
+  assert.equal(planTaskRoute(project, { taskKind: 'image', model: 'terra' },
     { discover: () => capabilities }).status, 'NEEDS_USER_ACTION');
   assert.equal(planTaskRoute(project, { taskKind: 'episode-script' },
     { discover: () => ({ webDev: inheritedDev }) }).status, 'NEEDS_USER_ACTION');
@@ -320,7 +320,7 @@ test('planner refuses inherited top-level capability candidates from direct disc
   const cases = [
     [{ taskKind: 'mechanics' }, { codex: { available: true, reasonCode: 'AVAILABLE' } }],
     [{ taskKind: 'episode-script' }, { webDev: { ...verifiedDev, reasonCode: 'AVAILABLE' } }],
-    [{ taskKind: 'image' }, { imageTerra: { ...verifiedTerra, reasonCode: 'AVAILABLE' } }],
+    [{ taskKind: 'image', model: 'terra' }, { imageTerra: { ...verifiedTerra, reasonCode: 'AVAILABLE' } }],
   ];
   for (const [task, inherited] of cases) {
     const plan = planTaskRoute(project, task, { discover: () => Object.create(inherited) });
@@ -339,7 +339,7 @@ test('planner never invokes a mutable getter for candidate capabilities or obser
     return getterReads < 3 ? { ...verifiedTerra, reasonCode: 'AVAILABLE' }
       : { available: false, modelObserved: 'forged-model' };
   } });
-  const plan = planTaskRoute(project, { taskKind: 'image' }, { discover: () => candidates });
+  const plan = planTaskRoute(project, { taskKind: 'image', model: 'terra' }, { discover: () => candidates });
   assert.equal(plan.status, 'NEEDS_USER_ACTION');
   assert.equal(Object.hasOwn(plan, 'modelObserved'), false);
   assert.equal(getterReads, 0);
@@ -354,7 +354,7 @@ test('revoked host proxies fail closed without escaping capability or planner pr
   const fromCandidate = discoverTaskCapabilities(project, { taskKind: 'image',
     hostProbe: () => ({ imageTerra: proxy }) });
   assert.equal(fromCandidate.imageTerra.available, false);
-  const fromPlanner = planTaskRoute(project, { taskKind: 'image' }, { discover: () => proxy });
+  const fromPlanner = planTaskRoute(project, { taskKind: 'image', model: 'terra' }, { discover: () => proxy });
   assert.equal(fromPlanner.status, 'NEEDS_USER_ACTION');
   assert.equal(fromPlanner.selectedRoute, 'manual');
 });

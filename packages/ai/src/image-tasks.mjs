@@ -6,12 +6,10 @@ import { readNativeRun, planNativeEvent, commitNativeEvent, stageNativeImageArti
   stageNativeManualImage } from './store.mjs';
 import { hasStudioCreationReceipt } from './executor.mjs';
 import { ownData } from './capabilities.mjs';
-import { validateImageCapability, validateGptImageCapability, discoverImageHost } from './image-host.mjs';
+import { validateImageCapability, discoverImageHost } from './image-host.mjs';
 import { decodeGeneratedImage, readProjectImageInput } from './image-artifacts.mjs';
 
 const MAX_BRIEF = 64 * 1024;
-const GPT_MODELS = { auto: 'gpt-image-2.5-sunburst', sunburst: 'gpt-image-2.5-sunburst',
-  flare: 'gpt-image-2.5-flare' };
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const imagePath = file => typeof file === 'string' && file.length > 0 && file.length <= 200 &&
@@ -45,12 +43,12 @@ function blocked(project, run, code) {
     nextAction: { kind: 'STOP', executable: false } };
 }
 
-/** Read-only planning: discovery is an explicitly injected, trusted host capability probe. */
+/** Read-only planning: the built-in $imagegen route never probes or calls an API. */
 export async function planImageTask(projectDir, options = {}, { discover = async () => null } = {}) {
   if (!options || typeof options !== 'object' || Array.isArray(options) ||
       Object.keys(options).some(key => !['run', 'brief', 'model'].includes(key)) ||
       typeof options.run !== 'string' || !options.run.trim() || options.run.length > 180 ||
-      !imagePath(options.brief) || !['auto', 'sunburst', 'flare', 'terra', 'sol'].includes(options.model ?? 'auto')) {
+      !imagePath(options.brief) || !['auto', 'terra', 'sol'].includes(options.model ?? 'auto')) {
     throw new Error('IMAGE_TASK_INVALID');
   }
   const { run, brief, model = 'auto' } = options;
@@ -68,38 +66,49 @@ export async function planImageTask(projectDir, options = {}, { discover = async
   try { briefFile = boundedBrief(project, brief); }
   catch (error) { return blocked(project, run, error.message.startsWith('IMAGE_')
     ? error.message : 'IMAGE_BRIEF_UNSAFE'); }
-  // The Images API caps prompt length at 32,000 characters. Reject this locally,
-  // before recording an ACTION_REQUESTED that would require manual recovery.
-  if (GPT_MODELS[model] && briefFile.text.length > 32_000) {
-    return blocked(project, run, 'IMAGE_BRIEF_PROVIDER_LIMIT');
+  if (model === 'auto') {
+    // The CLI can prepare this source-bound handoff, but only a live Codex agent
+    // can invoke its built-in $imagegen skill. No network transport, billing,
+    // effective-model attestation or journal write is implied by --apply.
+    return { engine: 'ludory-ai', operation: 'image', project, runId: current.run.runId,
+      taskKind: 'image', requestedModel: model, preferredRoute: 'codex-imagegen',
+      selectedRoute: 'codex-imagegen', modelObserved: null,
+      modelSelection: 'provider-default', qualityPreference: 'highest-available',
+      sourceBinding, runHeadSha256: current.headSha256, stage: current.nextStage,
+      brief: briefFile.snapshot, status: 'NEEDS_AGENT_ACTION', reasonCode: 'IMAGEGEN_SKILL_HANDOFF',
+      writes: [], conflicts: [],
+      manualPacket: { taskKind: 'image', runId: current.run.runId,
+        skill: '$imagegen', mode: 'built-in', modelSelection: 'provider-default',
+        qualityPreference: 'highest-available',
+        prompt: `Create a production-quality game illustration faithful to the following approved art brief. ` +
+          `Prioritize consistent characters, locations, composition, readable silhouettes, ` +
+          `correct story details and reference fidelity. Use the highest image quality available ` +
+          `in the built-in tool. Do not invent story facts or include unintended text.\n\n${briefFile.text}`,
+        brief: { ...briefFile.snapshot, text: briefFile.text },
+        steps: ['Invoke the built-in $imagegen skill from the active Codex agent using this prompt and project references.',
+          'Save the original generated PNG/JPEG/WebP into the project as a relative path.',
+          'Run ludory workflow image-import with --apply; inspect and review before acceptance.'],
+        output: 'PNG/JPEG/WebP originals for explicit review; do not claim release or host-attested model PASS' },
+      nextAction: { kind: 'CALL_IMAGEGEN_SKILL', executable: false } };
   }
   let found;
   try { found = await discover(project); }
   catch { found = null; }
-  const gptModel = GPT_MODELS[model];
-  // A legacy Terra/SOL pin must not inherit the GPT validator's default model.
-  const gpt = gptModel ? validateGptImageCapability(ownData(found, 'imageGpt'), gptModel)
-    : { available: false, reasonCode: 'IMAGE_PROVIDER_NOT_REQUESTED' };
   const terra = validateImageCapability(ownData(found, 'imageTerra'), 'terra');
   const sol = validateImageCapability(ownData(found, 'imageSol'), 'sol');
   // Terra/SOL are retained solely for explicitly pinned legacy integrations.
-  const selected = gpt.available ? 'gpt' : model === 'terra' && terra.available ? 'terra'
+  const selected = model === 'terra' && terra.available ? 'terra'
     : model === 'sol' && sol.available ? 'sol' : null;
-  const capability = selected === 'gpt' ? gpt : selected === 'terra' ? terra
-    : selected === 'sol' ? sol : null;
+  const capability = selected === 'terra' ? terra : selected === 'sol' ? sol : null;
   const ready = Boolean(selected);
   return { engine: 'ludory-ai', operation: 'image', project, runId: current.run.runId,
-    taskKind: 'image', requestedModel: model, preferredRoute: model === 'sol' ? 'image-sol'
-      : model === 'terra' ? 'image-terra' : 'gpt-image',
+    taskKind: 'image', requestedModel: model, preferredRoute: `image-${model}`,
     sourceBinding, runHeadSha256: current.headSha256, stage: current.nextStage,
     brief: briefFile.snapshot, status: ready ? 'READY' : 'NEEDS_USER_ACTION',
-    selectedRoute: ready ? selected === 'gpt' ? 'gpt-image' : `image-${selected}` : 'manual',
-    ...(ready && { modelObserved: capability.modelObserved,
-      ...(selected === 'gpt' && { modelRequested: capability.modelRequested }) }),
-    reasonCode: ready ? selected === 'gpt' ? 'IMAGE_PROVIDER_CONFIGURED' : 'IMAGE_ROUTE_VERIFIED'
-      : model === 'auto' ? 'IMAGE_PROVIDER_UNAVAILABLE' : 'IMAGE_PINNED_MODEL_UNAVAILABLE',
-    capabilityReasons: model === 'terra' || model === 'sol' ?
-      { terra: terra.reasonCode, sol: sol.reasonCode } : { gptImage: gpt.reasonCode },
+    selectedRoute: ready ? `image-${selected}` : 'manual',
+    ...(ready && { modelObserved: capability.modelObserved }),
+    reasonCode: ready ? 'IMAGE_ROUTE_VERIFIED' : 'IMAGE_PINNED_MODEL_UNAVAILABLE',
+    capabilityReasons: { terra: terra.reasonCode, sol: sol.reasonCode },
     writes: [], conflicts: [],
     manualPacket: { taskKind: 'image', runId: current.run.runId,
       brief: { ...briefFile.snapshot, text: briefFile.text }, requestedModel: model,
@@ -131,20 +140,17 @@ export async function executeImageTask(plan, { apply = false, host = null, timeo
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120_000) {
     throw new Error('IMAGE_TIMEOUT_INVALID');
   }
-  const isGpt = plan.selectedRoute === 'gpt-image';
-  const model = isGpt ? plan.modelRequested : plan.selectedRoute === 'image-terra' ? 'terra'
+  const model = plan.selectedRoute === 'image-terra' ? 'terra'
     : plan.selectedRoute === 'image-sol' ? 'sol' : null;
-  const live = await discoverImageHost(host, isGpt ? model : undefined);
-  const capability = isGpt ? live.imageGpt : model === 'terra' ? live.imageTerra : live.imageSol;
-  if (!model || !capability?.available || capability.modelObserved !== plan.modelObserved ||
-      (isGpt && capability.modelRequested !== plan.modelRequested)) {
+  const live = await discoverImageHost(host, model);
+  const capability = model === 'terra' ? live.imageTerra : live.imageSol;
+  if (!model || !capability?.available || capability.modelObserved !== plan.modelObserved) {
     throw new Error('IMAGE_ROUTE_UNVERIFIED');
   }
   const fresh = await planImageTask(plan.project, { run: plan.runId, brief: plan.brief.path,
     model: plan.requestedModel }, { discover: async () => live });
   if (fresh.status !== 'READY' || fresh.selectedRoute !== plan.selectedRoute ||
       fresh.modelObserved !== plan.modelObserved || fresh.stage !== plan.stage ||
-      (isGpt && fresh.modelRequested !== plan.modelRequested) ||
       fresh.runHeadSha256 !== plan.runHeadSha256 ||
       !equal(fresh.brief, plan.brief) || !equal(fresh.sourceBinding, plan.sourceBinding)) {
     throw new Error('IMAGE_PLAN_TAMPERED_OR_STALE');
@@ -152,8 +158,7 @@ export async function executeImageTask(plan, { apply = false, host = null, timeo
   const requested = commitNativeEvent(planNativeEvent(plan.project, plan.runId, {
     kind: 'ACTION_REQUESTED', stage: plan.stage, executor: 'image-gen',
     request: { taskKind: 'image', route: plan.selectedRoute, requestedModel: plan.requestedModel,
-      modelObserved: plan.modelObserved,
-      ...(isGpt && { modelRequested: plan.modelRequested }), brief: plan.brief },
+      modelObserved: plan.modelObserved, brief: plan.brief },
   }));
   const requestSha256 = requested.pendingRequestSha256;
   const abort = new AbortController();
@@ -173,12 +178,9 @@ export async function executeImageTask(plan, { apply = false, host = null, timeo
   const imageInputs = ownData(response, 'images');
   const acceptedEnvelope = ownData(response, 'status') === 'HOST_OBSERVED' &&
     ownData(response, 'modelObserved') === plan.modelObserved &&
-    (isGpt ? ownData(response, 'routeObserved') === 'gpt-image' &&
-      ownData(response, 'provider') === 'openai' &&
-      ownData(response, 'modelRequested') === plan.modelRequested
-      : ownData(response, 'routeObserved') === 'image-gen' &&
+    ownData(response, 'routeObserved') === 'image-gen' &&
         ownData(response, 'attestationScope') === 'live-execution-context' &&
-        ownData(response, 'imageGenCalled') === true) && Array.isArray(imageInputs) &&
+        ownData(response, 'imageGenCalled') === true && Array.isArray(imageInputs) &&
     imageInputs.length > 0 && imageInputs.length <= 4;
   const sourceValid = verifyNativeSource(plan.sourceBinding).ok && (() => {
     try { return equal(snapshotArtifact(plan.project, plan.brief.path, { maxBytes: MAX_BRIEF }), plan.brief); }
@@ -206,8 +208,7 @@ export async function executeImageTask(plan, { apply = false, host = null, timeo
     status: ok ? 'PENDING_REVIEW' : 'BLOCKED', nativeStatus: end.status,
     reasonCode: ok ? 'IMAGE_REVIEW_REQUIRED' : 'IMAGE_EXECUTOR_UNVERIFIED',
     provenance: ok ? 'HOST_OBSERVED' : 'UNVERIFIED', writes: outputs.map(item => item.outputPath),
-    ...(ok && { images: outputs, modelObserved: plan.modelObserved,
-      ...(isGpt && { modelRequested: plan.modelRequested }) }),
+    ...(ok && { images: outputs, modelObserved: plan.modelObserved }),
     nextAction: { kind: ok ? 'REVIEW_IMAGES' : 'STOP', executable: false } };
 }
 

@@ -16,12 +16,12 @@ export const terra = { available: true, reasonCode: 'AVAILABLE', transportVerifi
   attestationScope: 'live-execution-context', modelObserved: 'gpt-6-terra' };
 export const sol = { ...terra, modelObserved: 'gpt-6-sol' };
 
-test('image preview is read-only, source-bound, manual by default and blocks frozen games', async t => {
+test('image preview is read-only, source-bound, built-in skill handoff by default and blocks frozen games', async t => {
   const { project, run } = game(t);
   const before = fs.readdirSync(path.join(project, '.ludory', 'ai', 'runs', run));
   const plan = await planImageTask(project, { run, brief: 'image-brief.md' });
-  assert.equal(plan.status, 'NEEDS_USER_ACTION');
-  assert.equal(plan.selectedRoute, 'manual');
+  assert.equal(plan.status, 'NEEDS_AGENT_ACTION');
+  assert.equal(plan.selectedRoute, 'codex-imagegen');
   assert.equal(plan.manualPacket.brief.sha256, sha('Scene: lighthouse over a winter sea.'));
   assert.deepEqual(fs.readdirSync(path.join(project, '.ludory', 'ai', 'runs', run)), before);
   const frozen = game(t, false);
@@ -35,7 +35,7 @@ test('image preview is read-only, source-bound, manual by default and blocks fro
 test('legacy Terra/SOL producer is supported only with an explicit pin', async t => {
   const { project, run } = game(t);
   const found = async () => ({ imageTerra: terra, imageSol: sol });
-  assert.equal((await planImageTask(project, { run, brief: 'image-brief.md' }, { discover: found })).selectedRoute, 'manual');
+  assert.equal((await planImageTask(project, { run, brief: 'image-brief.md' }, { discover: found })).selectedRoute, 'codex-imagegen');
   assert.equal((await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover: found })).selectedRoute, 'image-terra');
   const fallback = async () => ({ imageTerra: { available: false }, imageSol: sol });
   assert.equal((await planImageTask(project, { run, brief: 'image-brief.md', model: 'sol' }, { discover: fallback })).selectedRoute, 'image-sol');

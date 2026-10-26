@@ -5,7 +5,7 @@ import { planCreate, applyCreatePlan } from './scaffold.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
 import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNativeRun,
   planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport,
-  discoverImageHost, createOpenAIImageHost, planImageTask, executeImageTask,
+  planImageTask,
   planImageImport, executeImageImport } from '@ludory/ai';
 
 const usage = `Ludory Studio 0.1.0 — native game-development workflows
@@ -22,10 +22,10 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory templates show --name <id> [--catalog <directory>] [--json]
   ludory create --project <empty-directory> --id <slug> --title <name> --lang <locale> --profile <id> --template <id> --targets <comma-separated> [--version <semver>] [--catalog <directory>] [--apply] [--json]
   ludory workflow doctor --project <game-directory> [--json]
-  ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--model <auto|sunburst|flare>] [--json]
+  ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--apply] [--json]
   ludory workflow draft-import --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> --file <relative-draft> [--apply] [--json]
-  ludory workflow image --project <new-studio-game> --run <id> --brief <relative-art-brief> [--model <auto|sunburst|flare>] [--apply] [--json]
+  ludory workflow image --project <new-studio-game> --run <id> --brief <relative-art-brief> [--apply] [--json]
   ludory workflow image-import --project <new-studio-game> --run <id> --brief <relative-text> --file <relative-image> [--apply] [--json]
   ludory workflow status --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
@@ -40,16 +40,16 @@ No writes by default. init/migrate --apply only create ludory.project.json;
 create --apply only creates new template files, manifest and Studio receipt in an empty directory.
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
 workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
-workflow route is read-only: it checks executor eligibility; image routing defaults to dedicated GPT Image, not Terra/SOL.
+workflow route is read-only: image routing hands the brief to the built-in Codex $imagegen skill.
 workflow draft preview never calls the DEV host; --apply probes only the isolated DEV helper and saves a review-only draft if the actual selected model is attested.
 Without a verified DEV host, draft returns a manual handoff packet; draft-import records USER_DECLARED provenance, never HOST_OBSERVED or narrative PASS.
 First, Web DEV drafts a source-aware art concept when authenticated and given adequate scene/style context;
 otherwise the primary task model authors the brief in its own session (standalone CLI gives manual handoff).
-Then a separate GPT Image producer generates reviewed originals. auto requests quality-first gpt-image-2.5-sunburst,
-or --model flare requests gpt-image-2.5-flare. Terra/SOL pins are legacy-only, not the default.
-The OpenAI Images adapter needs OPENAI_API_KEY and explicit LUDORY_IMAGE_ALLOW_PAID=1 plus --apply.
-Paid opt-in authorizes one request but does not enforce a dollar budget; no paid smoke is run automatically.
-The API request model is recorded separately from the unknown effective model; no fabricated attestation.
+Then the active Codex agent invokes built-in $imagegen; no separate API key or programmatic image provider is used.
+The built-in tool exposes no model or quality selector: request maximum fidelity in the prompt and use
+the provider-selected model, whose identity cannot be attested by this CLI.
+workflow image --apply returns a source-bound agent handoff only; the CLI cannot call Codex tools.
+The agent saves the generated original under the project and runs workflow image-import --apply.
 image-import stores checked original PNG/JPEG/WebP bytes as USER_DECLARED; neither route grants art, rights or release PASS.
 Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.
 workflow cycle checks Codex-observed Node test execution with at most two repairs; it never automatically advances a stage.
@@ -67,10 +67,10 @@ function argumentsFor(command, argv) {
   const common = new Set(['--project', '--json']);
   const workflowCommon = [...common];
   const allowed = command.startsWith('workflow-')
-    ? new Set(command === 'workflow-route' ? [...workflowCommon, '--task', '--model']
+    ? new Set(command === 'workflow-route' ? [...workflowCommon, '--task']
       : command === 'workflow-draft' ? [...workflowCommon, '--run', '--task', '--brief', '--source', '--apply']
       : command === 'workflow-draft-import' ? [...workflowCommon, '--run', '--task', '--brief', '--file', '--apply']
-      : command === 'workflow-image' ? [...workflowCommon, '--run', '--brief', '--model', '--apply']
+      : command === 'workflow-image' ? [...workflowCommon, '--run', '--brief', '--apply']
       : command === 'workflow-image-import' ? [...workflowCommon, '--run', '--brief', '--file', '--apply']
       : command === 'workflow-doctor' ? workflowCommon
       : command === 'workflow-status' || command === 'workflow-next' ? [...workflowCommon, '--run']
@@ -140,6 +140,11 @@ function displayWorkflow(result, json, out) {
   if (result.warning) out(`  warning: ${result.warning}\n`);
   if (result.executorCode) out(`  result: ${result.executorCode}\n`);
   if (result.provenance) out(`  provenance: ${result.provenance}\n`);
+  if (result.manualPacket?.skill === '$imagegen') {
+    out('  imagegen: invoke $imagegen in the active Codex session using the source-bound packet\n');
+    out('  prompt: rerun with --json to access manualPacket.prompt and its brief hash\n');
+    out('  after generation: save the original in the project and run workflow image-import --apply\n');
+  }
   if (result.modelRequested) out(`  requested image model: ${result.modelRequested}\n`);
   if (result.output?.outputPath) out(`  artifact: ${result.output.outputPath}\n`);
   for (const item of result.images ?? []) out(`  image: ${item.outputPath} · ${item.outputSha256}\n`);
@@ -181,7 +186,7 @@ async function runDraftCommand(operation, flags, { out, devHost }) {
   return result.status === 'BLOCKED' || (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
 }
 
-async function runImageCommand(operation, flags, { out, imageHost }) {
+async function runImageCommand(operation, flags, { out }) {
   const project = flags.get('--project');
   const options = { run: flags.get('--run'), brief: flags.get('--brief') };
   let result;
@@ -189,23 +194,8 @@ async function runImageCommand(operation, flags, { out, imageHost }) {
     const plan = await planImageImport(project, { ...options, file: flags.get('--file') });
     result = await executeImageImport(plan, { apply: flags.has('--apply') });
   } else {
-    const requested = { ...options, model: flags.get('--model') ?? 'auto' };
-    const preview = await planImageTask(project, requested);
-    if (!flags.has('--apply') || preview.status === 'BLOCKED') result = preview;
-    else {
-      const host = imageHost();
-      try {
-        const caps = await discoverImageHost(host, requested.model === 'flare'
-          ? 'gpt-image-2.5-flare' : 'gpt-image-2.5-sunburst');
-        const ready = await planImageTask(project, requested, { discover: async () => caps });
-        result = ready.status === 'READY'
-          ? await executeImageTask(ready, { apply: true, host }) : ready;
-      } finally {
-        if (typeof host?.close === 'function') {
-          try { await host.close(); } catch { /* Pending state remains authoritative. */ }
-        }
-      }
-    }
+    // Agent handoff: --apply never triggers a paid HTTP request or impersonates a tool call.
+    result = await planImageTask(project, options);
   }
   displayWorkflow(result, flags.has('--json'), out);
   return result.status === 'BLOCKED' || (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
@@ -274,7 +264,7 @@ function display(result, json, out) {
 
 /** Pure command boundary; inject streams to test status/output without child processes. */
 export function runCli(argv, { out = text => process.stdout.write(text), err = text => process.stderr.write(text),
-  executor, devHost = discoverDevHost, imageHost = createOpenAIImageHost } = {}) {
+  executor, devHost = discoverDevHost } = {}) {
   try {
     const [command = 'help', ...rest] = argv;
     if (command === 'help' || command === '--help') {
@@ -308,7 +298,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
         });
       }
       if (operation === 'image' || operation === 'image-import') {
-        return runImageCommand(operation, flags, { out, imageHost }).catch(error => {
+        return runImageCommand(operation, flags, { out }).catch(error => {
           let pending = false;
           try { pending = operation === 'image' && flags.has('--apply') &&
             readNativeRun(flags.get('--project'), flags.get('--run')).pendingExecutor === 'image-gen'; }
@@ -316,7 +306,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
           const result = pending ? { engine: 'ludory-ai', operation, status: 'PENDING_RECOVERY',
             project: flags.get('--project'), nativeStatus: 'WAITING_FOR_EVIDENCE',
             reasonCode: 'IMAGE_EXECUTION_OUTCOME_UNKNOWN', writes: [], conflicts: [],
-            warning: 'Generation may still be running or incur a charge. Confirm the host is stopped before workflow recover --confirm-no-executor --apply.',
+            warning: 'A historical image host request may still be running. Confirm the host is stopped before workflow recover --confirm-no-executor --apply.',
             nextAction: { kind: 'CONFIRM_EXECUTOR_STOPPED', executable: false },
           } : { operation, status: 'FAILED', project: flags.get('--project'),
             writes: [], conflicts: [error.message] };
@@ -327,7 +317,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       }
       if (operation === 'route') {
         const plan = planTaskRoute(flags.get('--project'), {
-          taskKind: flags.get('--task'), model: flags.get('--model') ?? 'auto',
+          taskKind: flags.get('--task'),
         });
         displayWorkflow(plan, flags.has('--json'), out);
         return plan.status === 'BLOCKED' ? 2 : 0;

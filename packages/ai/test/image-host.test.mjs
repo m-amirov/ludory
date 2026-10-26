@@ -22,8 +22,11 @@ test('image host requires one live paired model and callable tool, not an advert
 
 test('host preflight checks Terra and SOL without ever invoking generation', async () => {
   let generates = 0;
-  const result = await discoverImageHost({ probe: async () => ({ terra, sol }),
-    generate: async () => { generates++; } });
+  const result = await discoverImageHost({ probe: async ({ model }) => {
+    assert.equal(model, 'terra');
+    return { terra, sol };
+  },
+    generate: async () => { generates++; } }, 'terra');
   assert.equal(result.imageTerra.modelObserved, 'gpt-6-terra');
   assert.equal(result.imageSol.modelObserved, 'gpt-6-sol');
   assert.equal(generates, 0);

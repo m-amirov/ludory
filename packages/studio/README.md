@@ -189,13 +189,13 @@ The new read-only command explains which executor is eligible **before** any mod
 ```sh
 node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task mechanics --json
 node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task episode-script --json
-node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task image --model auto --json
+node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task image --json
 ```
 
-Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` prefers authenticated Web DEV; `art-concept` prefers Web DEV **only if** supplied with enough selected story/style context, otherwise the task's primary model writes the art brief. `image` chooses a **separate GPT Image** provider (quality-first Sunburst by default; optional Flare). `terra` and `sol` remain accepted only for explicitly pinned historical in-process adapters. Missing provider evidence produces `NEEDS_USER_ACTION` and `MANUAL_HANDOFF`, not successful generation. Read-only routing invokes no provider.
+Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` prefers authenticated Web DEV; `art-concept` prefers Web DEV **only if** supplied with enough selected story/style context, otherwise the task's primary model writes the art brief. `image` creates an agent handoff to the **built-in Codex `$imagegen` skill**. It returns `NEEDS_AGENT_ACTION`/`CALL_IMAGEGEN_SKILL`, never a claimed automatic invocation. Programmatic `terra` and `sol` are retained only for explicitly pinned historical in-process adapters. Read-only routing invokes no provider.
 
 `workflow route` never writes project files or workflow events; it rejects `--apply`. Exit code `0` covers a valid preview, including a manual handoff; `2` means the project is blocked (for example, no Studio creation receipt); `1` means invalid arguments or inspection error. Historical games stay frozen. No image, script, art review, independent acceptance, or Release PASS is produced by a route preview.
-JSON previews preserve `reasonCode` and, when available, `capabilityReasonCode`. GPT Image previews show `capabilityReasons.gptImage`; explicitly pinned historical routes retain the Terra/SOL reason fields. A configured API key does not attest a model's hidden execution identity.
+JSON previews preserve `reasonCode` and, when available, `capabilityReasonCode`. The built-in ImageGen route uses `modelSelection: provider-default`, `qualityPreference: highest-available` and `modelObserved: null`; it cannot set or attest a hidden execution model. Historical in-process routes retain their Terra/SOL evidence fields.
 
 ## Web DEV reviewable drafts (Slice B, experimental)
 
@@ -234,34 +234,33 @@ An interrupted import can leave an unreferenced uniquely named draft in the priv
 
 CLI `--apply` without an authenticated compatible DEV helper produces a manual handoff (`NEEDS_USER_ACTION`, exit 2) without game writes. In that case the **primary model already executing the task** should use the project's scene/character/style context to author the brief and supply a source-bound file; a standalone Ludory process has no truthful way to impersonate that active model. Local mock-host tests are not evidence of successful real Windows DEV model selection. Live Windows DEV host and NTFS acceptance are still required.
 
-## Dedicated GPT Image originals (Slice C, experimental)
+## Codex built-in ImageGen originals (Slice C, experimental)
 
 These commands require an active native run in a newly created Studio game:
 
 ```sh
 # Step 1: prepare a source-aware artistic brief through the preceding Web DEV draft path,
 # or let the active primary task model author one from selected story/style files.
-# Step 2: pure generation preview; never makes a paid call.
+# Step 2: read-only preview. The response includes a source-bound $imagegen prompt.
 node packages/studio/bin/ludory.mjs workflow image --project /path/to/new-studio-game \
-  --run RUN_ID --brief narrative/scene-art-brief.md --model auto --json
+  --run RUN_ID --brief narrative/scene-art-brief.md --json
 
-# Step 3: first set OPENAI_API_KEY and LUDORY_IMAGE_ALLOW_PAID=1 in your shell.
-# --apply explicitly authorizes one billable request; without the opt-in it refuses.
+# Step 3: request an agent handoff (this does not invoke any external provider).
 node packages/studio/bin/ludory.mjs workflow image --project /path/to/new-studio-game \
-  --run RUN_ID --brief narrative/scene-art-brief.md --model auto --apply --json
+  --run RUN_ID --brief narrative/scene-art-brief.md --apply --json
 
-# Optional quality-versus-speed choice when available: --model flare.
+# Step 4: inside the active Codex session, invoke $imagegen with the packet's prompt
+# and selected project references, then copy the generated original into the game.
 
-# Portable fallback: generate outside Ludory, save a PNG/JPEG/WebP inside the game,
-# then preview and explicitly import the checked original as USER_DECLARED.
+# Step 5: preview and explicitly import the checked original as USER_DECLARED.
 node packages/studio/bin/ludory.mjs workflow image-import --project /path/to/new-studio-game \
   --run RUN_ID --brief narrative/scene-art-brief.md --file art/candidate.webp --json
 node packages/studio/bin/ludory.mjs workflow image-import --project /path/to/new-studio-game \
   --run RUN_ID --brief narrative/scene-art-brief.md --file art/candidate.webp --apply --json
 ```
 
-The separate GPT Image adapter uses OpenAI's `/v1/images/generations` endpoint. By default it explicitly **requests** `gpt-image-2.5-sunburst`, `quality=high`, one 1536×864 PNG. `--model flare` requests `gpt-image-2.5-flare`. These are *requested* API models; a response that returns image bytes without independent effective-model attestation is stored with `modelObserved: null`. The art-brief author can be Web DEV or the primary task model; their identities must never be presented as the image generator's identity. No Terra/SOL attestation is required. If a future dedicated Image Gen tool offers no model selector, report its provider default honestly instead of inventing a model name.
+`$imagegen` is a **built-in Codex tool**, not a programmatic API provided to Node.js. The CLI cannot call it directly: a live Codex agent must consume `manualPacket.prompt`, invoke the image-generation skill, preserve the generated original, and then perform the explicit import. No authentication secret, separate provider endpoint or key is required by Ludory. This integration is an **agent handoff**, not unattended generation by the CLI.
 
-`OPENAI_API_KEY` and `LUDORY_IMAGE_ALLOW_PAID=1` must both be present for automatic production; preview alone is free and offline. This opt-in is **permission to incur a charge, not an enforceable spending limit**: set and monitor a real budget in the provider billing account before running production. The dry-run may report a manual route because it never probes credentials or invokes external hosts. Invalid credentials, missing entitlement or provider errors are discovered on real execution. Once intent is journaled, **no automatic retry or model fallback occurs**. A timeout, crash or uncertain HTTP response leaves `image-gen` pending (`PENDING_RECOVERY`, exit 3); do not recover until the original request is known stopped/resolved and further charges cannot be in flight. Recovery records an interruption, not successful generation.
+The built-in tool has no visible model/quality selection parameter. `qualityPreference: highest-available` is an instruction to pursue the best available result using a precise brief and relevant reference images, **not an SDK setting or a verified model ID**; the actual model is left unobserved. Model availability, generation limits and the ability to use references depend on the active Codex session. A text packet alone cannot assert that an image has been generated. Recheck story fidelity, composition and technical quality after seeing the output.
 
-Generated and imported originals are stored exclusively under `.ludory/ai/runs/<id>/images/`. Signatures, PNG integrity, JPEG/WebP structure and **full JPEG/WebP pixel decode with sharp**, dimensions, byte limits and SHA-256 receipts are verified before staging. Imports reject symlinks, hardlinks, parent aliases and content/extension mismatches; orphan files from interruptions remain untrusted. Neither operation publishes runtime assets, updates rights manifests or grants art/release PASS. Local mocked HTTP tests do not establish live paid-generation success or real Windows-host completion.
+Imported originals are stored exclusively under `.ludory/ai/runs/<id>/images/`. Signatures, PNG integrity, JPEG/WebP structure and **full JPEG/WebP pixel decode with sharp**, dimensions, byte limits and SHA-256 receipts are verified before staging. Imports reject symlinks, hardlinks, parent aliases and content/extension mismatches; orphan files from interruptions remain untrusted. Provenance is `USER_DECLARED`: the CLI cannot independently attest that the tool ran. Neither operation publishes runtime assets, updates rights manifests or grants art/release PASS. Tests do not establish real Codex tool invocation or real Windows-host completion.

@@ -43,7 +43,10 @@ test('workflow route advertises the five approved tasks and does not mutate a fr
     assert.equal(plan.operation, 'route');
     assert.deepEqual(plan.writes, []);
     assert.equal(plan.nextAction.executable, false);
-    if (['episode-script', 'art-concept', 'image'].includes(taskKind)) {
+    if (taskKind === 'image') {
+      assert.equal(plan.status, 'NEEDS_AGENT_ACTION');
+      assert.equal(plan.selectedRoute, 'codex-imagegen');
+    } else if (['episode-script', 'art-concept'].includes(taskKind)) {
       assert.equal(plan.status, 'NEEDS_USER_ACTION');
       assert.equal(plan.selectedRoute, 'manual');
     }
@@ -71,23 +74,22 @@ test('workflow route fails closed on unknown flags, tasks and illegal model pins
   }
 });
 
-test('workflow route pinned Terra never silently changes model when hosts are absent', t => {
+test('workflow route provides built-in ImageGen handoff without selecting an API model', t => {
   const project = game(t);
-  const response = cli('workflow', 'route', '--project', project, '--task', 'image', '--model', 'terra', '--json');
+  const response = cli('workflow', 'route', '--project', project, '--task', 'image', '--json');
   assert.equal(response.code, 0, response.stderr);
   const plan = JSON.parse(response.stdout);
-  assert.equal(plan.requestedModel, 'terra');
-  assert.equal(plan.status, 'NEEDS_USER_ACTION');
-  assert.equal(plan.selectedRoute, 'manual');
-  assert.equal(plan.reasonCode, 'AI_ROUTING_PINNED_MODEL_UNAVAILABLE');
-  assert.equal(plan.capabilityReasonCode, 'AI_ROUTING_HOST_UNVERIFIED');
-  assert.equal(Object.hasOwn(plan, 'modelObserved'), false);
+  assert.equal(plan.requestedModel, 'auto');
+  assert.equal(plan.status, 'NEEDS_AGENT_ACTION');
+  assert.equal(plan.selectedRoute, 'codex-imagegen');
+  assert.equal(plan.reasonCode, 'IMAGEGEN_SKILL_HANDOFF');
+  assert.equal(plan.modelSelection, 'provider-default');
+  assert.equal(plan.modelObserved, null);
   const printed = cli('workflow', 'route', '--project', project, '--task', 'image');
   assert.equal(printed.code, 0);
-  assert.match(printed.stdout, /MANUAL_HANDOFF/);
-  assert.match(printed.stdout, /gptImage capability: AI_ROUTING_HOST_UNVERIFIED/);
+  assert.match(printed.stdout, /CALL_IMAGEGEN_SKILL/);
   const pinnedText = cli('workflow', 'route', '--project', project, '--task', 'image', '--model', 'terra');
-  assert.match(pinnedText.stdout, /capability: AI_ROUTING_HOST_UNVERIFIED/);
+  assert.equal(pinnedText.code, 1);
 });
 
 test('workflow route returns a blocker for a frozen game without updating its files', t => {
