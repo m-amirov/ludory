@@ -87,7 +87,7 @@ test('workflow route provides built-in ImageGen handoff without selecting an API
   assert.equal(plan.modelObserved, null);
   const printed = cli('workflow', 'route', '--project', project, '--task', 'image');
   assert.equal(printed.code, 0);
-  assert.match(printed.stdout, /CALL_IMAGEGEN_SKILL/);
+  assert.match(printed.stdout, /SPAWN_IMAGE_AGENT/);
   const pinnedText = cli('workflow', 'route', '--project', project, '--task', 'image', '--model', 'terra');
   assert.equal(pinnedText.code, 1);
 });

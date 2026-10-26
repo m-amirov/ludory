@@ -11,6 +11,10 @@ import { planWorkflow, executeWorkflow } from '../src/workflows.mjs';
 import { png, jpeg } from './helpers/images.mjs';
 
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+async function boundImport(project, { run, brief, file }) {
+  const handoff = await planImageTask(project, { run, brief });
+  return planImageImport(project, { run, brief, file, handoffSha256: handoff.handoffSha256 });
+}
 export const terra = { available: true, reasonCode: 'AVAILABLE', transportVerified: true,
   entitlementVerified: true, imageGenCallable: true, routeObserved: 'image-gen',
   attestationScope: 'live-execution-context', modelObserved: 'gpt-6-terra' };
@@ -187,7 +191,7 @@ test('a preexisting output filename cannot be replaced by a new producer receipt
 test('manual image import preserves original bytes with USER_DECLARED provenance and no inferred model', async t => {
   const { project, run } = game(t);
   fs.writeFileSync(path.join(project, 'candidate.png'), png);
-  const preview = await planImageImport(project, { run, brief: 'image-brief.md', file: 'candidate.png' });
+  const preview = await boundImport(project, { run, brief: 'image-brief.md', file: 'candidate.png' });
   assert.equal(preview.status, 'READY');
   assert.equal(readNativeRun(project, run).events.length, 0);
   const result = await executeImageImport(preview, { apply: true });
@@ -200,9 +204,33 @@ test('manual image import preserves original bytes with USER_DECLARED provenance
   assert.equal(current.reviewPending, true);
   assert.equal(current.events.at(-1).kind, 'IMAGE_IMPORTED');
   assert.equal(current.events.at(-1).manual.provenance, 'USER_DECLARED');
+  assert.equal(current.events.at(-1).manual.handoffSha256, preview.handoffSha256);
   assert.equal(fs.readFileSync(path.join(project, 'src/main.js'), 'utf8'), '// Original user code\n');
-  const repeated = await planImageImport(project, { run, brief: 'image-brief.md', file: 'candidate.png' });
+  const repeated = await boundImport(project, { run, brief: 'image-brief.md', file: 'candidate.png' });
   assert.equal(repeated.status, 'BLOCKED');
+});
+
+test('image import rejects a generated original when its reviewed handoff brief or run head changed', async t => {
+  const { project, run } = game(t);
+  const handoff = await planImageTask(project, { run, brief: 'image-brief.md' });
+  fs.writeFileSync(path.join(project, 'candidate.png'), png);
+  fs.writeFileSync(path.join(project, 'image-brief.md'), 'a newly revised scene');
+  const changedBrief = await planImageImport(project, { run, brief: 'image-brief.md',
+    file: 'candidate.png', handoffSha256: handoff.handoffSha256 });
+  assert.equal(changedBrief.status, 'BLOCKED');
+  assert.equal(changedBrief.reasonCode, 'IMAGE_HANDOFF_STALE');
+  assert.equal(readNativeRun(project, run).events.length, 0);
+  fs.writeFileSync(path.join(project, 'image-brief.md'), 'Scene: lighthouse over a winter sea.');
+  const current = readNativeRun(project, run);
+  const request = planNativeEvent(project, run, { kind: 'CHECKPOINT', stage: current.nextStage,
+    artifacts: ['image-brief.md'], outcome: 'CONTINUE' });
+  // The native head is now different even though the brief bytes were restored.
+  const { commitNativeEvent } = await import('../src/store.mjs');
+  commitNativeEvent(request);
+  const changedHead = await planImageImport(project, { run, brief: 'image-brief.md',
+    file: 'candidate.png', handoffSha256: handoff.handoffSha256 });
+  assert.equal(changedHead.status, 'BLOCKED');
+  assert.equal(readNativeRun(project, run).events.length, 1);
 });
 
 test('manual import refuses hardlink, symlink, corrupt bytes, stale input and parent link', async t => {
@@ -210,16 +238,16 @@ test('manual import refuses hardlink, symlink, corrupt bytes, stale input and pa
   const candidate = path.join(project, 'candidate.png');
   fs.writeFileSync(candidate, png);
   fs.symlinkSync(candidate, path.join(project, 'link.png'));
-  assert.equal((await planImageImport(project, { run, brief: 'image-brief.md', file: 'link.png' })).status, 'BLOCKED');
+  assert.equal((await boundImport(project, { run, brief: 'image-brief.md', file: 'link.png' })).status, 'BLOCKED');
   fs.linkSync(candidate, path.join(project, 'hard.png'));
-  assert.equal((await planImageImport(project, { run, brief: 'image-brief.md', file: 'hard.png' })).status, 'BLOCKED');
+  assert.equal((await boundImport(project, { run, brief: 'image-brief.md', file: 'hard.png' })).status, 'BLOCKED');
   fs.unlinkSync(path.join(project, 'hard.png'));
   fs.mkdirSync(path.join(project, 'input-dir'));
   fs.symlinkSync(path.join(project, 'input-dir'), path.join(project, 'parent'), 'dir');
-  assert.equal((await planImageImport(project, { run, brief: 'image-brief.md', file: 'parent/image.png' })).status, 'BLOCKED');
+  assert.equal((await boundImport(project, { run, brief: 'image-brief.md', file: 'parent/image.png' })).status, 'BLOCKED');
   fs.writeFileSync(path.join(project, 'corrupt.png'), png.subarray(0, -4));
-  assert.equal((await planImageImport(project, { run, brief: 'image-brief.md', file: 'corrupt.png' })).status, 'BLOCKED');
-  const ready = await planImageImport(project, { run, brief: 'image-brief.md', file: 'candidate.png' });
+  assert.equal((await boundImport(project, { run, brief: 'image-brief.md', file: 'corrupt.png' })).status, 'BLOCKED');
+  const ready = await boundImport(project, { run, brief: 'image-brief.md', file: 'candidate.png' });
   assert.equal(ready.status, 'READY');
   fs.writeFileSync(candidate, png.subarray(0, -3));
   await assert.rejects(executeImageImport(ready, { apply: true }), /STALE|UNSAFE/);
@@ -245,7 +273,7 @@ test('image timeout only recovers after explicit owner confirmation; accepted im
 test('native event rejects a forged MIME to extension mismatch even when image hash is valid', async t => {
   const { project, run } = game(t);
   fs.writeFileSync(path.join(project, 'candidate.png'), png);
-  const plan = await planImageImport(project, { run, brief: 'image-brief.md', file: 'candidate.png' });
+  const plan = await boundImport(project, { run, brief: 'image-brief.md', file: 'candidate.png' });
   const output = stageNativeManualImage(project, run, plan.runHeadSha256,
     { brief: plan.brief, source: plan.source, requestedModel: 'auto' });
   assert.throws(() => planNativeEvent(project, run, {
@@ -280,8 +308,8 @@ test('manual native event rejects forged image dimensions and source/output mism
   const { project, run } = game(t);
   fs.writeFileSync(path.join(project, 'candidate.png'), png);
   fs.writeFileSync(path.join(project, 'other.jpg'), jpeg);
-  const plan = await planImageImport(project, { run, brief: 'image-brief.md', file: 'candidate.png' });
-  const second = await planImageImport(project, { run, brief: 'image-brief.md', file: 'other.jpg' });
+  const plan = await boundImport(project, { run, brief: 'image-brief.md', file: 'candidate.png' });
+  const second = await boundImport(project, { run, brief: 'image-brief.md', file: 'other.jpg' });
   const output = stageNativeManualImage(project, run, plan.runHeadSha256,
     { brief: plan.brief, source: plan.source, requestedModel: 'auto' });
   const manual = { taskKind: 'image', provenance: 'USER_DECLARED', reviewStatus: 'PENDING_REVIEW',

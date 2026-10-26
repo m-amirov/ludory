@@ -50,8 +50,11 @@ test('CLI rejects API model pins; import stores USER_DECLARED and rejects frozen
     '--brief', 'brief.md', '--model', 'flare', '--apply', '--json'];
   const pin = await cli(args);
   assert.equal(pin.code, 1);
+  const handoff = await cli(['workflow', 'image', '--project', project, '--run', run,
+    '--brief', 'brief.md', '--json']);
   const impArgs = ['workflow', 'image-import', '--project', project, '--run', run,
-    '--brief', 'brief.md', '--file', 'image.png', '--json'];
+    '--brief', 'brief.md', '--file', 'image.png', '--handoff-sha256',
+    handoff.result.handoffSha256, '--json'];
   assert.equal((await cli(impArgs)).result.status, 'READY');
   const imported = await cli([...impArgs, '--apply']);
   assert.equal(imported.code, 0, imported.stderr);
@@ -60,7 +63,8 @@ test('CLI rejects API model pins; import stores USER_DECLARED and rejects frozen
   assert.equal((await cli([...impArgs, '--apply'])).code, 2);
   const frozen = game(t, false);
   assert.equal((await cli(['workflow', 'image-import', '--project', frozen.project, '--run', frozen.run,
-    '--brief', 'brief.md', '--file', 'image.png', '--apply', '--json'])).code, 2);
+    '--brief', 'brief.md', '--file', 'image.png', '--handoff-sha256',
+    'a'.repeat(64), '--apply', '--json'])).code, 2);
 });
 
 test('CLI image never records pending host execution on apply', async t => {

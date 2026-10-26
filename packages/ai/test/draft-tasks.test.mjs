@@ -28,6 +28,16 @@ function game(t, { receipt = true } = {}) {
 const observedDev = { available: true, reasonCode: 'AVAILABLE', transportVerified: true,
   entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol' };
 
+function artSources(project) {
+  for (const [name, content] of [
+    ['scene.md', 'Scene S01 on the pier, dawn, low camera angle.'],
+    ['characters.md', 'Hero Maya: blue scarf, dark braided hair.'],
+    ['location.md', 'Pier in Iceland, icy sea and wooden railing.'],
+    ['style.md', 'Painterly warm highlights, consistent proportions.'],
+  ]) fs.writeFileSync(path.join(project, name), content);
+  return ['scene:scene.md', 'characters:characters.md', 'location:location.md', 'style:style.md'];
+}
+
 test('a new Studio game prepares a hash-bound manual draft packet without writes', t => {
   const { project, run } = game(t);
   const before = fs.readdirSync(path.join(project, '.ludory', 'ai', 'runs', run)).sort();
@@ -45,12 +55,28 @@ test('a new Studio game prepares a hash-bound manual draft packet without writes
 test('a witnessed DEV capability makes a reviewable art-concept task ready', t => {
   const { project, run } = game(t);
   const result = planDevDraft(project, { run, taskKind: 'art-concept', brief: 'brief.md',
-    sources: ['src/main.js'] },
+    sources: artSources(project), contextReviewed: true },
     { discover: () => observedDev });
   assert.equal(result.status, 'READY');
   assert.equal(result.selectedRoute, 'web-dev');
   assert.equal(result.modelObserved, 'gpt-6-sol');
   assert.equal(result.nextAction.kind, 'REVIEW_DRAFT_ROUTE');
+});
+
+test('Web DEV rejects a verified but non-approved Web model for every draft kind', t => {
+  const { project, run } = game(t);
+  const fullContext = artSources(project);
+  for (const taskKind of ['art-concept', 'episode-script']) {
+    for (const modelObserved of ['gpt-5.6-sol', 'gpt-7-sol', 'gpt-6-terra']) {
+      const result = planDevDraft(project, { run, taskKind, brief: 'brief.md',
+        sources: taskKind === 'art-concept' ? fullContext : ['src/main.js'],
+        contextReviewed: taskKind === 'art-concept' },
+      { discover: () => ({ ...observedDev, modelObserved }) });
+      assert.equal(result.status, 'NEEDS_USER_ACTION');
+      assert.equal(result.selectedRoute, 'manual');
+      assert.equal(result.modelObserved, undefined);
+    }
+  }
 });
 
 test('art-concept cannot be delegated to Web DEV without selected game context', t => {
@@ -61,6 +87,25 @@ test('art-concept cannot be delegated to Web DEV without selected game context',
   assert.equal(plan.reasonCode, 'DEV_ART_CONTEXT_INSUFFICIENT');
   assert.equal(plan.selectedRoute, 'manual');
   assert.equal(plan.manualPacket.sources.length, 0);
+});
+
+test('art-concept requires distinct typed scene, character, location and style sources plus explicit primary review', t => {
+  const { project, run } = game(t);
+  const sources = artSources(project);
+  const choose = (entries, reviewed) => planDevDraft(project, { run, taskKind: 'art-concept',
+    brief: 'brief.md', sources: entries, contextReviewed: reviewed }, { discover: () => observedDev });
+  assert.equal(choose(sources, false).status, 'NEEDS_USER_ACTION');
+  assert.equal(choose(sources, false).reasonCode, 'DEV_ART_CONTEXT_REVIEW_REQUIRED');
+  assert.equal(choose(['brief.md'], true).status, 'NEEDS_USER_ACTION');
+  assert.equal(choose(['src/main.js'], true).status, 'NEEDS_USER_ACTION');
+  assert.equal(choose(sources.slice(0, 3), true).status, 'NEEDS_USER_ACTION');
+  assert.equal(choose(['scene:scene.md', 'characters:scene.md', ...sources.slice(2)], true).status, 'NEEDS_USER_ACTION');
+  const ready = choose(sources, true);
+  assert.equal(ready.status, 'READY');
+  assert.deepEqual(ready.sourceRoles, ['scene', 'characters', 'location', 'style']);
+  assert.equal(ready.contextReview, 'USER_DECLARED');
+  fs.writeFileSync(path.join(project, 'style.md'), 'An unreviewed different look');
+  assert.equal(verifyDevDraftPlan(ready).ok, false);
 });
 
 test('a frozen game blocks before consulting any external host', t => {

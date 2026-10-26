@@ -56,13 +56,14 @@ export function planTaskRoute(projectDir, options = {}, { discover = discoverTas
       reasonCode: 'AI_ROUTING_STUDIO_GAME_REQUIRED',
       nextAction: { kind: 'STOP_FROZEN_GAME', executable: false } };
   }
-  // Built-in $imagegen is a tool of the active Codex agent, not an image API endpoint.
-  // No model selector is exposed. A read-only route preview cannot call that tool.
+  // Built-in $imagegen must be called by a separate Codex subagent, never from
+  // the CLI. No provider model selector is exposed; preview cannot spawn agents.
   if (taskKind === 'image' && model === 'auto') {
     return { ...base, status: 'NEEDS_AGENT_ACTION', selectedRoute: 'codex-imagegen',
       reasonCode: 'IMAGEGEN_SKILL_HANDOFF', modelObserved: null,
       modelSelection: 'provider-default', qualityPreference: 'highest-available',
-      nextAction: { kind: 'CALL_IMAGEGEN_SKILL', executable: false } };
+      nextAction: { kind: 'SPAWN_IMAGE_AGENT', executable: false,
+        agentRole: 'image-generator', model: 'inherit-parent' } };
   }
   let capabilities;
   try { capabilities = discover(project, { taskKind, model }); }

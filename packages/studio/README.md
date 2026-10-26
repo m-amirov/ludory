@@ -192,12 +192,14 @@ node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio
 node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task image --json
 ```
 
-Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` prefers authenticated Web DEV; `art-concept` prefers Web DEV **only if** supplied with enough selected story/style context, otherwise the task's primary model writes the art brief. `image` creates an agent handoff to the **built-in Codex `$imagegen` skill**. It returns `NEEDS_AGENT_ACTION`/`CALL_IMAGEGEN_SKILL`, never a claimed automatic invocation. Programmatic `terra` and `sol` are retained only for explicitly pinned historical in-process adapters. Read-only routing invokes no provider.
+Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` prefers authenticated **GPT-6 Sol (Web)** DEV; `art-concept` prefers that same Web DEV **only if** the primary agent explicitly reviewed four distinct scene/character/location/style references, otherwise the primary model writes the art brief. `image` creates an agent handoff to a **separate Codex image-generator subagent**, inheriting the primary model and invoking built-in `$imagegen`. It returns `NEEDS_AGENT_ACTION`/`SPAWN_IMAGE_AGENT`, never a claimed automatic spawn or invocation. Programmatic `terra` and `sol` are retained only for explicitly pinned historical in-process adapters. Read-only routing invokes no provider.
 
 `workflow route` never writes project files or workflow events; it rejects `--apply`. Exit code `0` covers a valid preview, including a manual handoff; `2` means the project is blocked (for example, no Studio creation receipt); `1` means invalid arguments or inspection error. Historical games stay frozen. No image, script, art review, independent acceptance, or Release PASS is produced by a route preview.
 JSON previews preserve `reasonCode` and, when available, `capabilityReasonCode`. The built-in ImageGen route uses `modelSelection: provider-default`, `qualityPreference: highest-available` and `modelObserved: null`; it cannot set or attest a hidden execution model. Historical in-process routes retain their Terra/SOL evidence fields.
 
 ## Web DEV reviewable drafts (Slice B, experimental)
+
+For `--task art-concept`, selected source text files must be distinct and labeled with the four roles `scene:path`, `characters:path`, `location:path`, `style:path` in `--source` (separated by semicolons). A role that is not applicable can have a file explaining why. After the primary agent assesses that the selected contents are sufficient, it supplies `--context-reviewed`. This is an explicit **USER_DECLARED** assessment, not automatic semantic QA; absent/duplicated roles or omitted review cause a read-only primary-model handoff and never an automatic Web DEV call. Existing `episode-script` sources remain untyped.
 
 For a game created with `ludory create` and an active native workflow run:
 
@@ -208,10 +210,11 @@ node packages/studio/bin/ludory.mjs workflow draft --project /path/to/new-studio
   --source narrative/graph.json --json
 
 # Explicit execution. Invokes DEV only if the installed isolated helper attests
-# actual authenticated transport, effective selected gpt-*-sol model, and browser-only mode.
+# actual authenticated transport, effective selected GPT-6 Sol (Web), and browser-only mode.
 node packages/studio/bin/ludory.mjs workflow draft --project /path/to/new-studio-game \
   --run RUN_ID --task art-concept --brief narrative/art-brief.md \
-  --source 'narrative/graph.json;narrative/character-bible.md;narrative/art-style.md' --apply --json
+  --source 'scene:narrative/scene.txt;characters:narrative/characters.txt;location:narrative/location.txt;style:narrative/art-style.txt' \
+  --context-reviewed --apply --json
 
 # No supported DEV host? Prepare the draft yourself, then import by user declaration.
 node packages/studio/bin/ludory.mjs workflow draft-import --project /path/to/new-studio-game \
@@ -249,18 +252,21 @@ node packages/studio/bin/ludory.mjs workflow image --project /path/to/new-studio
 node packages/studio/bin/ludory.mjs workflow image --project /path/to/new-studio-game \
   --run RUN_ID --brief narrative/scene-art-brief.md --apply --json
 
-# Step 4: inside the active Codex session, invoke $imagegen with the packet's prompt
-# and selected project references, then copy the generated original into the game.
+# Step 4: the primary Codex agent delegates the packet to a separate image-generator
+# subagent inheriting the primary model. That subagent invokes $imagegen with the
+# prompt and references, then saves the generated original inside the game.
 
 # Step 5: preview and explicitly import the checked original as USER_DECLARED.
 node packages/studio/bin/ludory.mjs workflow image-import --project /path/to/new-studio-game \
-  --run RUN_ID --brief narrative/scene-art-brief.md --file art/candidate.webp --json
+  --run RUN_ID --brief narrative/scene-art-brief.md --file art/candidate.webp \
+  --handoff-sha256 PACKET_HANDOFF_SHA256 --json
 node packages/studio/bin/ludory.mjs workflow image-import --project /path/to/new-studio-game \
-  --run RUN_ID --brief narrative/scene-art-brief.md --file art/candidate.webp --apply --json
+  --run RUN_ID --brief narrative/scene-art-brief.md --file art/candidate.webp \
+  --handoff-sha256 PACKET_HANDOFF_SHA256 --apply --json
 ```
 
-`$imagegen` is a **built-in Codex tool**, not a programmatic API provided to Node.js. The CLI cannot call it directly: a live Codex agent must consume `manualPacket.prompt`, invoke the image-generation skill, preserve the generated original, and then perform the explicit import. No authentication secret, separate provider endpoint or key is required by Ludory. This integration is an **agent handoff**, not unattended generation by the CLI.
+`$imagegen` is a **built-in Codex tool**, not a programmatic API provided to Node.js. The CLI cannot spawn agents or call it directly: the primary Codex agent receives `manualPacket`, spawns a separate image-generator subagent with the inherited model, and supplies the prompt and selected references. That subagent must invoke the skill, save the original and report its location. The primary agent explicitly imports it. Missing subagent or tool access blocks generation; there is no direct-primary-agent or HTTP fallback. No authentication secret, separate provider endpoint or key is required by Ludory. This integration is an **agent handoff**, not unattended generation by the CLI.
 
-The built-in tool has no visible model/quality selection parameter. `qualityPreference: highest-available` is an instruction to pursue the best available result using a precise brief and relevant reference images, **not an SDK setting or a verified model ID**; the actual model is left unobserved. Model availability, generation limits and the ability to use references depend on the active Codex session. A text packet alone cannot assert that an image has been generated. Recheck story fidelity, composition and technical quality after seeing the output.
+The built-in tool has no visible model/quality selection parameter. `qualityPreference: highest-available` is an instruction to pursue the best available result using a precise brief, **not an SDK setting or a verified model ID**; the actual model is left unobserved. Model availability, generation limits and reference support depend on the active Codex session. Selected external visual references are not currently part of the image handoff hash and therefore cannot be claimed as cryptographically bound by Ludory. A text packet alone cannot assert that an image has been generated. Recheck story fidelity, composition and technical quality after seeing the output.
 
-Imported originals are stored exclusively under `.ludory/ai/runs/<id>/images/`. Signatures, PNG integrity, JPEG/WebP structure and **full JPEG/WebP pixel decode with sharp**, dimensions, byte limits and SHA-256 receipts are verified before staging. Imports reject symlinks, hardlinks, parent aliases and content/extension mismatches; orphan files from interruptions remain untrusted. Provenance is `USER_DECLARED`: the CLI cannot independently attest that the tool ran. Neither operation publishes runtime assets, updates rights manifests or grants art/release PASS. Tests do not establish real Codex tool invocation or real Windows-host completion.
+Imported originals are stored exclusively under `.ludory/ai/runs/<id>/images/`. Import requires `handoffSha256` from the original `workflow image` packet and rejects a changed brief, project source binding, run head or stage before staging. The native image receipt records this token as declared attribution. Signatures, PNG integrity, JPEG/WebP structure and **full JPEG/WebP pixel decode with sharp**, dimensions, byte limits and SHA-256 receipts are verified before staging. Imports reject symlinks, hardlinks, parent aliases and content/extension mismatches; orphan files from interruptions remain untrusted. Provenance is `USER_DECLARED`: the CLI cannot independently attest that the tool ran. Neither operation publishes runtime assets, updates rights manifests or grants art/release PASS. Tests do not establish real Codex tool invocation or real Windows-host completion.

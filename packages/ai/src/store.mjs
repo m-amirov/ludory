@@ -82,6 +82,7 @@ function validateImageManualImport(value, runId, index, { allowArchived = false 
   if (!value || typeof value !== 'object' || value.taskKind !== 'image' ||
       value.provenance !== 'USER_DECLARED' || value.reviewStatus !== 'PENDING_REVIEW' ||
       !value.brief || !value.source || !value.output ||
+      (value.handoffSha256 !== undefined && !/^[a-f0-9]{64}$/.test(value.handoffSha256)) ||
       !(allowArchived ? ['auto', 'terra', 'sol', 'sunburst', 'flare']
         : ['auto', 'terra', 'sol']).includes(value.requestedModel)) throw new Error('NATIVE_IMAGE_IMPORT_INVALID');
   for (const item of [value.brief, value.source]) {
@@ -105,7 +106,8 @@ function validateImageManualImport(value, runId, index, { allowArchived = false 
       item.width * item.height > 64 * 1024 * 1024) throw new Error('NATIVE_IMAGE_IMPORT_INVALID');
   return { taskKind: 'image', provenance: 'USER_DECLARED', reviewStatus: 'PENDING_REVIEW',
     requestedModel: value.requestedModel, brief: { ...value.brief },
-    source: { ...value.source }, output: { ...item } };
+    source: { ...value.source }, output: { ...item },
+    ...(value.handoffSha256 && { handoffSha256: value.handoffSha256 }) };
 }
 
 function validateDevRequest(request) {

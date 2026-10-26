@@ -9,7 +9,7 @@ import { ownData } from './capabilities.mjs';
 const MAX_PROFILE_BYTES = 128 * 1024;
 const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const MAX_TEXT_BYTES = 2 * 1024 * 1024;
-const MODEL = /^gpt-\d+(?:\.\d+)?-sol$/i;
+const WEB_DEV_MODEL = 'gpt-6-sol';
 const CHILD_ENV_ALLOWLIST = ['PATH', 'Path', 'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT',
   'TMP', 'TEMP', 'TMPDIR', 'USERPROFILE', 'HOME', 'APPDATA', 'LOCALAPPDATA',
   'ProgramFiles', 'ProgramFiles(x86)', 'LANG', 'LC_ALL', 'XDG_RUNTIME_DIR',
@@ -71,7 +71,7 @@ function observedRoute(value) {
       ownData(value, 'entitlementVerified') !== true ||
       ownData(value, 'routeObserved') !== 'web-dev' ||
       ownData(value, 'localToolsEnabled') !== false ||
-      typeof model !== 'string' || !MODEL.test(model)) return null;
+      model !== WEB_DEV_MODEL) return null;
   return { available: true, reasonCode: 'AVAILABLE', modelObserved: model,
     transportVerified: true, entitlementVerified: true, routeObserved: 'web-dev' };
 }

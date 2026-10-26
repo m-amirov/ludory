@@ -23,10 +23,10 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory create --project <empty-directory> --id <slug> --title <name> --lang <locale> --profile <id> --template <id> --targets <comma-separated> [--version <semver>] [--catalog <directory>] [--apply] [--json]
   ludory workflow doctor --project <game-directory> [--json]
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--json]
-  ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--apply] [--json]
+  ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--context-reviewed] [--apply] [--json]
   ludory workflow draft-import --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> --file <relative-draft> [--apply] [--json]
   ludory workflow image --project <new-studio-game> --run <id> --brief <relative-art-brief> [--apply] [--json]
-  ludory workflow image-import --project <new-studio-game> --run <id> --brief <relative-text> --file <relative-image> [--apply] [--json]
+  ludory workflow image-import --project <new-studio-game> --run <id> --brief <relative-text> --file <relative-image> --handoff-sha256 <sha256> [--apply] [--json]
   ludory workflow status --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow start --project <game-directory> --pipeline <audit-repair-loop|production-art> --target <text> --in-scope <a;b> --acceptance <text> --mutation-boundary <text> [--out-of-scope <a;b>] [--apply] [--json]
@@ -40,16 +40,17 @@ No writes by default. init/migrate --apply only create ludory.project.json;
 create --apply only creates new template files, manifest and Studio receipt in an empty directory.
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
 workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
-workflow route is read-only: image routing hands the brief to the built-in Codex $imagegen skill.
+workflow route is read-only: image routing hands the brief to a dedicated Codex image-generator subagent.
 workflow draft preview never calls the DEV host; --apply probes only the isolated DEV helper and saves a review-only draft if the actual selected model is attested.
 Without a verified DEV host, draft returns a manual handoff packet; draft-import records USER_DECLARED provenance, never HOST_OBSERVED or narrative PASS.
 First, Web DEV drafts a source-aware art concept when authenticated and given adequate scene/style context;
 otherwise the primary task model authors the brief in its own session (standalone CLI gives manual handoff).
-Then the active Codex agent invokes built-in $imagegen; no separate API key or programmatic image provider is used.
+Then the primary Codex agent delegates to a separate image-generator subagent inheriting its model.
+That subagent invokes built-in $imagegen; no separate API key or programmatic image provider is used.
 The built-in tool exposes no model or quality selector: request maximum fidelity in the prompt and use
 the provider-selected model, whose identity cannot be attested by this CLI.
 workflow image --apply returns a source-bound agent handoff only; the CLI cannot call Codex tools.
-The agent saves the generated original under the project and runs workflow image-import --apply.
+The primary agent imports the subagent's original with --handoff-sha256 from the generation packet.
 image-import stores checked original PNG/JPEG/WebP bytes as USER_DECLARED; neither route grants art, rights or release PASS.
 Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.
 workflow cycle checks Codex-observed Node test execution with at most two repairs; it never automatically advances a stage.
@@ -68,10 +69,10 @@ function argumentsFor(command, argv) {
   const workflowCommon = [...common];
   const allowed = command.startsWith('workflow-')
     ? new Set(command === 'workflow-route' ? [...workflowCommon, '--task']
-      : command === 'workflow-draft' ? [...workflowCommon, '--run', '--task', '--brief', '--source', '--apply']
+      : command === 'workflow-draft' ? [...workflowCommon, '--run', '--task', '--brief', '--source', '--context-reviewed', '--apply']
       : command === 'workflow-draft-import' ? [...workflowCommon, '--run', '--task', '--brief', '--file', '--apply']
       : command === 'workflow-image' ? [...workflowCommon, '--run', '--brief', '--apply']
-      : command === 'workflow-image-import' ? [...workflowCommon, '--run', '--brief', '--file', '--apply']
+      : command === 'workflow-image-import' ? [...workflowCommon, '--run', '--brief', '--file', '--handoff-sha256', '--apply']
       : command === 'workflow-doctor' ? workflowCommon
       : command === 'workflow-status' || command === 'workflow-next' ? [...workflowCommon, '--run']
           : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
@@ -95,7 +96,7 @@ function argumentsFor(command, argv) {
     const key = argv[i];
     if (!allowed.has(key)) throw new Error(`Unknown option: ${key}`);
     if (flags.has(key)) throw new Error(`Duplicate option: ${key}`);
-    if (key === '--apply' || key === '--json' || key === '--confirm-no-executor') {
+    if (key === '--apply' || key === '--json' || key === '--confirm-no-executor' || key === '--context-reviewed') {
       flags.set(key, true);
       continue;
     }
@@ -141,9 +142,10 @@ function displayWorkflow(result, json, out) {
   if (result.executorCode) out(`  result: ${result.executorCode}\n`);
   if (result.provenance) out(`  provenance: ${result.provenance}\n`);
   if (result.manualPacket?.skill === '$imagegen') {
-    out('  imagegen: invoke $imagegen in the active Codex session using the source-bound packet\n');
+    out('  imagegen: delegate to a separate Codex image-generator subagent inheriting the parent model\n');
+    out('  subagent: invoke $imagegen using the source-bound packet; stop if delegation or skill is unavailable\n');
     out('  prompt: rerun with --json to access manualPacket.prompt and its brief hash\n');
-    out('  after generation: save the original in the project and run workflow image-import --apply\n');
+    out('  after generation: save the original and import with --handoff-sha256 from the packet\n');
   }
   if (result.modelRequested) out(`  requested image model: ${result.modelRequested}\n`);
   if (result.output?.outputPath) out(`  artifact: ${result.output.outputPath}\n`);
@@ -164,7 +166,8 @@ async function runDraftCommand(operation, flags, { out, devHost }) {
   } else {
     const sourceText = flags.get('--source');
     const sources = sourceText === undefined ? [] : sourceText.split(';');
-    const preview = planDevDraft(project, { ...options, sources });
+    const context = { ...options, sources, contextReviewed: flags.has('--context-reviewed') };
+    const preview = planDevDraft(project, context);
     if (!flags.has('--apply') || preview.status === 'BLOCKED') result = preview;
     else {
       const host = devHost();
@@ -172,7 +175,7 @@ async function runDraftCommand(operation, flags, { out, devHost }) {
       else {
         try {
           const capability = await host.probe();
-          const ready = planDevDraft(project, { ...options, sources }, { discover: () => capability });
+          const ready = planDevDraft(project, context, { discover: () => capability });
           result = await executeDevDraft(ready, { apply: true, host });
         } finally {
           if (typeof host.close === 'function') {
@@ -191,7 +194,8 @@ async function runImageCommand(operation, flags, { out }) {
   const options = { run: flags.get('--run'), brief: flags.get('--brief') };
   let result;
   if (operation === 'image-import') {
-    const plan = await planImageImport(project, { ...options, file: flags.get('--file') });
+    const plan = await planImageImport(project, { ...options, file: flags.get('--file'),
+      handoffSha256: flags.get('--handoff-sha256') });
     result = await executeImageImport(plan, { apply: flags.has('--apply') });
   } else {
     // Agent handoff: --apply never triggers a paid HTTP request or impersonates a tool call.

@@ -50,8 +50,16 @@ test('workflow draft previews source-bound manual handoff with zero files or hos
 
 test('workflow draft requires apply plus observed route; returns review-only output', async t => {
   const { project, run } = game(t);
+  for (const [name, value] of [
+    ['scene.md', 'Scene 1, winter storm with sailors.'],
+    ['characters.md', 'Captain: black coat and silver hair.'],
+    ['location.md', 'A fishing vessel in a storm.'],
+    ['style.md', 'Cinematic, consistent colors.'],
+  ]) fs.writeFileSync(path.join(project, name), value);
   const args = ['workflow', 'draft', '--project', project, '--run', run, '--task', 'art-concept',
-    '--brief', 'episode.md', '--source', 'src/main.js', '--json', '--apply'];
+    '--brief', 'episode.md',
+    '--source', 'scene:scene.md;characters:characters.md;location:location.md;style:style.md',
+    '--context-reviewed', '--json', '--apply'];
   const missing = await cli(args, { devHost: () => ({ available: false, reasonCode: 'DEV_HOST_UNAVAILABLE' }) });
   assert.equal(missing.result.status, 'NEEDS_USER_ACTION');
   assert.equal(readNativeRun(project, run).events.length, 0);

@@ -29,11 +29,14 @@ test('CLI image apply hands generation to the Codex built-in skill; import retai
   assert.equal(requested.code, 0, requested.stderr);
   assert.equal(requested.result.status, 'NEEDS_AGENT_ACTION');
   assert.equal(requested.result.manualPacket.skill, '$imagegen');
+  assert.equal(requested.result.nextAction.kind, 'SPAWN_IMAGE_AGENT');
+  assert.equal(requested.result.manualPacket.agent.model, 'inherit-parent');
   assert.equal(requested.result.manualPacket.modelSelection, 'provider-default');
   assert.equal(readNativeRun(project, run).events.length, 0);
   fs.writeFileSync(path.join(project, 'generated.png'), png);
   const imported = await cli(['workflow', 'image-import', '--project', project,
-    '--run', run, '--brief', 'image-brief.md', '--file', 'generated.png', '--apply', '--json']);
+    '--run', run, '--brief', 'image-brief.md', '--file', 'generated.png',
+    '--handoff-sha256', requested.result.handoffSha256, '--apply', '--json']);
   assert.equal(imported.code, 0, imported.stderr);
   assert.equal(imported.result.status, 'PENDING_REVIEW');
   assert.equal(imported.result.provenance, 'USER_DECLARED');

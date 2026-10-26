@@ -126,6 +126,15 @@ test('DEV requires a verified transport, entitlement, and real selected route', 
   const forged = discoverTaskCapabilities(project, { checkCodex: () => ({ ok: false }),
     hostProbe: () => ({ webDev: { ...verifiedDev, routeObserved: 'general-web' } }) });
   assert.equal(planTaskRoute(project, { taskKind: 'episode-script' }, { discover: () => forged }).status, 'NEEDS_USER_ACTION');
+  for (const modelObserved of ['gpt-5.6-sol', 'gpt-7-sol']) {
+    const wrongModel = discoverTaskCapabilities(project, { hostProbe: () => ({
+      webDev: { ...verifiedDev, modelObserved },
+    }) });
+    assert.equal(wrongModel.webDev.available, false);
+    assert.equal(wrongModel.webDev.reasonCode, 'AI_ROUTING_MODEL_UNVERIFIED');
+    assert.equal(planTaskRoute(project, { taskKind: 'art-concept' },
+      { discover: () => wrongModel }).status, 'NEEDS_USER_ACTION');
+  }
 });
 
 test('legacy image routing requires explicit producer pins, while auto uses built-in ImageGen', t => {

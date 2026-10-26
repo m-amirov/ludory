@@ -67,29 +67,39 @@ export async function planImageTask(projectDir, options = {}, { discover = async
   catch (error) { return blocked(project, run, error.message.startsWith('IMAGE_')
     ? error.message : 'IMAGE_BRIEF_UNSAFE'); }
   if (model === 'auto') {
-    // The CLI can prepare this source-bound handoff, but only a live Codex agent
-    // can invoke its built-in $imagegen skill. No network transport, billing,
+    // The CLI can prepare this source-bound handoff, but only a separate live
+    // Codex subagent can invoke the built-in $imagegen skill. The primary agent
+    // must explicitly delegate; no Node-level agent spawn is implied. No network transport, billing,
     // effective-model attestation or journal write is implied by --apply.
+    const handoffSha256 = hash(Buffer.from(JSON.stringify({ schemaVersion: 1,
+      project, runId: current.run.runId, runHeadSha256: current.headSha256,
+      stage: current.nextStage, sourceBinding, brief: briefFile.snapshot,
+    })));
     return { engine: 'ludory-ai', operation: 'image', project, runId: current.run.runId,
       taskKind: 'image', requestedModel: model, preferredRoute: 'codex-imagegen',
       selectedRoute: 'codex-imagegen', modelObserved: null,
       modelSelection: 'provider-default', qualityPreference: 'highest-available',
       sourceBinding, runHeadSha256: current.headSha256, stage: current.nextStage,
-      brief: briefFile.snapshot, status: 'NEEDS_AGENT_ACTION', reasonCode: 'IMAGEGEN_SKILL_HANDOFF',
+      brief: briefFile.snapshot, handoffSha256,
+      status: 'NEEDS_AGENT_ACTION', reasonCode: 'IMAGEGEN_SKILL_HANDOFF',
       writes: [], conflicts: [],
-      manualPacket: { taskKind: 'image', runId: current.run.runId,
+      manualPacket: { taskKind: 'image', runId: current.run.runId, handoffSha256,
         skill: '$imagegen', mode: 'built-in', modelSelection: 'provider-default',
         qualityPreference: 'highest-available',
+        agent: { role: 'image-generator', executor: 'codex-subagent',
+          model: 'inherit-parent', requiredSkill: '$imagegen' },
         prompt: `Create a production-quality game illustration faithful to the following approved art brief. ` +
           `Prioritize consistent characters, locations, composition, readable silhouettes, ` +
           `correct story details and reference fidelity. Use the highest image quality available ` +
           `in the built-in tool. Do not invent story facts or include unintended text.\n\n${briefFile.text}`,
         brief: { ...briefFile.snapshot, text: briefFile.text },
-        steps: ['Invoke the built-in $imagegen skill from the active Codex agent using this prompt and project references.',
+        steps: ['The primary agent must delegate this packet to a separate Codex subagent with the parent model; stop without generating if delegation or its skill is unavailable.',
+          'In the image-generator subagent, invoke the built-in $imagegen skill with this prompt and project references.',
           'Save the original generated PNG/JPEG/WebP into the project as a relative path.',
-          'Run ludory workflow image-import with --apply; inspect and review before acceptance.'],
+          'Return the output path to the primary agent; it runs ludory workflow image-import with --handoff-sha256 from this packet and --apply, then requests independent review.'],
         output: 'PNG/JPEG/WebP originals for explicit review; do not claim release or host-attested model PASS' },
-      nextAction: { kind: 'CALL_IMAGEGEN_SKILL', executable: false } };
+      nextAction: { kind: 'SPAWN_IMAGE_AGENT', executable: false,
+        agentRole: 'image-generator', model: 'inherit-parent' } };
   }
   let found;
   try { found = await discover(project); }
@@ -212,9 +222,15 @@ export async function executeImageTask(plan, { apply = false, host = null, timeo
     nextAction: { kind: ok ? 'REVIEW_IMAGES' : 'STOP', executable: false } };
 }
 
-export async function planImageImport(projectDir, { run, brief, file } = {}) {
+export async function planImageImport(projectDir, { run, brief, file, handoffSha256 } = {}) {
+  if (typeof handoffSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(handoffSha256)) {
+    throw new Error('IMAGE_HANDOFF_SHA256_REQUIRED');
+  }
   const plan = await planImageTask(projectDir, { run, brief });
   if (plan.status === 'BLOCKED') return { ...plan, operation: 'image-import' };
+  if (plan.handoffSha256 !== handoffSha256) return {
+    ...blocked(plan.project, plan.runId, 'IMAGE_HANDOFF_STALE'), operation: 'image-import',
+  };
   if (!imagePath(file) || file === brief) throw new Error('IMAGE_IMPORT_FILE_INVALID');
   const current = readNativeRun(plan.project, plan.runId);
   if (current.events.some(event => event.kind === 'IMAGE_IMPORTED')) {
@@ -239,7 +255,7 @@ export async function executeImageImport(plan, { apply = false } = {}) {
   if (!plan || plan.operation !== 'image-import') throw new Error('IMAGE_IMPORT_PLAN_INVALID');
   if (plan.status !== 'READY' || !apply) return plan;
   const fresh = await planImageImport(plan.project, { run: plan.runId, brief: plan.brief?.path,
-    file: plan.source?.path });
+    file: plan.source?.path, handoffSha256: plan.handoffSha256 });
   if (fresh.status !== 'READY' || fresh.runHeadSha256 !== plan.runHeadSha256 ||
       fresh.stage !== plan.stage || !equal(fresh.brief, plan.brief) ||
       !equal(fresh.sourceBinding, plan.sourceBinding) || !equal(fresh.source, plan.source) ||
@@ -249,7 +265,8 @@ export async function executeImageImport(plan, { apply = false } = {}) {
   const finished = commitNativeEvent(planNativeEvent(plan.project, plan.runId, {
     kind: 'IMAGE_IMPORTED', stage: plan.stage,
     manual: { taskKind: 'image', provenance: 'USER_DECLARED', reviewStatus: 'PENDING_REVIEW',
-      requestedModel: plan.requestedModel, brief: plan.brief, source: plan.source, output },
+      requestedModel: plan.requestedModel, brief: plan.brief, source: plan.source,
+      handoffSha256: plan.handoffSha256, output },
   }));
   return { engine: 'ludory-ai', operation: 'image-import', project: plan.project,
     runId: plan.runId, taskKind: 'image', status: 'PENDING_REVIEW',

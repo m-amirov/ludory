@@ -149,6 +149,16 @@ test('legacy helper without capability handshake is closed after a bounded probe
   assert.equal(host.child, null, 'a legacy helper must not remain running after denied preflight');
 });
 
+test('DEV host refuses non-GPT-6 Sol Web route before accepting a task', async t => {
+  const { home, stableHome, root } = fixture(helper().replaceAll('gpt-6-sol', 'gpt-5.6-sol'));
+  const dev = discoverDevHost({ devHome: home, stableHome });
+  cleanupHost(t, root, dev);
+  const cap = await dev.probe();
+  assert.equal(cap.available, false);
+  assert.equal(cap.reasonCode, 'DEV_ROUTE_UNVERIFIED');
+  await assert.rejects(dev.turn({ prompt: 'draft', taskId: 'wrong-model' }), /DEV_ROUTE_UNVERIFIED/);
+});
+
 test('isolated DEV process receives only a constrained environment, not ambient service credentials', async t => {
   const { home, stableHome, root } = fixture(helper());
   let environment;

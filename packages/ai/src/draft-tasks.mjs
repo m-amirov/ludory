@@ -8,6 +8,7 @@ import { hasStudioCreationReceipt } from './executor.mjs';
 import { isVerifiedCapability, ownData } from './capabilities.mjs';
 
 const TASKS = new Set(['episode-script', 'art-concept']);
+const ART_ROLES = ['scene', 'characters', 'location', 'style'];
 const FILE_LIMIT = 256 * 1024;
 const TEXT_LIMIT = 64 * 1024;
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
@@ -61,13 +62,15 @@ function blocked(project, taskKind, run, reasonCode) {
 /** Plan only. The optional discover injection is reserved for trusted host code. */
 export function planDevDraft(projectDir, options = {}, { discover = () => null } = {}) {
   if (!options || typeof options !== 'object' || Array.isArray(options) ||
-      Object.keys(options).some(key => !['run', 'taskKind', 'brief', 'sources'].includes(key)) ||
+      Object.keys(options).some(key => !['run', 'taskKind', 'brief', 'sources', 'contextReviewed'].includes(key)) ||
       !TASKS.has(options.taskKind) || typeof options.run !== 'string' ||
       !options.run.trim() || options.run.length > 180 ||
       typeof options.brief !== 'string' || !Array.isArray(options.sources ?? []) ||
       options.sources?.length > 8 ||
-      options.sources?.some(file => typeof file !== 'string')) invalid('DEV_TASK_INVALID');
-  const { run, taskKind, brief, sources = [] } = options;
+      options.sources?.some(file => typeof file !== 'string') ||
+      (options.contextReviewed !== undefined && typeof options.contextReviewed !== 'boolean') ||
+      (options.taskKind !== 'art-concept' && options.contextReviewed === true)) invalid('DEV_TASK_INVALID');
+  const { run, taskKind, brief, sources = [], contextReviewed = false } = options;
   const projectSource = inspectNativeProject(projectDir);
   const project = projectSource.project;
   if (!hasStudioCreationReceipt(project)) return blocked(project, taskKind, run, 'DEV_STUDIO_GAME_REQUIRED');
@@ -79,34 +82,53 @@ export function planDevDraft(projectDir, options = {}, { discover = () => null }
     return blocked(project, taskKind, run, 'DEV_RUN_NOT_ACTIVE');
   }
   const resolvedRun = current.run.runId;
+  const selected = sources.map(file => {
+    if (taskKind !== 'art-concept') return { path: file, role: null };
+    const divider = file.indexOf(':');
+    return divider > 0 ? { role: file.slice(0, divider), path: file.slice(divider + 1) }
+      : { role: null, path: file };
+  });
+  const sourceRoles = selected.map(item => item.role);
+  const coverageComplete = taskKind !== 'art-concept' ||
+    (selected.length === ART_ROLES.length &&
+      ART_ROLES.every(role => sourceRoles.includes(role)) &&
+      new Set(selected.map(item => item.path)).size === selected.length &&
+      selected.every(item => item.path !== brief));
   let briefFile, referenceFiles;
   try {
     briefFile = recordFile(project, brief, { text: true });
-    referenceFiles = sources.map(file => recordFile(project, file, { text: true, maxBytes: FILE_LIMIT }));
+    referenceFiles = selected.map(item => recordFile(project, item.path,
+      { text: true, maxBytes: FILE_LIMIT }));
   } catch (error) { return blocked(project, taskKind, run, error.message.startsWith('DEV_') ? error.message : 'DEV_SOURCE_UNSAFE'); }
   const referenceSnapshots = referenceFiles.map(file => file.snapshot);
   const manualPacket = { taskKind, runId: resolvedRun, stage: current.nextStage,
     brief: { ...briefFile.snapshot, text: briefFile.content },
     sources: referenceFiles.map(file => ({ ...file.snapshot, text: file.content })),
+    ...(taskKind === 'art-concept' && { sourceRoles, contextReview: contextReviewed
+      ? 'USER_DECLARED' : 'REVIEW_REQUIRED' }),
     output: 'reviewable text draft; no scene integration or narrative PASS' };
   const promptBytes = Buffer.byteLength(draftPrompt({ taskKind, runId: resolvedRun,
     sourceBinding: projectSource, stage: current.nextStage, brief: briefFile.snapshot,
-    sources: referenceSnapshots, manualPacket }), 'utf8');
+    sources: referenceSnapshots, sourceRoles, manualPacket }), 'utf8');
   if (promptBytes > 64 * 1024) return blocked(project, taskKind, run, 'DEV_PROMPT_TOO_LARGE');
   const cap = (() => { try { return discover(project); } catch { return null; } })();
   // A brief alone does not demonstrate access to the project's story/character/style context.
   // Without selected source references, leave art authoring to the primary task model's session.
-  const artContextReady = taskKind !== 'art-concept' || referenceFiles.length > 0;
+  const artContextReady = coverageComplete && (taskKind !== 'art-concept' || contextReviewed);
   const verified = isVerifiedCapability(cap, 'webDev') && artContextReady;
   const details = {
     engine: 'ludory-ai', operation: 'draft', project, runId: resolvedRun, taskKind,
     sourceBinding: projectSource, runHeadSha256: current.headSha256,
     stage: current.nextStage, brief: briefFile.snapshot,
+    sourceRoles, contextReviewed, ...(taskKind === 'art-concept' && {
+      contextReview: contextReviewed ? 'USER_DECLARED' : 'REVIEW_REQUIRED',
+    }),
     sources: referenceSnapshots, writes: [], conflicts: [],
     status: verified ? 'READY' : 'NEEDS_USER_ACTION',
     selectedRoute: verified ? 'web-dev' : 'manual',
-    reasonCode: verified ? 'DEV_ROUTE_VERIFIED' : !artContextReady
-      ? 'DEV_ART_CONTEXT_INSUFFICIENT' : 'DEV_ROUTE_UNVERIFIED',
+    reasonCode: verified ? 'DEV_ROUTE_VERIFIED' : !coverageComplete
+      ? 'DEV_ART_CONTEXT_INSUFFICIENT' : !artContextReady
+        ? 'DEV_ART_CONTEXT_REVIEW_REQUIRED' : 'DEV_ROUTE_UNVERIFIED',
     ...(verified && { modelObserved: ownData(cap, 'modelObserved') }),
     nextAction: { kind: verified ? 'REVIEW_DRAFT_ROUTE' : 'MANUAL_HANDOFF', executable: false },
     manualPacket,
@@ -132,8 +154,8 @@ export function verifyDevDraftPlan(plan) {
 }
 
 function draftPrompt(plan) {
-  const references = plan.manualPacket.sources.flatMap(item => [
-    `- ${item.path} (sha256=${item.sha256}, bytes=${item.size}):`,
+  const references = plan.manualPacket.sources.flatMap((item, index) => [
+    `- ${plan.sourceRoles?.[index] ?? 'reference'}: ${item.path} (sha256=${item.sha256}, bytes=${item.size}):`,
     item.text,
   ]);
   return [
@@ -168,10 +190,14 @@ export async function executeDevDraft(plan, { apply = false, host = null } = {})
   }
   const trustedPlan = planDevDraft(plan.project, {
     run: plan.runId, taskKind: plan.taskKind, brief: plan.brief?.path,
-    sources: plan.sources?.map(item => item.path),
+    sources: plan.sources?.map((item, index) => plan.taskKind === 'art-concept'
+      ? `${plan.sourceRoles?.[index]}:${item.path}` : item.path),
+    contextReviewed: plan.contextReviewed,
   }, { discover: () => capability });
   if (trustedPlan.status !== 'READY' || !unchanged(trustedPlan.sourceBinding, plan.sourceBinding) ||
       !unchanged(trustedPlan.brief, plan.brief) || !unchanged(trustedPlan.sources, plan.sources) ||
+      !unchanged(trustedPlan.sourceRoles, plan.sourceRoles) ||
+      trustedPlan.contextReviewed !== plan.contextReviewed ||
       trustedPlan.runHeadSha256 !== plan.runHeadSha256 || trustedPlan.stage !== plan.stage) {
     throw new Error('DEV_PLAN_TAMPERED_OR_STALE');
   }

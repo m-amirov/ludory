@@ -31,6 +31,8 @@ function normalizeHost(record, kind) {
   if (!validModelId(modelObserved)) return unavailable('AI_ROUTING_MODEL_UNVERIFIED');
   if (kind === 'webDev') {
     if (ownData(record, 'routeObserved') !== 'web-dev') return unavailable('AI_ROUTING_ROUTE_UNVERIFIED');
+    // The owner explicitly selected GPT-6 Sol (Web) for every Web DEV agent task.
+    if (modelObserved !== 'gpt-6-sol') return unavailable('AI_ROUTING_MODEL_UNVERIFIED');
   } else {
     if (ownData(record, 'imageGenCallable') !== true) return unavailable('AI_ROUTING_IMAGE_GEN_UNVERIFIED');
     if (!(kind === 'imageTerra' ? /^gpt-\d+(?:\.\d+)?-terra$/i
