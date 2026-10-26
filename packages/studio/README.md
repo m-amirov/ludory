@@ -192,7 +192,7 @@ node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio
 node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task image --model auto --json
 ```
 
-Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` and `art-concept` require the authenticated Web DEV host; `image` prefers Terra with SOL as preflight-only fallback. Explicit `--model terra` or `--model sol` prevents automatic substitution. Missing or unverifiable host evidence produces `NEEDS_USER_ACTION` and `MANUAL_HANDOFF`, not fake successful generation. Web DEV and Image Gen host adapters are **not connected in Slice A**, so those tasks currently receive manual handoff until the adapters are implemented. An installed Codex CLI can be probed with `--version`, but this command does not execute Codex tasks.
+Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` and `art-concept` require the authenticated Web DEV host; `image` prefers Terra with SOL as preflight-only fallback. Explicit `--model terra` or `--model sol` prevents automatic substitution. Missing or unverifiable host evidence produces `NEEDS_USER_ACTION` and `MANUAL_HANDOFF`, not fake successful generation. The read-only Slice A route preview itself never invokes Web DEV or Image Gen; the explicit task commands below hold the optional adapters. An installed Codex CLI can be probed with `--version`, but this command does not execute Codex tasks.
 
 `workflow route` never writes project files or workflow events; it rejects `--apply`. Exit code `0` covers a valid preview, including a manual handoff; `2` means the project is blocked (for example, no Studio creation receipt); `1` means invalid arguments or inspection error. Historical games stay frozen. No image, script, art review, independent acceptance, or Release PASS is produced by a route preview.
 JSON previews preserve the general `reasonCode` and, on unavailable routes, a more specific `capabilityReasonCode`. Image previews additionally expose `capabilityReasons.terra` and `capabilityReasons.sol`, including why the preferred Terra preflight was rejected when SOL is selected. Untrusted or missing attestation fields never establish availability.
@@ -231,4 +231,31 @@ Only deliberately named UTF-8 `--brief` and `--source` files are sent as text to
 
 An interrupted import can leave an unreferenced uniquely named draft in the private run directory. It is not treated as an accepted import or used by runtime; a later explicit import may safely create a new file. Orphan cleanup is manual after inspecting provenance and contents. `workflow status/next` advertises `REVIEW_DRAFT` while review-only evidence exists; narrative review completion remains a separate future gate.
 
-CLI `--apply` without an authenticated compatible DEV helper produces a manual handoff (`NEEDS_USER_ACTION`, exit 2) without game writes. Local mock-host tests are not evidence of successful real Windows DEV model selection. Live Windows DEV host and NTFS acceptance are still required; image adapter work follows in Slice C.
+CLI `--apply` without an authenticated compatible DEV helper produces a manual handoff (`NEEDS_USER_ACTION`, exit 2) without game writes. Local mock-host tests are not evidence of successful real Windows DEV model selection. Live Windows DEV host and NTFS acceptance are still required.
+
+## Verified image originals (Slice C, experimental)
+
+These commands require an active native run in a newly created Studio game:
+
+```sh
+# Pure preview: source-bound brief and manual generation packet; never calls Image Gen.
+node packages/studio/bin/ludory.mjs workflow image --project /path/to/new-studio-game \
+  --run RUN_ID --brief narrative/scene-art-brief.md --model auto --json
+
+# Explicit attempt, only when a trusted in-process host can attest model + Image Gen.
+node packages/studio/bin/ludory.mjs workflow image --project /path/to/new-studio-game \
+  --run RUN_ID --brief narrative/scene-art-brief.md --model terra --apply --json
+
+# Portable fallback: generate outside Ludory, save a PNG/JPEG/WebP inside the game,
+# then preview and explicitly import the checked original as USER_DECLARED.
+node packages/studio/bin/ludory.mjs workflow image-import --project /path/to/new-studio-game \
+  --run RUN_ID --brief narrative/scene-art-brief.md --file art/candidate.webp --json
+node packages/studio/bin/ludory.mjs workflow image-import --project /path/to/new-studio-game \
+  --run RUN_ID --brief narrative/scene-art-brief.md --file art/candidate.webp --apply --json
+```
+
+The selected producer must be **observed as the effective `gpt-*-terra` or `gpt-*-sol` model in the same live execution context** as the callable Image Gen tool. The optional `discoverImageHost`/`generate` API accepts only a host supplied by trusted in-process integration code; user-supplied configuration strings, CLI flags and response claims alone are not evidence. The current CLI ships **without such a trusted producer host**: `image --apply` normally returns a manual handoff (exit 2), and cannot claim actual Terra/SOL generation. The ChatGPT Image Gen API available during this slice does not expose an effective Terra/SOL selection/attestation interface. Local fake-host tests are not Windows/production model evidence.
+
+For `auto`, Terra is preferred and SOL may be selected only on read-only preflight when Terra lacks a verified paired capability. Explicit pins never switch. Once a request is journaled and the host is called, **no automatic retry or model fallback occurs**. A timeout, crash or uncertain artifact publication leaves `image-gen` pending (`PENDING_RECOVERY`, exit 3); do not recover until the original host is confirmed stopped and no image or charge can still be in flight. Recovery records an interruption, not successful generation.
+
+Generated and imported originals are stored exclusively under `.ludory/ai/runs/<id>/images/`. Format signatures, PNG chunk CRC/inflate integrity, JPEG/WebP structural bounds, dimensions, bytes, and SHA-256 receipts are checked again at native event commit/replay. **JPEG/WebP are not fully pixel-decoded by this lightweight adapter**: independent decode/visual acceptance remains an explicit blocker before runtime integration or release. Imports reject symlinks, hardlinks, parent path aliases and content/extension mismatches, with immutable new output names. Orphan files from interrupted writes are untrusted and require explicit inspection. Neither path modifies game scenes, runtime images, rights manifests or existing project files, and both yield **`PENDING_REVIEW`**; an independent art/rights/platform release gate is still required.

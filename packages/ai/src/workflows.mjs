@@ -67,7 +67,9 @@ function fromRun(project, operation, current) {
     : current.pendingExecutor
       ? { kind: 'AWAIT_EXECUTOR_RESULT', stage: current.nextStage, executable: false }
     : current.reviewPending
-      ? { kind: 'REVIEW_DRAFT', stage: current.nextStage, executable: false }
+      ? { kind: current.events.some(event => event.kind === 'IMAGE_IMPORTED' ||
+        (event.kind === 'EXECUTION_RESULT' && Array.isArray(event.result?.images) && event.result.ok))
+        ? 'REVIEW_IMAGES' : 'REVIEW_DRAFT', stage: current.nextStage, executable: false }
     : ['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(current.status)
       ? { kind: 'AWAIT_EVIDENCE', stage: current.nextStage, executable: false }
       : current.status === 'EXECUTION_FAILED' ? { kind: 'RETRY_EXECUTOR', stage: current.nextStage, executable: false }
@@ -150,7 +152,7 @@ export function planWorkflow(projectDir, operation, options = {}) {
       test: options.test, requiredCommand, repairs, executor: 'codex',
       warning: 'Test execution is observed only via Codex sandbox JSONL, not independently verified. No automatic checkpoint, stage advancement or Release PASS.' };
   }
-  if (operation === 'recover' && !['codex', 'web-dev'].includes(current.pendingExecutor)) {
+  if (operation === 'recover' && !['codex', 'web-dev', 'image-gen'].includes(current.pendingExecutor)) {
     return blocked(project, operation, 'NATIVE_RECOVERY_NO_PENDING_EXECUTOR');
   }
   let nativePlan;
@@ -161,7 +163,10 @@ export function planWorkflow(projectDir, operation, options = {}) {
     });
     else if (operation === 'recover') nativePlan = planNativeEvent(project, current.run.runId, {
       kind: 'EXECUTION_RESULT', stage: current.nextStage,
-      result: current.pendingExecutor === 'web-dev'
+      result: current.pendingExecutor === 'image-gen'
+        ? { ok: false, code: 'IMAGE_EXECUTOR_INTERRUPTED', reviewStatus: 'PENDING_REVIEW',
+          modelObserved: null, images: [] }
+        : current.pendingExecutor === 'web-dev'
         ? { ok: false, code: 'DEV_EXECUTOR_INTERRUPTED', reviewStatus: 'PENDING_REVIEW',
           modelObserved: null, outputPath: null, outputSha256: null, outputSize: null }
         : { ok: false, code: 'EXECUTOR_INTERRUPTED', exitCode: null,
@@ -181,7 +186,9 @@ export function planWorkflow(projectDir, operation, options = {}) {
   const executorPlan = operation === 'continue' && options.executor === 'codex'
     ? prepareCodexExecution(project, current.run.scope, current.nextStage, { gitRoot: source.gitRoot }) : null;
   const recoveryWarning = operation === 'recover'
-    ? current.pendingExecutor === 'web-dev'
+    ? current.pendingExecutor === 'image-gen'
+      ? 'Recovery cannot prove whether the old image-generation host finished or charged for this request. Confirm the image host is stopped and no output is in flight before --apply; unjournaled originals remain unapproved.'
+      : current.pendingExecutor === 'web-dev'
       ? 'Recovery cannot prove whether the old DEV helper completed its request; confirm the DEV browser helper is stopped and no response is in flight before --apply. Any generated but unjournaled draft remains unapproved.'
       : 'Recovery cannot reliably inspect the old Codex child; confirm that no Codex process can still modify this project before --apply.'
     : null;

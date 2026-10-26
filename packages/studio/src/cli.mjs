@@ -4,7 +4,8 @@ import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
 import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNativeRun,
-  planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport } from '@ludory/ai';
+  planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport,
+  discoverImageHost, planImageTask, executeImageTask, planImageImport, executeImageImport } from '@ludory/ai';
 
 const usage = `Ludory Studio 0.1.0 — native game-development workflows
 
@@ -23,6 +24,8 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--model <auto|terra|sol>] [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--apply] [--json]
   ludory workflow draft-import --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> --file <relative-draft> [--apply] [--json]
+  ludory workflow image --project <new-studio-game> --run <id> --brief <relative-text> [--model <auto|terra|sol>] [--apply] [--json]
+  ludory workflow image-import --project <new-studio-game> --run <id> --brief <relative-text> --file <relative-image> [--apply] [--json]
   ludory workflow status --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow start --project <game-directory> --pipeline <audit-repair-loop|production-art> --target <text> --in-scope <a;b> --acceptance <text> --mutation-boundary <text> [--out-of-scope <a;b>] [--apply] [--json]
@@ -40,6 +43,8 @@ workflow route is read-only: it checks executor eligibility; Web DEV and Image G
 workflow draft preview never calls the DEV host; --apply probes only the isolated DEV helper and saves a review-only draft if the actual selected model is attested.
 Without a verified DEV host, draft returns a manual handoff packet; draft-import records USER_DECLARED provenance, never HOST_OBSERVED or narrative PASS.
 For image tasks, auto prefers Terra then SOL at preflight; pinned models never switch silently.
+workflow image requires a trusted host with a live, paired Terra/SOL + Image Gen attestation; no default provider has this capability.
+image-import stores checked original PNG/JPEG/WebP bytes as USER_DECLARED; neither route grants art, rights or release PASS.
 Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.
 workflow cycle checks Codex-observed Node test execution with at most two repairs; it never automatically advances a stage.
 Codex tool telemetry is not independent QA and cannot establish Release PASS.
@@ -59,6 +64,8 @@ function argumentsFor(command, argv) {
     ? new Set(command === 'workflow-route' ? [...workflowCommon, '--task', '--model']
       : command === 'workflow-draft' ? [...workflowCommon, '--run', '--task', '--brief', '--source', '--apply']
       : command === 'workflow-draft-import' ? [...workflowCommon, '--run', '--task', '--brief', '--file', '--apply']
+      : command === 'workflow-image' ? [...workflowCommon, '--run', '--brief', '--model', '--apply']
+      : command === 'workflow-image-import' ? [...workflowCommon, '--run', '--brief', '--file', '--apply']
       : command === 'workflow-doctor' ? workflowCommon
       : command === 'workflow-status' || command === 'workflow-next' ? [...workflowCommon, '--run']
           : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
@@ -127,7 +134,8 @@ function displayWorkflow(result, json, out) {
   if (result.warning) out(`  warning: ${result.warning}\n`);
   if (result.executorCode) out(`  result: ${result.executorCode}\n`);
   if (result.provenance) out(`  provenance: ${result.provenance}\n`);
-  if (result.output?.outputPath) out(`  draft: ${result.output.outputPath}\n`);
+  if (result.output?.outputPath) out(`  artifact: ${result.output.outputPath}\n`);
+  for (const item of result.images ?? []) out(`  image: ${item.outputPath} · ${item.outputSha256}\n`);
   if (result.nextAction?.kind) out(`  next: ${result.nextAction.kind}\n`);
   for (const run of result.runs ?? []) out(`  run: ${run.runId} · ${run.status} · ${run.nextStage ?? 'terminal'}\n`);
   if (result.status === 'READY') for (const item of result.writes ?? []) out(`  planned: ${item}\n`);
@@ -158,6 +166,35 @@ async function runDraftCommand(operation, flags, { out, devHost }) {
           if (typeof host.close === 'function') {
             try { await host.close(); } catch { /* Result or pending state remains authoritative. */ }
           }
+        }
+      }
+    }
+  }
+  displayWorkflow(result, flags.has('--json'), out);
+  return result.status === 'BLOCKED' || (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
+}
+
+async function runImageCommand(operation, flags, { out, imageHost }) {
+  const project = flags.get('--project');
+  const options = { run: flags.get('--run'), brief: flags.get('--brief') };
+  let result;
+  if (operation === 'image-import') {
+    const plan = await planImageImport(project, { ...options, file: flags.get('--file') });
+    result = await executeImageImport(plan, { apply: flags.has('--apply') });
+  } else {
+    const requested = { ...options, model: flags.get('--model') ?? 'auto' };
+    const preview = await planImageTask(project, requested);
+    if (!flags.has('--apply') || preview.status === 'BLOCKED') result = preview;
+    else {
+      const host = imageHost();
+      try {
+        const caps = await discoverImageHost(host);
+        const ready = await planImageTask(project, requested, { discover: async () => caps });
+        result = ready.status === 'READY'
+          ? await executeImageTask(ready, { apply: true, host }) : ready;
+      } finally {
+        if (typeof host?.close === 'function') {
+          try { await host.close(); } catch { /* Pending state remains authoritative. */ }
         }
       }
     }
@@ -229,7 +266,7 @@ function display(result, json, out) {
 
 /** Pure command boundary; inject streams to test status/output without child processes. */
 export function runCli(argv, { out = text => process.stdout.write(text), err = text => process.stderr.write(text),
-  executor, devHost = discoverDevHost } = {}) {
+  executor, devHost = discoverDevHost, imageHost = () => null } = {}) {
   try {
     const [command = 'help', ...rest] = argv;
     if (command === 'help' || command === '--help') {
@@ -239,7 +276,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'workflow') {
       const [operation, ...args] = rest;
-      if (!['doctor', 'route', 'draft', 'draft-import', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
+      if (!['doctor', 'route', 'draft', 'draft-import', 'image', 'image-import', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
         throw new Error(`Unknown workflow operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`workflow-${operation}`, args);
@@ -254,6 +291,24 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
             project: flags.get('--project'), nativeStatus: 'WAITING_FOR_EVIDENCE',
             reasonCode: 'DEV_EXECUTION_OUTCOME_UNKNOWN', writes: [], conflicts: [],
             warning: 'A DEV request may still be running. Stop/verify the old helper before workflow recover --confirm-no-executor --apply.',
+            nextAction: { kind: 'CONFIRM_EXECUTOR_STOPPED', executable: false },
+          } : { operation, status: 'FAILED', project: flags.get('--project'),
+            writes: [], conflicts: [error.message] };
+          if (flags.has('--json') || pending) displayWorkflow(result, flags.has('--json'), out);
+          else err(`Ludory: ${error.message}\n`);
+          return pending ? 3 : 1;
+        });
+      }
+      if (operation === 'image' || operation === 'image-import') {
+        return runImageCommand(operation, flags, { out, imageHost }).catch(error => {
+          let pending = false;
+          try { pending = operation === 'image' && flags.has('--apply') &&
+            readNativeRun(flags.get('--project'), flags.get('--run')).pendingExecutor === 'image-gen'; }
+          catch { /* No pending run can be inferred from absent metadata. */ }
+          const result = pending ? { engine: 'ludory-ai', operation, status: 'PENDING_RECOVERY',
+            project: flags.get('--project'), nativeStatus: 'WAITING_FOR_EVIDENCE',
+            reasonCode: 'IMAGE_EXECUTION_OUTCOME_UNKNOWN', writes: [], conflicts: [],
+            warning: 'Generation may still be running or incur a charge. Confirm the host is stopped before workflow recover --confirm-no-executor --apply.',
             nextAction: { kind: 'CONFIRM_EXECUTOR_STOPPED', executable: false },
           } : { operation, status: 'FAILED', project: flags.get('--project'),
             writes: [], conflicts: [error.message] };

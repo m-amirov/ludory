@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { getPipeline, checkTransition } from './pipelines.mjs';
 import { inspectNativeProject, verifyNativeSource, snapshotArtifact } from './source.mjs';
+import { inspectGeneratedImage, readProjectImageInput } from './image-artifacts.mjs';
 
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const serial = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -15,6 +16,84 @@ const EXECUTION_CODES = new Set(['EXECUTED_UNVERIFIED', 'EXECUTOR_INCOMPLETE', '
 const DEV_TASKS = new Set(['episode-script', 'art-concept']);
 const DEV_RESULT_CODES = new Set(['HOST_OBSERVED', 'DEV_EXECUTOR_UNVERIFIED', 'DEV_EXECUTOR_INTERRUPTED']);
 const DEV_MODEL = /^gpt-\d+(?:\.\d+)?-sol$/i;
+const IMAGE_MODEL = /^gpt-\d+(?:\.\d+)?-(?:terra|sol)$/i;
+const IMAGE_CODES = new Set(['HOST_OBSERVED', 'IMAGE_EXECUTOR_UNVERIFIED', 'IMAGE_EXECUTOR_INTERRUPTED']);
+
+function validateImageRequest(request) {
+  if (!request || typeof request !== 'object' || Array.isArray(request) ||
+      request.taskKind !== 'image' || !['image-terra', 'image-sol'].includes(request.route) ||
+      !['auto', 'terra', 'sol'].includes(request.requestedModel) ||
+      !IMAGE_MODEL.test(request.modelObserved ?? '') ||
+      !request.modelObserved.endsWith(request.route.slice(6)) ||
+      request.requestedModel !== 'auto' && `image-${request.requestedModel}` !== request.route ||
+      !request.brief || typeof request.brief.path !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(request.brief.sha256 ?? '') ||
+      !Number.isSafeInteger(request.brief.size) || request.brief.size < 1 ||
+      request.brief.size > 64 * 1024) throw new Error('NATIVE_IMAGE_REQUEST_INVALID');
+  return { taskKind: 'image', route: request.route, requestedModel: request.requestedModel,
+    modelObserved: request.modelObserved, brief: { ...request.brief } };
+}
+
+function validateImageOutput(image, runId, requestIndex, order, modelObserved) {
+  const prefix = `.ludory/ai/runs/${runId}/images/image-${String(requestIndex).padStart(6, '0')}-${order}.`;
+  if (!image || typeof image !== 'object' || !['image/png', 'image/jpeg', 'image/webp'].includes(image.mediaType) ||
+      image.outputPath !== `${prefix}${image.mediaType === 'image/png' ? 'png' : image.mediaType === 'image/jpeg' ? 'jpg' : 'webp'}` ||
+      !/^[a-f0-9]{64}$/.test(image.outputSha256 ?? '') ||
+      !Number.isSafeInteger(image.outputSize) || image.outputSize < 1 || image.outputSize > 10 * 1024 * 1024 ||
+      !Number.isSafeInteger(image.width) || image.width < 1 || image.width > 16384 ||
+      !Number.isSafeInteger(image.height) || image.height < 1 || image.height > 16384 ||
+      image.width * image.height > 64 * 1024 * 1024 || image.modelObserved !== modelObserved) {
+    throw new Error('NATIVE_IMAGE_OUTPUT_INVALID');
+  }
+  return { outputPath: image.outputPath, outputSha256: image.outputSha256,
+    outputSize: image.outputSize, mediaType: image.mediaType, width: image.width,
+    height: image.height, modelObserved: image.modelObserved };
+}
+
+function validateImageResult(result, runId, request) {
+  if (!result || typeof result !== 'object' || Array.isArray(result) ||
+      !IMAGE_CODES.has(result.code) || result.ok !== (result.code === 'HOST_OBSERVED') ||
+      result.reviewStatus !== 'PENDING_REVIEW' || !Array.isArray(result.images)) {
+    throw new Error('NATIVE_IMAGE_RESULT_INVALID');
+  }
+  if (result.ok) {
+    if (result.modelObserved !== request?.modelObserved || !result.images.length || result.images.length > 4) {
+      throw new Error('NATIVE_IMAGE_RESULT_INVALID');
+    }
+  } else if (result.modelObserved !== null || result.images.length) throw new Error('NATIVE_IMAGE_RESULT_INVALID');
+  return { ok: result.ok, code: result.code, reviewStatus: 'PENDING_REVIEW',
+    modelObserved: result.modelObserved, images: result.images.map((img, index) =>
+      validateImageOutput(img, runId, request?.eventIndex, index, request?.modelObserved)) };
+}
+
+function validateImageManualImport(value, runId, index) {
+  if (!value || typeof value !== 'object' || value.taskKind !== 'image' ||
+      value.provenance !== 'USER_DECLARED' || value.reviewStatus !== 'PENDING_REVIEW' ||
+      !value.brief || !value.source || !value.output ||
+      !['auto', 'terra', 'sol'].includes(value.requestedModel)) throw new Error('NATIVE_IMAGE_IMPORT_INVALID');
+  for (const item of [value.brief, value.source]) {
+    if (typeof item.path !== 'string' || !item.path || !/^[a-f0-9]{64}$/.test(item.sha256 ?? '') ||
+        !Number.isSafeInteger(item.size) || item.size < 1) throw new Error('NATIVE_IMAGE_IMPORT_INVALID');
+  }
+  const item = value.output;
+  if (value.source.sha256 !== item.outputSha256 || value.source.size !== item.outputSize) {
+    throw new Error('NATIVE_IMAGE_IMPORT_INVALID');
+  }
+  const escapedRun = runId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const expectedExtension = item.mediaType === 'image/png' ? '.png'
+    : item.mediaType === 'image/jpeg' ? '.jpg' : item.mediaType === 'image/webp' ? '.webp' : null;
+  if (!new RegExp(`^\\.ludory/ai/runs/${escapedRun}/images/import-${String(index).padStart(6, '0')}-[a-f0-9]{24}\\.(?:png|jpg|webp)$`).test(item.outputPath ?? '') ||
+      !expectedExtension || !item.outputPath.endsWith(expectedExtension) ||
+      item.modelObserved !== null || !['image/png', 'image/jpeg', 'image/webp'].includes(item.mediaType) ||
+      !/^[a-f0-9]{64}$/.test(item.outputSha256 ?? '') ||
+      !Number.isSafeInteger(item.outputSize) || item.outputSize < 1 || item.outputSize > 10 * 1024 * 1024 ||
+      !Number.isSafeInteger(item.width) || !Number.isSafeInteger(item.height) ||
+      item.width < 1 || item.height < 1 || item.width > 16384 || item.height > 16384 ||
+      item.width * item.height > 64 * 1024 * 1024) throw new Error('NATIVE_IMAGE_IMPORT_INVALID');
+  return { taskKind: 'image', provenance: 'USER_DECLARED', reviewStatus: 'PENDING_REVIEW',
+    requestedModel: value.requestedModel, brief: { ...value.brief },
+    source: { ...value.source }, output: { ...item } };
+}
 
 function validateDevRequest(request) {
   if (!request || typeof request !== 'object' || Array.isArray(request) ||
@@ -213,6 +292,42 @@ function checkedRunDir(project, runId) {
   return dir;
 }
 
+/** Independently inspect committed image bytes, not metadata supplied by a host or event caller. */
+function verifyStoredImage(project, runId, output) {
+  const expectedBase = path.basename(output.outputPath ?? '');
+  if (!expectedBase || output.outputPath !== `.ludory/ai/runs/${runId}/images/${expectedBase}`) {
+    throw new Error('NATIVE_IMAGE_OUTPUT_INVALID');
+  }
+  const previous = process.cwd();
+  let fd;
+  try {
+    process.chdir(project);
+    enterDirectory('.ludory');
+    enterDirectory('ai');
+    enterDirectory('runs');
+    enterDirectory(runId);
+    enterDirectory('images');
+    const stat = fs.lstatSync(expectedBase, { bigint: true });
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n ||
+        stat.size < 1n || stat.size > 10n * 1024n * 1024n) throw new Error('NATIVE_IMAGE_OUTPUT_INVALID');
+    fd = fs.openSync(expectedBase, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    const opened = fs.fstatSync(fd, { bigint: true });
+    if (!opened.isFile() || opened.nlink !== 1n || opened.dev !== stat.dev ||
+        opened.ino !== stat.ino || opened.size !== stat.size) throw new Error('NATIVE_IMAGE_OUTPUT_INVALID');
+    const bytes = fs.readFileSync(fd);
+    const info = inspectGeneratedImage(bytes, { mediaType: output.mediaType });
+    const after = fs.lstatSync(expectedBase, { bigint: true });
+    if (after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size ||
+        after.nlink !== 1n || info.sha256 !== output.outputSha256 ||
+        info.size !== output.outputSize || info.width !== output.width ||
+        info.height !== output.height) throw new Error('NATIVE_IMAGE_OUTPUT_INVALID');
+  } catch { throw new Error('NATIVE_IMAGE_OUTPUT_INVALID'); }
+  finally {
+    if (fd !== undefined) fs.closeSync(fd);
+    process.chdir(previous);
+  }
+}
+
 function nativeRunId() {
   return `${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(6).toString('hex')}`;
 }
@@ -323,8 +438,10 @@ export function readNativeRun(projectDir, runRef = 'latest') {
   let pendingExecutor = null;
   let pendingRequestSha256 = null;
   let pendingDevRequest = null;
+  let pendingImageRequest = null;
   const manualTaskKinds = new Set();
   let reviewPending = false;
+  let manualImageImported = false;
   const events = [];
   for (let index = 0; index < files.length / 2; index++) {
     const prefix = String(index + 1).padStart(6, '0');
@@ -360,25 +477,29 @@ export function readNativeRun(projectDir, runRef = 'latest') {
     } else if (event.kind === 'ACTION_REQUESTED') {
       if (['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(status) ||
           event.outcome !== null || event.artifacts?.length ||
-          (event.executor !== undefined && !['codex', 'web-dev'].includes(event.executor))) {
+          (event.executor !== undefined && !['codex', 'web-dev', 'image-gen'].includes(event.executor))) {
         throw new Error('NATIVE_INTEGRITY_DUPLICATE_REQUEST');
       }
       if (event.executor === 'web-dev') {
         try { pendingDevRequest = { ...validateDevRequest(event.request), eventIndex: event.index }; }
         catch { throw new Error('NATIVE_INTEGRITY_DEV_REQUEST'); }
       }
+      if (event.executor === 'image-gen') {
+        try { pendingImageRequest = { ...validateImageRequest(event.request), eventIndex: event.index }; }
+        catch { throw new Error('NATIVE_INTEGRITY_IMAGE_REQUEST'); }
+      }
       status = 'WAITING_FOR_EVIDENCE';
       pendingExecutor = event.executor ?? null;
       pendingRequestSha256 = pendingExecutor ? sha256(bytes) : null;
     } else if (event.kind === 'EXECUTION_RESULT') {
-      if (status !== 'WAITING_FOR_EVIDENCE' || !['codex', 'web-dev'].includes(pendingExecutor) ||
+      if (status !== 'WAITING_FOR_EVIDENCE' || !['codex', 'web-dev', 'image-gen'].includes(pendingExecutor) ||
           event.requestSha256 !== pendingRequestSha256 ||
           event.outcome !== null || event.artifacts?.length) {
         throw new Error('NATIVE_INTEGRITY_UNREQUESTED_EXECUTION_RESULT');
       }
       try {
         if (pendingExecutor === 'codex') validateExecutionResult(event.result);
-        else {
+        else if (pendingExecutor === 'web-dev') {
           validateDevResult(event.result, run.runId, pendingDevRequest);
           if (event.result.ok) {
             const file = snapshotArtifact(project, event.result.outputPath);
@@ -387,13 +508,18 @@ export function readNativeRun(projectDir, runRef = 'latest') {
             }
           }
         }
+        else {
+          validateImageResult(event.result, run.runId, pendingImageRequest);
+          if (event.result.ok) for (const image of event.result.images) verifyStoredImage(project, run.runId, image);
+        }
       }
       catch { throw new Error('NATIVE_INTEGRITY_EXECUTION_RESULT'); }
       status = event.result.ok ? 'EXECUTED_UNVERIFIED' : 'EXECUTION_FAILED';
-      if (pendingExecutor === 'web-dev' && event.result.ok) reviewPending = true;
+      if (['web-dev', 'image-gen'].includes(pendingExecutor) && event.result.ok) reviewPending = true;
       pendingExecutor = null;
       pendingRequestSha256 = null;
       pendingDevRequest = null;
+      pendingImageRequest = null;
     } else if (event.kind === 'DRAFT_IMPORTED') {
       if (pendingExecutor || event.outcome !== null || event.artifacts?.length ||
           manualTaskKinds.has(event.manual?.taskKind)) throw new Error('NATIVE_INTEGRITY_DEV_MANUAL_IMPORT');
@@ -406,6 +532,16 @@ export function readNativeRun(projectDir, runRef = 'latest') {
         manualTaskKinds.add(imported.taskKind);
         reviewPending = true;
       } catch { throw new Error('NATIVE_INTEGRITY_DEV_MANUAL_IMPORT'); }
+    } else if (event.kind === 'IMAGE_IMPORTED') {
+      if (pendingExecutor || event.outcome !== null || event.artifacts?.length || manualImageImported) {
+        throw new Error('NATIVE_INTEGRITY_IMAGE_IMPORT');
+      }
+      try {
+        const imp = validateImageManualImport(event.manual, runId, event.index);
+        verifyStoredImage(project, runId, imp.output);
+        manualImageImported = true;
+        reviewPending = true;
+      } catch { throw new Error('NATIVE_INTEGRITY_IMAGE_IMPORT'); }
     } else throw new Error('NATIVE_INTEGRITY_EVENT_KIND');
     precedingHash = sha256(bytes);
     events.push(event);
@@ -420,7 +556,7 @@ export function planNativeEvent(projectDir, runRef, input) {
   const current = readNativeRun(project, runRef);
   const source = inspectNativeProject(project);
   if (current.terminal) throw new Error('NATIVE_TERMINAL_RUN');
-  if (!input || !['CHECKPOINT', 'ACTION_REQUESTED', 'EXECUTION_RESULT', 'DRAFT_IMPORTED'].includes(input.kind)) throw new Error('NATIVE_EVENT_KIND_INVALID');
+  if (!input || !['CHECKPOINT', 'ACTION_REQUESTED', 'EXECUTION_RESULT', 'DRAFT_IMPORTED', 'IMAGE_IMPORTED'].includes(input.kind)) throw new Error('NATIVE_EVENT_KIND_INVALID');
   if (input.stage !== current.nextStage) throw new Error(`NATIVE_INVALID_STAGE: expected ${current.nextStage}`);
   let artifacts = [];
   let outcome = null;
@@ -434,11 +570,13 @@ export function planNativeEvent(projectDir, runRef, input) {
     const decision = checkTransition(current.run.pipeline, input.stage, outcome, { hasEvidence: artifacts.length > 0 });
     if (!decision.ok) throw new Error(`NATIVE_CHECKPOINT_BLOCKED: ${decision.code}`);
   } else if (input.kind === 'EXECUTION_RESULT') {
-    if (current.status !== 'WAITING_FOR_EVIDENCE' || !['codex', 'web-dev'].includes(current.pendingExecutor)) {
+    if (current.status !== 'WAITING_FOR_EVIDENCE' || !['codex', 'web-dev', 'image-gen'].includes(current.pendingExecutor)) {
       throw new Error('NATIVE_EXECUTION_RESULT_WITHOUT_REQUEST');
     }
     result = current.pendingExecutor === 'codex' ? validateExecutionResult(input.result)
-      : validateDevResult(input.result, current.run.runId, {
+      : current.pendingExecutor === 'web-dev' ? validateDevResult(input.result, current.run.runId, {
+        ...current.events.at(-1).request, eventIndex: current.events.at(-1).index,
+      }) : validateImageResult(input.result, current.run.runId, {
         ...current.events.at(-1).request, eventIndex: current.events.at(-1).index,
       });
     if (current.pendingExecutor === 'web-dev' && result.ok) {
@@ -447,6 +585,14 @@ export function planNativeEvent(projectDir, runRef, input) {
         throw new Error('NATIVE_DEV_OUTPUT_CHANGED');
       }
     }
+    if (current.pendingExecutor === 'image-gen' && result.ok) for (const image of result.images) {
+      verifyStoredImage(project, current.run.runId, image);
+    }
+  } else if (input.kind === 'IMAGE_IMPORTED') {
+    if (current.pendingExecutor || !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status) ||
+        current.events.some(event => event.kind === 'IMAGE_IMPORTED')) throw new Error('NATIVE_IMAGE_IMPORT_DUPLICATE');
+    manual = validateImageManualImport(input.manual, current.run.runId, current.events.length + 1);
+    verifyStoredImage(project, current.run.runId, manual.output);
   } else if (input.kind === 'DRAFT_IMPORTED') {
     if (current.pendingExecutor || !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status) ||
         current.events.some(event => event.kind === 'DRAFT_IMPORTED' &&
@@ -460,7 +606,7 @@ export function planNativeEvent(projectDir, runRef, input) {
     if (['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(current.status)) {
       throw new Error('NATIVE_ACTION_ALREADY_REQUESTED');
     }
-    if (input.executor !== undefined && !['codex', 'web-dev'].includes(input.executor)) {
+    if (input.executor !== undefined && !['codex', 'web-dev', 'image-gen'].includes(input.executor)) {
       throw new Error('NATIVE_EXECUTOR_UNSUPPORTED');
     }
   }
@@ -469,9 +615,10 @@ export function planNativeEvent(projectDir, runRef, input) {
     sourceAtCheckpoint: { gitHead: source.gitHead, manifestSha256: source.manifestSha256 } };
   if (result) event.result = result;
   if (manual) event.manual = manual;
-  if (input.kind === 'ACTION_REQUESTED' && ['codex', 'web-dev'].includes(input.executor)) {
+  if (input.kind === 'ACTION_REQUESTED' && ['codex', 'web-dev', 'image-gen'].includes(input.executor)) {
     event.executor = input.executor;
     if (input.executor === 'web-dev') event.request = validateDevRequest(input.request);
+    if (input.executor === 'image-gen') event.request = validateImageRequest(input.request);
   }
   if (result) event.requestSha256 = current.pendingRequestSha256;
   return { status: 'READY', kind: 'NATIVE_EVENT', project, runId: current.run.runId,
@@ -495,7 +642,7 @@ export function commitNativeEvent(plan) {
         (plan.event.kind === 'ACTION_REQUESTED' && ['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(current.status)) ||
         (plan.event.kind === 'CHECKPOINT' && current.pendingExecutor) ||
         (plan.event.kind === 'EXECUTION_RESULT' && (current.status !== 'WAITING_FOR_EVIDENCE' ||
-          !['codex', 'web-dev'].includes(current.pendingExecutor) ||
+          !['codex', 'web-dev', 'image-gen'].includes(current.pendingExecutor) ||
           plan.event.requestSha256 !== current.pendingRequestSha256))) {
       throw new Error('NATIVE_STALE_EVENT_CONFLICT');
     }
@@ -514,6 +661,14 @@ export function commitNativeEvent(plan) {
         }
       }
     }
+    if (plan.event.kind === 'EXECUTION_RESULT' && current.pendingExecutor === 'image-gen') {
+      const request = { ...current.events.at(-1).request, eventIndex: current.events.at(-1).index };
+      const result = validateImageResult(plan.event.result, current.run.runId, request);
+      if (result.ok) {
+        verifyDraftInputs(plan.project, [request.brief]);
+        for (const image of result.images) verifyStoredImage(plan.project, current.run.runId, image);
+      }
+    }
     if (plan.event.kind === 'DRAFT_IMPORTED') {
       if (current.pendingExecutor || !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status) ||
           current.events.some(event => event.kind === 'DRAFT_IMPORTED' &&
@@ -525,8 +680,18 @@ export function commitNativeEvent(plan) {
         throw new Error('NATIVE_STALE_ARTIFACT_HASH');
       }
     }
+    if (plan.event.kind === 'IMAGE_IMPORTED') {
+      if (current.pendingExecutor || !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status) ||
+          current.events.some(event => event.kind === 'IMAGE_IMPORTED')) throw new Error('NATIVE_IMAGE_IMPORT_DUPLICATE');
+      const imp = validateImageManualImport(plan.event.manual, current.run.runId, plan.event.index);
+      verifyDraftInputs(plan.project, [imp.brief, imp.source]);
+      verifyStoredImage(plan.project, current.run.runId, imp.output);
+    }
     if (plan.event.kind === 'ACTION_REQUESTED' && plan.event.executor === 'web-dev') {
       verifyDraftInputs(plan.project, [plan.event.request.brief, ...plan.event.request.sources]);
+    }
+    if (plan.event.kind === 'ACTION_REQUESTED' && plan.event.executor === 'image-gen') {
+      verifyDraftInputs(plan.project, [plan.event.request.brief]);
     }
     for (const artifact of plan.event.artifacts) {
       const snapshot = snapshotArtifact(plan.project, artifact.path);
@@ -621,5 +786,76 @@ export function commitNativeManualDraftArtifact(projectDir, runRef, expectedHead
       finally { fs.closeSync(fd); }
     }));
     return { outputPath, outputSha256: sha256(bytes), outputSize: bytes.length };
+  });
+}
+
+/** Write validated producer bytes exclusively beneath the pending native run, not game assets. */
+export function stageNativeImageArtifacts(projectDir, runRef, requestSha256, inputs) {
+  if (!Array.isArray(inputs) || !inputs.length || inputs.length > 4) throw new Error('NATIVE_IMAGE_INPUT_INVALID');
+  if (inputs.some(input => !(Buffer.isBuffer(input?.bytes) || input?.bytes instanceof Uint8Array) ||
+      input.bytes.length === 0 || input.bytes.length > 10 * 1024 * 1024)) {
+    throw new Error('NATIVE_IMAGE_INPUT_INVALID');
+  }
+  const inspected = inputs.map(input => ({
+    bytes: Buffer.isBuffer(input?.bytes) || input?.bytes instanceof Uint8Array
+      ? Buffer.from(input.bytes) : null,
+    mediaType: input?.mediaType,
+  }));
+  const descriptors = inspected.map(input => inspectGeneratedImage(input.bytes, { mediaType: input.mediaType }));
+  const source = inspectNativeProject(projectDir);
+  return withLock(source.project, source, () => {
+    const current = readNativeRun(source.project, runRef);
+    if (current.pendingExecutor !== 'image-gen' || current.pendingRequestSha256 !== requestSha256) {
+      throw new Error('NATIVE_IMAGE_REQUEST_STALE');
+    }
+    const request = current.events.at(-1);
+    verifyDraftInputs(source.project, [request.request.brief]);
+    const index = String(request.index).padStart(6, '0');
+    const outputs = descriptors.map((info, order) => ({
+      outputPath: `.ludory/ai/runs/${current.run.runId}/images/image-${index}-${order}.${info.mediaType === 'image/png' ? 'png' : info.mediaType === 'image/jpeg' ? 'jpg' : 'webp'}`,
+      outputSha256: info.sha256, outputSize: info.size, mediaType: info.mediaType,
+      width: info.width, height: info.height, modelObserved: request.request.modelObserved,
+    }));
+    checkedRunDir(source.project, current.run.runId);
+    withinDirectory(current.run.runId, false, () => withinDirectory('images', true, () => {
+      for (const [order, output] of outputs.entries()) {
+        const file = path.basename(output.outputPath);
+        const fd = fs.openSync(file, EXCLUSIVE, 0o600);
+        try { fs.writeFileSync(fd, inspected[order].bytes); fs.fsyncSync(fd); }
+        finally { fs.closeSync(fd); }
+      }
+    }));
+    return outputs;
+  });
+}
+
+/** Manual input is re-read through pinned project directories while the native lock is held. */
+export function stageNativeManualImage(projectDir, runRef, expectedHeadSha256,
+  { brief, source: inputSnapshot, requestedModel }) {
+  const source = inspectNativeProject(projectDir);
+  return withLock(source.project, source, () => {
+    const current = readNativeRun(source.project, runRef);
+    if (current.headSha256 !== expectedHeadSha256 || current.pendingExecutor || current.terminal ||
+        !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status) ||
+        current.events.some(event => event.kind === 'IMAGE_IMPORTED')) throw new Error('NATIVE_IMAGE_IMPORT_STALE');
+    verifyDraftInputs(source.project, [brief, inputSnapshot]);
+    const input = readProjectImageInput(source.project, inputSnapshot.path);
+    if (input.source.sha256 !== inputSnapshot.sha256 || input.source.size !== inputSnapshot.size) {
+      throw new Error('NATIVE_IMAGE_IMPORT_STALE');
+    }
+    const file = `import-${String(current.events.length + 1).padStart(6, '0')}-${crypto.randomBytes(12).toString('hex')}.${input.info.mediaType === 'image/png' ? 'png' : input.info.mediaType === 'image/jpeg' ? 'jpg' : 'webp'}`;
+    const output = { outputPath: `.ludory/ai/runs/${current.run.runId}/images/${file}`,
+      outputSha256: input.info.sha256, outputSize: input.info.size, mediaType: input.info.mediaType,
+      width: input.info.width, height: input.info.height, modelObserved: null };
+    validateImageManualImport({ taskKind: 'image', provenance: 'USER_DECLARED',
+      reviewStatus: 'PENDING_REVIEW', requestedModel, brief, source: inputSnapshot, output },
+    current.run.runId, current.events.length + 1);
+    checkedRunDir(source.project, current.run.runId);
+    withinDirectory(current.run.runId, false, () => withinDirectory('images', true, () => {
+      const fd = fs.openSync(file, EXCLUSIVE, 0o600);
+      try { fs.writeFileSync(fd, input.bytes); fs.fsyncSync(fd); }
+      finally { fs.closeSync(fd); }
+    }));
+    return output;
   });
 }
