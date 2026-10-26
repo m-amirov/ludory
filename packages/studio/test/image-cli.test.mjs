@@ -89,7 +89,7 @@ test('CLI pinned model unavailable stays manual; import stores USER_DECLARED and
 test('CLI host uncertainty reports pending recovery and asks for executor confirmation', async t => {
   const { project, run } = game(t);
   const result = await cli(['workflow', 'image', '--project', project, '--run', run,
-    '--brief', 'brief.md', '--apply', '--json'], { imageHost: () => ({
+    '--brief', 'brief.md', '--model', 'terra', '--apply', '--json'], { imageHost: () => ({
     probe: async () => ({ terra: observed }), generate: async () => { throw new Error('IMAGE_HOST_TIMEOUT'); },
   }) });
   assert.equal(result.code, 3);

@@ -44,12 +44,23 @@ test('a new Studio game prepares a hash-bound manual draft packet without writes
 
 test('a witnessed DEV capability makes a reviewable art-concept task ready', t => {
   const { project, run } = game(t);
-  const result = planDevDraft(project, { run, taskKind: 'art-concept', brief: 'brief.md' },
+  const result = planDevDraft(project, { run, taskKind: 'art-concept', brief: 'brief.md',
+    sources: ['src/main.js'] },
     { discover: () => observedDev });
   assert.equal(result.status, 'READY');
   assert.equal(result.selectedRoute, 'web-dev');
   assert.equal(result.modelObserved, 'gpt-6-sol');
   assert.equal(result.nextAction.kind, 'REVIEW_DRAFT_ROUTE');
+});
+
+test('art-concept cannot be delegated to Web DEV without selected game context', t => {
+  const { project, run } = game(t);
+  const plan = planDevDraft(project, { run, taskKind: 'art-concept', brief: 'brief.md' },
+    { discover: () => observedDev });
+  assert.equal(plan.status, 'NEEDS_USER_ACTION');
+  assert.equal(plan.reasonCode, 'DEV_ART_CONTEXT_INSUFFICIENT');
+  assert.equal(plan.selectedRoute, 'manual');
+  assert.equal(plan.manualPacket.sources.length, 0);
 });
 
 test('a frozen game blocks before consulting any external host', t => {

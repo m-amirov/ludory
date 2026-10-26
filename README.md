@@ -90,6 +90,16 @@ intended platforms, **not** a production-ready VK/Yandex integration. The
 Starter Kit updater, full CEOS automation and host release gates remain unmigrated.
 See [Studio's guide](packages/studio/README.md).
 
+The experimental **Slice C** art workflow separates prompt authorship from image generation:
+Web DEV prepares a source-bound art brief when it can access the selected narrative/style
+references; otherwise the active primary task model prepares the brief. A dedicated GPT
+Image adapter requests `gpt-image-2.5-sunburst` (or optionally Flare) via the OpenAI Images
+API. Preview is read-only; a billable attempt requires both `OPENAI_API_KEY` and
+`LUDORY_IMAGE_ALLOW_PAID=1` plus `workflow image --apply`. The requested model is
+**not** evidence of its effective execution identity. Originals remain in a private
+hash-bound run directory for review, never automatically published or approved.
+See [Studio's GPT Image instructions](packages/studio/README.md#dedicated-gpt-image-originals-slice-c-experimental).
+
 For **existing games** with a canonical manifest, Studio now supports an
 opt-in, read-only-by-default profile association and updates:
 

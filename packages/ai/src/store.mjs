@@ -17,21 +17,31 @@ const DEV_TASKS = new Set(['episode-script', 'art-concept']);
 const DEV_RESULT_CODES = new Set(['HOST_OBSERVED', 'DEV_EXECUTOR_UNVERIFIED', 'DEV_EXECUTOR_INTERRUPTED']);
 const DEV_MODEL = /^gpt-\d+(?:\.\d+)?-sol$/i;
 const IMAGE_MODEL = /^gpt-\d+(?:\.\d+)?-(?:terra|sol)$/i;
+const GPT_IMAGE_REQUESTS = new Map([
+  ['auto', 'gpt-image-2.5-sunburst'], ['sunburst', 'gpt-image-2.5-sunburst'],
+  ['flare', 'gpt-image-2.5-flare'],
+]);
 const IMAGE_CODES = new Set(['HOST_OBSERVED', 'IMAGE_EXECUTOR_UNVERIFIED', 'IMAGE_EXECUTOR_INTERRUPTED']);
 
 function validateImageRequest(request) {
+  const isGpt = request?.route === 'gpt-image';
+  const allowed = isGpt ? GPT_IMAGE_REQUESTS.has(request?.requestedModel) &&
+    request.modelRequested === GPT_IMAGE_REQUESTS.get(request.requestedModel) &&
+    request.modelObserved === null
+    : ['image-terra', 'image-sol'].includes(request?.route) &&
+      ['auto', 'terra', 'sol'].includes(request?.requestedModel) &&
+      IMAGE_MODEL.test(request?.modelObserved ?? '') &&
+      request.modelObserved.endsWith(request.route.slice(6)) &&
+      (request.requestedModel === 'auto' || `image-${request.requestedModel}` === request.route);
   if (!request || typeof request !== 'object' || Array.isArray(request) ||
-      request.taskKind !== 'image' || !['image-terra', 'image-sol'].includes(request.route) ||
-      !['auto', 'terra', 'sol'].includes(request.requestedModel) ||
-      !IMAGE_MODEL.test(request.modelObserved ?? '') ||
-      !request.modelObserved.endsWith(request.route.slice(6)) ||
-      request.requestedModel !== 'auto' && `image-${request.requestedModel}` !== request.route ||
+      request.taskKind !== 'image' || !allowed ||
       !request.brief || typeof request.brief.path !== 'string' ||
       !/^[a-f0-9]{64}$/.test(request.brief.sha256 ?? '') ||
       !Number.isSafeInteger(request.brief.size) || request.brief.size < 1 ||
       request.brief.size > 64 * 1024) throw new Error('NATIVE_IMAGE_REQUEST_INVALID');
   return { taskKind: 'image', route: request.route, requestedModel: request.requestedModel,
-    modelObserved: request.modelObserved, brief: { ...request.brief } };
+    modelObserved: request.modelObserved,
+    ...(isGpt && { modelRequested: request.modelRequested }), brief: { ...request.brief } };
 }
 
 function validateImageOutput(image, runId, requestIndex, order, modelObserved) {
@@ -70,7 +80,7 @@ function validateImageManualImport(value, runId, index) {
   if (!value || typeof value !== 'object' || value.taskKind !== 'image' ||
       value.provenance !== 'USER_DECLARED' || value.reviewStatus !== 'PENDING_REVIEW' ||
       !value.brief || !value.source || !value.output ||
-      !['auto', 'terra', 'sol'].includes(value.requestedModel)) throw new Error('NATIVE_IMAGE_IMPORT_INVALID');
+      !['auto', 'sunburst', 'flare', 'terra', 'sol'].includes(value.requestedModel)) throw new Error('NATIVE_IMAGE_IMPORT_INVALID');
   for (const item of [value.brief, value.source]) {
     if (typeof item.path !== 'string' || !item.path || !/^[a-f0-9]{64}$/.test(item.sha256 ?? '') ||
         !Number.isSafeInteger(item.size) || item.size < 1) throw new Error('NATIVE_IMAGE_IMPORT_INVALID');

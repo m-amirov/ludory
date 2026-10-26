@@ -1,4 +1,6 @@
-# Verified Image Production — Slice C Implementation Plan
+# Verified Image Production — Slice C Implementation Plan (historical, superseded)
+
+> **Superseded 2026-10-26:** Terra/SOL producer attestation/fallback below is the original historical requirement; it is no longer the release gate. Use the updated `docs/superpowers/specs/2026-10-25-ai-task-routing-design.md` and `docs/superpowers/plans/2026-10-26-gpt-image-provider-slice-c.md`. The primary task model or sufficiently context-aware Web DEV authors the brief; independent GPT Image generates binary assets.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans or superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

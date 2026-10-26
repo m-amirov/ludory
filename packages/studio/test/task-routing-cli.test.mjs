@@ -85,8 +85,7 @@ test('workflow route pinned Terra never silently changes model when hosts are ab
   const printed = cli('workflow', 'route', '--project', project, '--task', 'image');
   assert.equal(printed.code, 0);
   assert.match(printed.stdout, /MANUAL_HANDOFF/);
-  assert.match(printed.stdout, /terra capability: AI_ROUTING_HOST_UNVERIFIED/);
-  assert.match(printed.stdout, /sol capability: AI_ROUTING_HOST_UNVERIFIED/);
+  assert.match(printed.stdout, /gptImage capability: AI_ROUTING_HOST_UNVERIFIED/);
   const pinnedText = cli('workflow', 'route', '--project', project, '--task', 'image', '--model', 'terra');
   assert.match(pinnedText.stdout, /capability: AI_ROUTING_HOST_UNVERIFIED/);
 });

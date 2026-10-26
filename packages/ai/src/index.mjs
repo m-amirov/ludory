@@ -2,7 +2,8 @@ export { getPipeline, nextStage, checkTransition } from './pipelines.mjs';
 export { inspectNativeProject, verifyNativeSource, snapshotArtifact } from './source.mjs';
 export { planNewRun, commitNewRun, readNativeRun, listNativeRuns, planNativeEvent, commitNativeEvent } from './store.mjs';
 export { discoverDevHost } from './dev-host.mjs';
-export { discoverImageHost, validateImageCapability } from './image-host.mjs';
+export { discoverImageHost, validateImageCapability, validateGptImageCapability,
+  createOpenAIImageHost } from './image-host.mjs';
 export { inspectGeneratedImage, decodeGeneratedImage } from './image-artifacts.mjs';
 export { planImageTask, verifyImagePlan, executeImageTask, planImageImport, executeImageImport } from './image-tasks.mjs';
 export { planDevDraft, verifyDevDraftPlan, executeDevDraft,

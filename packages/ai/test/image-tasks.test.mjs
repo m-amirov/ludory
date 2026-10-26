@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { nativeProject } from './helpers/project.mjs';
-import { planNewRun, commitNewRun, readNativeRun, planNativeEvent,
+import { game } from './helpers/image-game.mjs';
+import { readNativeRun, planNativeEvent,
   stageNativeManualImage } from '../src/store.mjs';
 import { planImageTask, executeImageTask, planImageImport, executeImageImport } from '../src/image-tasks.mjs';
 import { planWorkflow, executeWorkflow } from '../src/workflows.mjs';
@@ -15,20 +15,6 @@ export const terra = { available: true, reasonCode: 'AVAILABLE', transportVerifi
   entitlementVerified: true, imageGenCallable: true, routeObserved: 'image-gen',
   attestationScope: 'live-execution-context', modelObserved: 'gpt-6-terra' };
 export const sol = { ...terra, modelObserved: 'gpt-6-sol' };
-
-export function game(t, studio = true) {
-  const project = nativeProject(t);
-  if (studio) fs.writeFileSync(path.join(project, 'ludory.studio.json'), JSON.stringify({
-    schemaVersion: 1, profile: { id: 'narrative-game' }, template: { id: 'starter' },
-    files: { 'ludory.project.json': sha(fs.readFileSync(path.join(project, 'ludory.project.json'))) },
-  }));
-  fs.writeFileSync(path.join(project, 'image-brief.md'), 'Scene: lighthouse over a winter sea.');
-  const run = commitNewRun(planNewRun(project, { pipeline: 'production-art', scope: {
-    target: 'Scene art', inScope: ['image-brief.md'], outOfScope: [],
-    acceptanceContract: 'Independent visual review', mutationBoundary: 'Review-only images',
-  } })).run.runId;
-  return { project, run };
-}
 
 test('image preview is read-only, source-bound, manual by default and blocks frozen games', async t => {
   const { project, run } = game(t);
@@ -46,12 +32,13 @@ test('image preview is read-only, source-bound, manual by default and blocks fro
   assert.equal(called, false);
 });
 
-test('image producer is selected Terra before SOL; pinned Terra never switches', async t => {
+test('legacy Terra/SOL producer is supported only with an explicit pin', async t => {
   const { project, run } = game(t);
   const found = async () => ({ imageTerra: terra, imageSol: sol });
-  assert.equal((await planImageTask(project, { run, brief: 'image-brief.md' }, { discover: found })).selectedRoute, 'image-terra');
+  assert.equal((await planImageTask(project, { run, brief: 'image-brief.md' }, { discover: found })).selectedRoute, 'manual');
+  assert.equal((await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover: found })).selectedRoute, 'image-terra');
   const fallback = async () => ({ imageTerra: { available: false }, imageSol: sol });
-  assert.equal((await planImageTask(project, { run, brief: 'image-brief.md' }, { discover: fallback })).selectedRoute, 'image-sol');
+  assert.equal((await planImageTask(project, { run, brief: 'image-brief.md', model: 'sol' }, { discover: fallback })).selectedRoute, 'image-sol');
   const pin = await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover: fallback });
   assert.equal(pin.status, 'NEEDS_USER_ACTION');
   assert.equal(pin.selectedRoute, 'manual');
@@ -78,7 +65,7 @@ const discover = async () => ({ imageTerra: terra, imageSol: sol });
 
 test('an image generation attempt is journaled before invocation; timeout cannot silently retry via SOL', async t => {
   const { project, run } = game(t);
-  const plan = await planImageTask(project, { run, brief: 'image-brief.md' }, { discover });
+  const plan = await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover });
   let calls = 0;
   const host = { ...route(), generate: async ({ model, requestSha256 }) => {
     calls++;
@@ -97,7 +84,7 @@ test('an image generation attempt is journaled before invocation; timeout cannot
 
 test('a host that never settles still reaches the bounded timeout without relying on external event-loop activity', async t => {
   const { project, run } = game(t);
-  const plan = await planImageTask(project, { run, brief: 'image-brief.md' }, { discover });
+  const plan = await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover });
   await assert.rejects(executeImageTask(plan, { apply: true, timeoutMs: 25, host: {
     ...route(), generate: async () => new Promise(() => {}),
   } }), /IMAGE_HOST_TIMEOUT/);
@@ -106,7 +93,7 @@ test('a host that never settles still reaches the bounded timeout without relyin
 
 test('invalid or partial host response records failure without a second model attempt', async t => {
   const { project, run } = game(t);
-  const plan = await planImageTask(project, { run, brief: 'image-brief.md' }, { discover });
+  const plan = await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover });
   const calls = [];
   const result = await executeImageTask(plan, { apply: true, host: { ...route(),
     generate: async request => { calls.push(request.model); return { status: 'PARTIAL', images: [] }; },
@@ -122,7 +109,7 @@ test('invalid or partial host response records failure without a second model at
 
 test('a changed brief or forged plan cannot launch or commit image production', async t => {
   const { project, run } = game(t);
-  const plan = await planImageTask(project, { run, brief: 'image-brief.md' }, { discover });
+  const plan = await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover });
   const host = { ...route(), generate: async () => { throw new Error('unexpected generate'); } };
   fs.writeFileSync(path.join(project, 'image-brief.md'), 'modified');
   await assert.rejects(executeImageTask(plan, { apply: true, host }), /STALE/);
@@ -131,7 +118,7 @@ test('a changed brief or forged plan cannot launch or commit image production', 
 
 test('verified producer retains exact original bytes and review-only hash-bound receipt', async t => {
   const { project, run } = game(t);
-  const plan = await planImageTask(project, { run, brief: 'image-brief.md' }, { discover });
+  const plan = await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover });
   const result = await executeImageTask(plan, { apply: true, host: { ...route(),
     generate: async request => ({ status: 'HOST_OBSERVED', routeObserved: 'image-gen',
       attestationScope: 'live-execution-context', imageGenCalled: true,
@@ -155,7 +142,7 @@ test('verified producer retains exact original bytes and review-only hash-bound 
 
 test('malformed generated image bytes never enter a trusted receipt', async t => {
   const { project, run } = game(t);
-  const plan = await planImageTask(project, { run, brief: 'image-brief.md' }, { discover });
+  const plan = await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover });
   const result = await executeImageTask(plan, { apply: true, host: { ...route(),
     generate: async request => ({ status: 'HOST_OBSERVED', routeObserved: 'image-gen',
       attestationScope: 'live-execution-context', imageGenCalled: true,
@@ -171,7 +158,7 @@ test('a replaced image output parent never receives host bytes; request stays pe
   const outside = fs.mkdtempSync(path.join(project, 'offscope-'));
   const images = path.join(project, '.ludory', 'ai', 'runs', run, 'images');
   fs.symlinkSync(outside, images, 'dir');
-  const plan = await planImageTask(project, { run, brief: 'image-brief.md' }, { discover });
+  const plan = await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover });
   await assert.rejects(executeImageTask(plan, { apply: true, host: { ...route(),
     generate: async request => ({ status: 'HOST_OBSERVED', routeObserved: 'image-gen',
       attestationScope: 'live-execution-context', imageGenCalled: true,
@@ -187,7 +174,7 @@ test('a preexisting output filename cannot be replaced by a new producer receipt
   fs.mkdirSync(images);
   const collision = path.join(images, 'image-000001-0.png');
   fs.writeFileSync(collision, 'owned by a different writer');
-  const plan = await planImageTask(project, { run, brief: 'image-brief.md' }, { discover });
+  const plan = await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover });
   await assert.rejects(executeImageTask(plan, { apply: true, host: { ...route(),
     generate: async request => ({ status: 'HOST_OBSERVED', routeObserved: 'image-gen',
       attestationScope: 'live-execution-context', imageGenCalled: true,
@@ -241,7 +228,7 @@ test('manual import refuses hardlink, symlink, corrupt bytes, stale input and pa
 
 test('image timeout only recovers after explicit owner confirmation; accepted image asks for art review', async t => {
   const { project, run } = game(t);
-  const plan = await planImageTask(project, { run, brief: 'image-brief.md' }, { discover });
+  const plan = await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover });
   await assert.rejects(executeImageTask(plan, { apply: true, host: {
     ...route(), generate: async () => { throw new Error('IMAGE_HOST_TIMEOUT'); },
   } }), /TIMEOUT/);
@@ -271,7 +258,7 @@ test('native event rejects a forged MIME to extension mismatch even when image h
 
 test('native image result cannot attest a fabricated image file with only matching bytes/hash metadata', async t => {
   const { project, run } = game(t);
-  const plan = await planImageTask(project, { run, brief: 'image-brief.md' }, { discover });
+  const plan = await planImageTask(project, { run, brief: 'image-brief.md', model: 'terra' }, { discover });
   const request = planNativeEvent(project, run, { kind: 'ACTION_REQUESTED', stage: plan.stage,
     executor: 'image-gen', request: { taskKind: 'image', route: 'image-terra', requestedModel: 'auto',
       modelObserved: plan.modelObserved, brief: plan.brief },

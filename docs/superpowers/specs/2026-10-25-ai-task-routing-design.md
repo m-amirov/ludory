@@ -1,8 +1,8 @@
 # Ludory AI Task Routing: Codex, Web DEV, and Image Producers
 
-**Status:** Approved by project owner on 2026-10-25; implementation proceeds in separate reviewed slices.
+**Status:** Approved by project owner on 2026-10-25; Slice C producer contract revised and approved on 2026-10-26.
 **Date:** 2026-10-25
-**Decisions already confirmed:** Prefer automatic, authenticated DEV execution when genuinely available, with an explicit manual handoff when it is not. For unpinned image tasks, prefer Terra and use SOL only if preflight cannot establish Terra availability; record the actual effective model. No CEOS runtime dependency.
+**Decisions already confirmed:** Prefer Web DEV to author source-aware artistic briefs **if** it genuinely has enough project context; otherwise the primary task model authors them. A separate GPT Image agent/tool generates the binary image. Terra/SOL producer attestation is **not** a requirement for image generation. No CEOS runtime dependency.
 
 ## Purpose and user experience
 
@@ -12,8 +12,8 @@ Studio prepares a short, source-aware request and selects **one real executor pe
 | --- | --- | --- |
 | Implement game mechanics | Codex CLI | Code and bounded test evidence, not automatic acceptance |
 | Write an episode script | Web DEV | Source-bound script artifact, pending narrative review |
-| Develop an art concept | Web DEV | Concept/brief artifact, pending owner or independent review |
-| Generate images | Image Gen capability through a verified SOL or Terra host | Real image files and hashes, pending artistic review |
+| Develop an art concept | Web DEV with selected, verified project context; otherwise primary task model | Concept/brief artifact, source-bound, pending review |
+| Generate images | Dedicated GPT Image agent/tool or authenticated GPT Image API adapter | Original image files and hashes, pending artistic review |
 | Check functionality | Codex plus independent tests | Machine-observed test results; release gates remain separate |
 
 The existing `workflow start/continue/cycle/checkpoint/recover` system remains the single source of run state and the append-only receipt chain. No new top-level agent manager, broker service, recurring planning loop, or CEOS import is introduced.
@@ -30,7 +30,7 @@ The existing `workflow start/continue/cycle/checkpoint/recover` system remains t
 
 - Record one versioned `taskKind` (`mechanics`, `episode-script`, `art-concept`, `image`, `functional-check`) in a native task request. Routing is deterministic and inspectable; the system does not infer a different task type from arbitrary prose when it would change executor authority.
 - A pure read-only plan reports requested kind, selected route, why it is eligible, expected inputs and outputs, and whether execution is `READY`, `NEEDS_USER_ACTION`, or `BLOCKED`.
-- One task invokes one route. A capability-based image fallback may select SOL **before execution begins** if Terra is unavailable; do not cascade between models after an execution failure, start multiple subagents, or consume another retry budget without an explicit new attempt.
+- One task invokes one route. The **brief author** and **image generator** are different tasks with independently recorded provenance; no automatic second paid attempt or provider switch after an uncertain execution.
 - Model availability is discovered at execution time and cannot be inferred from a static config flag or from a task name. No model entitlement or executable means no automatic invocation.
 - Extend the existing Studio workflow CLI with a small, discoverable task-kind option and an `auto` route while retaining current `--executor codex` compatibility. The detailed command syntax belongs in the implementation plan after repository review.
 
@@ -46,17 +46,18 @@ The existing `workflow start/continue/cycle/checkpoint/recover` system remains t
 - Input is a bounded request with task/run ID, game source identity, optional attachments and hashes, output schema, and acceptance criteria. The adapter verifies attachment bytes and selected model actually observed; returned text is not treated as proof of visual inspection or acceptance.
 - Never copy browser cookies, tokens, DEV profiles, authenticated session files or raw reasoning into Ludory. Never fall back to direct CDP scraping or an unverified alternate provider.
 - If the launcher/protocol/entitlement is unavailable, return `NEEDS_USER_ACTION` with a bounded manual task packet. The owner may explicitly supply results; Ludory verifies their paths and hashes but labels the model/transport provenance as user-declared rather than host-observed.
+- For visual tasks, provide **only selected and hash-bound story, character, location, style and scene references**. Web DEV takes priority only when those references and the usable authenticated host suffice for a coherent artistic brief. If Web DEV is unavailable or cannot be given adequate context, the *primary model executing the task* writes the artistic brief in its existing session, and passes a reviewed text file to image production. A standalone CLI must not pretend to have the primary conversation model; it emits a source-bound handoff instead. Source text and model declarations alone are not artistic approval.
 - Keep text and creative-art evidence outside the release verifier. Malformed, missing, or foreign evidence fails closed.
 
-### 4. Image-generation route (SOL/Terra)
+### 4. Image-generation route (dedicated GPT Image)
 
-- SOL and Terra are **candidate producer models**, not image file generators. The selected host must demonstrate both an enforceable effective model route and a callable Image Gen capability within the same execution context before an automatic image task is allowed.
-- For an image task without an explicitly pinned producer, perform read-only capability preflight in this order: **Terra → SOL → manual handoff**. Select SOL automatically only when Terra's model entitlement, enforceable route, or paired Image Gen capability cannot be verified **before any generation attempt**. Record both the requested preference and the effective, host-observed producer model and route.
-- If the owner explicitly pins `Terra` or `SOL`, never replace that choice automatically: missing model/host/tool capability yields `NEEDS_USER_ACTION` or `BLOCKED` with the specific reason. If either selected automatic producer starts and then fails, do not silently retry through the other producer; a subsequent attempt must be explicit to avoid duplicate output and unaccounted generation cost.
-- If neither Terra nor SOL can be verified alongside Image Gen at preflight, prepare a bounded manual-generation/import request. Imported images have explicitly labeled declared provenance; they do not claim host-observed Terra or SOL execution.
-- For Terra, a config filename, child task name, or model string alone does not prove the running model. Require actual host-side model/role evidence where available. If that cannot be established, do not falsely claim Terra production.
-- The host adapter produces actual bounded image bytes and a receipt: task ID, source/brief hash, claimed versus observed producer route, image paths, SHA-256, format and dimensions. Reject zero-byte, malformed, off-scope, or missing image artifacts. Preserve original images; downstream optimized runtime variants require separate validation.
-- If an approved host tool or model identity cannot be verified, offer manual generation/import with explicit provenance limitations. Never fabricate PNGs, route attestations or a `PASS`.
+- The image generation actor is **GPT Image**, independently of the model that composed the prompt. Do **not** require the primary model, Terra or SOL to also generate the image. A dedicated trusted Image Gen tool may expose only its default model; do not infer a hidden effective model name from that fact.
+- The first stage produces a context-aware, readable art brief with scene/character/style consistency references and acceptance criteria. The brief must be inspected and its file hash bound to the image request before generation. A Web DEV result and a primary-model result are not interchangeable provenance claims; each carries its actual source.
+- The second stage uses a narrow GPT Image adapter. For OpenAI Images API, `auto` requests **`gpt-image-2.5-sunburst`** for quality-first artwork; explicit `sunburst` or `flare` selection is supported where the API exposes it. The effective model must be recorded as **unknown** unless independently returned and verified by the actual provider; record the *requested* model separately. For a tool without a selector, retain `provider-default` as the selection instead of inventing a model identity. No Terra/SOL model attestation is required.
+- A fully automated paid API call requires explicit operator execution (`--apply`), a configured API key and a separate per-session paid-call opt-in. The opt-in is **authorization**, not an enforceable dollar cap: estimates, billing and real budget checks remain the operator's responsibility. Without credentials/opt-in, offer manual generation/import and do not falsely claim an authenticated connection or completed work.
+- The host adapter produces actual bounded image bytes and a receipt: task ID, brief hash, image route/provider, requested model, *observed model if truly observable*, immutable original image paths, SHA-256, format and decoded dimensions. Reject zero-byte, truncated, off-scope or malformed images, including invalid JPEG/WebP decode. Keep original image bytes; optimized runtime versions require separate checks.
+- Journal the intent **before** any paid generation; one request permits at most one attempt. On timeout or ambiguous transport failure, leave the request pending until owner-confirmed recovery. No implicit alternate model, transparent retry or second charge.
+- Image import remains a manual `USER_DECLARED` alternative. Never fabricate binary assets, effective-model attestation or a `PASS` merely because a tool was invoked.
 - Image quality, scene consistency, rights and final release acceptance remain separate, evidence-based checks. Avoid endless cosmetic rework: block material P0/P1 contradictions first.
 
 ### 5. State and safe continuation
@@ -72,7 +73,7 @@ The existing `workflow start/continue/cycle/checkpoint/recover` system remains t
 
 **Slice B — DEV narrative:** automatic DEV text transport only where installed host capabilities are verified; explicit manual packet/import fallback, source-bound reviewable script drafts, narrative/consistency gate before separate game-scene integration, and failure/recovery regression coverage. Windows host smoke mandatory before MVP merge.
 
-**Slice C — image production:** one host Image Gen adapter, Terra→SOL preflight fallback for unpinned tasks, strict pinned-model behavior, actual model verification, binary output checks, manual fallback and host-observed art file smoke. No broad multi-provider framework.
+**Slice C — image production:** source-aware Web DEV / primary-model artistic-brief handoff, dedicated GPT Image provider adapter with a quality-first default, explicit billing opt-in, requested-versus-observed model distinction, decoded binary integrity, manual fallback, recovery, and host-observed art-file smoke when explicitly authorized. No broad multi-provider framework.
 
 **Slice D — independent validation:** functional tests bound to actual files, narrative/art review receipts, no invented verdict; release and platform checks remain separate projects.
 
@@ -81,6 +82,6 @@ For every slice: tests before code, Node 22/24 CI, Windows-host evidence for DEV
 ## Dependencies, risks, and non-goals
 
 - The exact installed DEV launcher protocol and Web model entitlement may differ from CEOS's recorded DEV 6.1.11. Discover and validate the current host instead of hardcoding its version or assuming `gpt-6-sol` access.
-- An agent/model route cannot be guaranteed when the active host does not expose a trustworthy selector. SOL/Terra automation must block or switch to an explicitly labeled manual mode, never silently substitute another model.
+- A dedicated Image Gen tool may not expose an effective-model selector or attestation. In that case record `provider-default`/unknown rather than claiming the main model or Terra/SOL made the image. The OpenAI API adapter explicitly requests a named GPT Image model but does not turn the requested ID into an observed ID.
 - This phase does **not** implement unattended login, browser credential extraction, arbitrary agent scheduling, a background queue, autonomous release approval, or forced migration of existing games.
 - PR #10's Windows component-update rollback failure is independent and must be resolved before integrating new features with the protected `main` workflow.

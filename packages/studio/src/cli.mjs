@@ -5,7 +5,8 @@ import { planCreate, applyCreatePlan } from './scaffold.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
 import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNativeRun,
   planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport,
-  discoverImageHost, planImageTask, executeImageTask, planImageImport, executeImageImport } from '@ludory/ai';
+  discoverImageHost, createOpenAIImageHost, planImageTask, executeImageTask,
+  planImageImport, executeImageImport } from '@ludory/ai';
 
 const usage = `Ludory Studio 0.1.0 — native game-development workflows
 
@@ -21,10 +22,10 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory templates show --name <id> [--catalog <directory>] [--json]
   ludory create --project <empty-directory> --id <slug> --title <name> --lang <locale> --profile <id> --template <id> --targets <comma-separated> [--version <semver>] [--catalog <directory>] [--apply] [--json]
   ludory workflow doctor --project <game-directory> [--json]
-  ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--model <auto|terra|sol>] [--json]
+  ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--model <auto|sunburst|flare>] [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--apply] [--json]
   ludory workflow draft-import --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> --file <relative-draft> [--apply] [--json]
-  ludory workflow image --project <new-studio-game> --run <id> --brief <relative-text> [--model <auto|terra|sol>] [--apply] [--json]
+  ludory workflow image --project <new-studio-game> --run <id> --brief <relative-art-brief> [--model <auto|sunburst|flare>] [--apply] [--json]
   ludory workflow image-import --project <new-studio-game> --run <id> --brief <relative-text> --file <relative-image> [--apply] [--json]
   ludory workflow status --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
@@ -39,11 +40,16 @@ No writes by default. init/migrate --apply only create ludory.project.json;
 create --apply only creates new template files, manifest and Studio receipt in an empty directory.
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
 workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
-workflow route is read-only: it checks executor eligibility; Web DEV and Image Gen require verified host adapters.
+workflow route is read-only: it checks executor eligibility; image routing defaults to dedicated GPT Image, not Terra/SOL.
 workflow draft preview never calls the DEV host; --apply probes only the isolated DEV helper and saves a review-only draft if the actual selected model is attested.
 Without a verified DEV host, draft returns a manual handoff packet; draft-import records USER_DECLARED provenance, never HOST_OBSERVED or narrative PASS.
-For image tasks, auto prefers Terra then SOL at preflight; pinned models never switch silently.
-workflow image requires a trusted host with a live, paired Terra/SOL + Image Gen attestation; no default provider has this capability.
+First, Web DEV drafts a source-aware art concept when authenticated and given adequate scene/style context;
+otherwise the primary task model authors the brief in its own session (standalone CLI gives manual handoff).
+Then a separate GPT Image producer generates reviewed originals. auto requests quality-first gpt-image-2.5-sunburst,
+or --model flare requests gpt-image-2.5-flare. Terra/SOL pins are legacy-only, not the default.
+The OpenAI Images adapter needs OPENAI_API_KEY and explicit LUDORY_IMAGE_ALLOW_PAID=1 plus --apply.
+Paid opt-in authorizes one request but does not enforce a dollar budget; no paid smoke is run automatically.
+The API request model is recorded separately from the unknown effective model; no fabricated attestation.
 image-import stores checked original PNG/JPEG/WebP bytes as USER_DECLARED; neither route grants art, rights or release PASS.
 Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.
 workflow cycle checks Codex-observed Node test execution with at most two repairs; it never automatically advances a stage.
@@ -134,6 +140,7 @@ function displayWorkflow(result, json, out) {
   if (result.warning) out(`  warning: ${result.warning}\n`);
   if (result.executorCode) out(`  result: ${result.executorCode}\n`);
   if (result.provenance) out(`  provenance: ${result.provenance}\n`);
+  if (result.modelRequested) out(`  requested image model: ${result.modelRequested}\n`);
   if (result.output?.outputPath) out(`  artifact: ${result.output.outputPath}\n`);
   for (const item of result.images ?? []) out(`  image: ${item.outputPath} · ${item.outputSha256}\n`);
   if (result.nextAction?.kind) out(`  next: ${result.nextAction.kind}\n`);
@@ -188,7 +195,8 @@ async function runImageCommand(operation, flags, { out, imageHost }) {
     else {
       const host = imageHost();
       try {
-        const caps = await discoverImageHost(host);
+        const caps = await discoverImageHost(host, requested.model === 'flare'
+          ? 'gpt-image-2.5-flare' : 'gpt-image-2.5-sunburst');
         const ready = await planImageTask(project, requested, { discover: async () => caps });
         result = ready.status === 'READY'
           ? await executeImageTask(ready, { apply: true, host }) : ready;
@@ -266,7 +274,7 @@ function display(result, json, out) {
 
 /** Pure command boundary; inject streams to test status/output without child processes. */
 export function runCli(argv, { out = text => process.stdout.write(text), err = text => process.stderr.write(text),
-  executor, devHost = discoverDevHost, imageHost = () => null } = {}) {
+  executor, devHost = discoverDevHost, imageHost = createOpenAIImageHost } = {}) {
   try {
     const [command = 'help', ...rest] = argv;
     if (command === 'help' || command === '--help') {

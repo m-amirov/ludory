@@ -25,7 +25,7 @@ test('the five task kinds preserve their selected preferred executors in read-on
   const project = freshStudioGame(t);
   const expected = [
     ['mechanics', 'codex'], ['episode-script', 'web-dev'],
-    ['art-concept', 'web-dev'], ['image', 'image-terra'],
+    ['art-concept', 'web-dev'], ['image', 'gpt-image'],
     ['functional-check', 'codex'],
   ];
   for (const [taskKind, preferredRoute] of expected) {
@@ -128,16 +128,16 @@ test('DEV requires a verified transport, entitlement, and real selected route', 
   assert.equal(planTaskRoute(project, { taskKind: 'episode-script' }, { discover: () => forged }).status, 'NEEDS_USER_ACTION');
 });
 
-test('automatic image routing selects Terra before SOL, then SOL before manual', t => {
+test('legacy image routing requires explicit producer pins, while auto remains GPT-only', t => {
   const project = freshStudioGame(t);
   const capabilitiesFor = host => discoverTaskCapabilities(project, { checkCodex: () => ({ ok: false }),
     hostProbe: () => host });
-  const both = planTaskRoute(project, { taskKind: 'image' },
+  const both = planTaskRoute(project, { taskKind: 'image', model: 'terra' },
     { discover: () => capabilitiesFor({ imageTerra: verifiedTerra, imageSol: verifiedSol }) });
   assert.equal(both.status, 'READY');
   assert.equal(both.selectedRoute, 'image-terra');
   assert.equal(both.modelObserved, 'gpt-5.6-terra');
-  const onlySol = planTaskRoute(project, { taskKind: 'image' },
+  const onlySol = planTaskRoute(project, { taskKind: 'image', model: 'sol' },
     { discover: () => capabilitiesFor({ imageSol: verifiedSol }) });
   assert.equal(onlySol.status, 'READY');
   assert.equal(onlySol.selectedRoute, 'image-sol');
@@ -285,12 +285,12 @@ test('negative aggregate host availability preserves its observed rejection caus
   assert.equal(contradictory.imageTerra.reasonCode, 'AI_ROUTING_HOST_UNVERIFIED');
 });
 
-test('automatic SOL fallback records why Terra preflight was rejected', t => {
+test('explicit SOL legacy selection retains Terra failure evidence', t => {
   const project = freshStudioGame(t);
   const capabilities = discoverTaskCapabilities(project, { taskKind: 'image',
     hostProbe: () => ({ imageTerra: { ...verifiedTerra, entitlementVerified: false },
       imageSol: verifiedSol }) });
-  const plan = planTaskRoute(project, { taskKind: 'image' }, { discover: () => capabilities });
+  const plan = planTaskRoute(project, { taskKind: 'image', model: 'sol' }, { discover: () => capabilities });
   assert.equal(plan.status, 'READY');
   assert.equal(plan.selectedRoute, 'image-sol');
   assert.equal(plan.capabilityReasons.terra, 'AI_ROUTING_ENTITLEMENT_UNVERIFIED');

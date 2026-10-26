@@ -51,7 +51,7 @@ test('workflow draft previews source-bound manual handoff with zero files or hos
 test('workflow draft requires apply plus observed route; returns review-only output', async t => {
   const { project, run } = game(t);
   const args = ['workflow', 'draft', '--project', project, '--run', run, '--task', 'art-concept',
-    '--brief', 'episode.md', '--json', '--apply'];
+    '--brief', 'episode.md', '--source', 'src/main.js', '--json', '--apply'];
   const missing = await cli(args, { devHost: () => ({ available: false, reasonCode: 'DEV_HOST_UNAVAILABLE' }) });
   assert.equal(missing.result.status, 'NEEDS_USER_ACTION');
   assert.equal(readNativeRun(project, run).events.length, 0);

@@ -192,10 +192,10 @@ node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio
 node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task image --model auto --json
 ```
 
-Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` and `art-concept` require the authenticated Web DEV host; `image` prefers Terra with SOL as preflight-only fallback. Explicit `--model terra` or `--model sol` prevents automatic substitution. Missing or unverifiable host evidence produces `NEEDS_USER_ACTION` and `MANUAL_HANDOFF`, not fake successful generation. The read-only Slice A route preview itself never invokes Web DEV or Image Gen; the explicit task commands below hold the optional adapters. An installed Codex CLI can be probed with `--version`, but this command does not execute Codex tasks.
+Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` prefers authenticated Web DEV; `art-concept` prefers Web DEV **only if** supplied with enough selected story/style context, otherwise the task's primary model writes the art brief. `image` chooses a **separate GPT Image** provider (quality-first Sunburst by default; optional Flare). `terra` and `sol` remain accepted only for explicitly pinned historical in-process adapters. Missing provider evidence produces `NEEDS_USER_ACTION` and `MANUAL_HANDOFF`, not successful generation. Read-only routing invokes no provider.
 
 `workflow route` never writes project files or workflow events; it rejects `--apply`. Exit code `0` covers a valid preview, including a manual handoff; `2` means the project is blocked (for example, no Studio creation receipt); `1` means invalid arguments or inspection error. Historical games stay frozen. No image, script, art review, independent acceptance, or Release PASS is produced by a route preview.
-JSON previews preserve the general `reasonCode` and, on unavailable routes, a more specific `capabilityReasonCode`. Image previews additionally expose `capabilityReasons.terra` and `capabilityReasons.sol`, including why the preferred Terra preflight was rejected when SOL is selected. Untrusted or missing attestation fields never establish availability.
+JSON previews preserve `reasonCode` and, when available, `capabilityReasonCode`. GPT Image previews show `capabilityReasons.gptImage`; explicitly pinned historical routes retain the Terra/SOL reason fields. A configured API key does not attest a model's hidden execution identity.
 
 ## Web DEV reviewable drafts (Slice B, experimental)
 
@@ -210,7 +210,8 @@ node packages/studio/bin/ludory.mjs workflow draft --project /path/to/new-studio
 # Explicit execution. Invokes DEV only if the installed isolated helper attests
 # actual authenticated transport, effective selected gpt-*-sol model, and browser-only mode.
 node packages/studio/bin/ludory.mjs workflow draft --project /path/to/new-studio-game \
-  --run RUN_ID --task art-concept --brief narrative/art-brief.md --apply --json
+  --run RUN_ID --task art-concept --brief narrative/art-brief.md \
+  --source 'narrative/graph.json;narrative/character-bible.md;narrative/art-style.md' --apply --json
 
 # No supported DEV host? Prepare the draft yourself, then import by user declaration.
 node packages/studio/bin/ludory.mjs workflow draft-import --project /path/to/new-studio-game \
@@ -231,20 +232,25 @@ Only deliberately named UTF-8 `--brief` and `--source` files are sent as text to
 
 An interrupted import can leave an unreferenced uniquely named draft in the private run directory. It is not treated as an accepted import or used by runtime; a later explicit import may safely create a new file. Orphan cleanup is manual after inspecting provenance and contents. `workflow status/next` advertises `REVIEW_DRAFT` while review-only evidence exists; narrative review completion remains a separate future gate.
 
-CLI `--apply` without an authenticated compatible DEV helper produces a manual handoff (`NEEDS_USER_ACTION`, exit 2) without game writes. Local mock-host tests are not evidence of successful real Windows DEV model selection. Live Windows DEV host and NTFS acceptance are still required.
+CLI `--apply` without an authenticated compatible DEV helper produces a manual handoff (`NEEDS_USER_ACTION`, exit 2) without game writes. In that case the **primary model already executing the task** should use the project's scene/character/style context to author the brief and supply a source-bound file; a standalone Ludory process has no truthful way to impersonate that active model. Local mock-host tests are not evidence of successful real Windows DEV model selection. Live Windows DEV host and NTFS acceptance are still required.
 
-## Verified image originals (Slice C, experimental)
+## Dedicated GPT Image originals (Slice C, experimental)
 
 These commands require an active native run in a newly created Studio game:
 
 ```sh
-# Pure preview: source-bound brief and manual generation packet; never calls Image Gen.
+# Step 1: prepare a source-aware artistic brief through the preceding Web DEV draft path,
+# or let the active primary task model author one from selected story/style files.
+# Step 2: pure generation preview; never makes a paid call.
 node packages/studio/bin/ludory.mjs workflow image --project /path/to/new-studio-game \
   --run RUN_ID --brief narrative/scene-art-brief.md --model auto --json
 
-# Explicit attempt, only when a trusted in-process host can attest model + Image Gen.
+# Step 3: first set OPENAI_API_KEY and LUDORY_IMAGE_ALLOW_PAID=1 in your shell.
+# --apply explicitly authorizes one billable request; without the opt-in it refuses.
 node packages/studio/bin/ludory.mjs workflow image --project /path/to/new-studio-game \
-  --run RUN_ID --brief narrative/scene-art-brief.md --model terra --apply --json
+  --run RUN_ID --brief narrative/scene-art-brief.md --model auto --apply --json
+
+# Optional quality-versus-speed choice when available: --model flare.
 
 # Portable fallback: generate outside Ludory, save a PNG/JPEG/WebP inside the game,
 # then preview and explicitly import the checked original as USER_DECLARED.
@@ -254,8 +260,8 @@ node packages/studio/bin/ludory.mjs workflow image-import --project /path/to/new
   --run RUN_ID --brief narrative/scene-art-brief.md --file art/candidate.webp --apply --json
 ```
 
-The selected producer must be **observed as the effective `gpt-*-terra` or `gpt-*-sol` model in the same live execution context** as the callable Image Gen tool. The optional `discoverImageHost`/`generate` API accepts only a host supplied by trusted in-process integration code; user-supplied configuration strings, CLI flags and response claims alone are not evidence. The current CLI ships **without such a trusted producer host**: `image --apply` normally returns a manual handoff (exit 2), and cannot claim actual Terra/SOL generation. The ChatGPT Image Gen API available during this slice does not expose an effective Terra/SOL selection/attestation interface. Local fake-host tests are not Windows/production model evidence.
+The separate GPT Image adapter uses OpenAI's `/v1/images/generations` endpoint. By default it explicitly **requests** `gpt-image-2.5-sunburst`, `quality=high`, one 1536×864 PNG. `--model flare` requests `gpt-image-2.5-flare`. These are *requested* API models; a response that returns image bytes without independent effective-model attestation is stored with `modelObserved: null`. The art-brief author can be Web DEV or the primary task model; their identities must never be presented as the image generator's identity. No Terra/SOL attestation is required. If a future dedicated Image Gen tool offers no model selector, report its provider default honestly instead of inventing a model name.
 
-For `auto`, Terra is preferred and SOL may be selected only on read-only preflight when Terra lacks a verified paired capability. Explicit pins never switch. Once a request is journaled and the host is called, **no automatic retry or model fallback occurs**. A timeout, crash or uncertain artifact publication leaves `image-gen` pending (`PENDING_RECOVERY`, exit 3); do not recover until the original host is confirmed stopped and no image or charge can still be in flight. Recovery records an interruption, not successful generation.
+`OPENAI_API_KEY` and `LUDORY_IMAGE_ALLOW_PAID=1` must both be present for automatic production; preview alone is free and offline. This opt-in is **permission to incur a charge, not an enforceable spending limit**: set and monitor a real budget in the provider billing account before running production. The dry-run may report a manual route because it never probes credentials or invokes external hosts. Invalid credentials, missing entitlement or provider errors are discovered on real execution. Once intent is journaled, **no automatic retry or model fallback occurs**. A timeout, crash or uncertain HTTP response leaves `image-gen` pending (`PENDING_RECOVERY`, exit 3); do not recover until the original request is known stopped/resolved and further charges cannot be in flight. Recovery records an interruption, not successful generation.
 
-Generated and imported originals are stored exclusively under `.ludory/ai/runs/<id>/images/`. Format signatures, PNG chunk CRC/inflate integrity, JPEG/WebP structural bounds, dimensions, bytes, and SHA-256 receipts are checked again at native event commit/replay. **JPEG/WebP are not fully pixel-decoded by this lightweight adapter**: independent decode/visual acceptance remains an explicit blocker before runtime integration or release. Imports reject symlinks, hardlinks, parent path aliases and content/extension mismatches, with immutable new output names. Orphan files from interrupted writes are untrusted and require explicit inspection. Neither path modifies game scenes, runtime images, rights manifests or existing project files, and both yield **`PENDING_REVIEW`**; an independent art/rights/platform release gate is still required.
+Generated and imported originals are stored exclusively under `.ludory/ai/runs/<id>/images/`. Signatures, PNG integrity, JPEG/WebP structure and **full JPEG/WebP pixel decode with sharp**, dimensions, byte limits and SHA-256 receipts are verified before staging. Imports reject symlinks, hardlinks, parent aliases and content/extension mismatches; orphan files from interruptions remain untrusted. Neither operation publishes runtime assets, updates rights manifests or grants art/release PASS. Local mocked HTTP tests do not establish live paid-generation success or real Windows-host completion.

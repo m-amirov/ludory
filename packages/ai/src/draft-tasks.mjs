@@ -94,7 +94,10 @@ export function planDevDraft(projectDir, options = {}, { discover = () => null }
     sources: referenceSnapshots, manualPacket }), 'utf8');
   if (promptBytes > 64 * 1024) return blocked(project, taskKind, run, 'DEV_PROMPT_TOO_LARGE');
   const cap = (() => { try { return discover(project); } catch { return null; } })();
-  const verified = isVerifiedCapability(cap, 'webDev');
+  // A brief alone does not demonstrate access to the project's story/character/style context.
+  // Without selected source references, leave art authoring to the primary task model's session.
+  const artContextReady = taskKind !== 'art-concept' || referenceFiles.length > 0;
+  const verified = isVerifiedCapability(cap, 'webDev') && artContextReady;
   const details = {
     engine: 'ludory-ai', operation: 'draft', project, runId: resolvedRun, taskKind,
     sourceBinding: projectSource, runHeadSha256: current.headSha256,
@@ -102,7 +105,8 @@ export function planDevDraft(projectDir, options = {}, { discover = () => null }
     sources: referenceSnapshots, writes: [], conflicts: [],
     status: verified ? 'READY' : 'NEEDS_USER_ACTION',
     selectedRoute: verified ? 'web-dev' : 'manual',
-    reasonCode: verified ? 'DEV_ROUTE_VERIFIED' : 'DEV_ROUTE_UNVERIFIED',
+    reasonCode: verified ? 'DEV_ROUTE_VERIFIED' : !artContextReady
+      ? 'DEV_ART_CONTEXT_INSUFFICIENT' : 'DEV_ROUTE_UNVERIFIED',
     ...(verified && { modelObserved: ownData(cap, 'modelObserved') }),
     nextAction: { kind: verified ? 'REVIEW_DRAFT_ROUTE' : 'MANUAL_HANDOFF', executable: false },
     manualPacket,

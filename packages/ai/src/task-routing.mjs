@@ -6,7 +6,7 @@ const PREFERRED_ROUTES = Object.freeze({
   mechanics: 'codex',
   'episode-script': 'web-dev',
   'art-concept': 'web-dev',
-  image: 'image-terra',
+  image: 'gpt-image',
   'functional-check': 'codex',
 });
 
@@ -42,12 +42,13 @@ export function planTaskRoute(projectDir, options = {}, { discover = discoverTas
     throw new Error('AI_ROUTING_INVALID_TASK');
   }
   if (typeof model !== 'string' ||
-      (taskKind === 'image' ? !['auto', 'terra', 'sol'].includes(model) : model !== 'auto')) {
+      (taskKind === 'image' ? !['auto', 'sunburst', 'flare', 'terra', 'sol'].includes(model) : model !== 'auto')) {
     throw new Error('AI_ROUTING_INVALID_MODEL');
   }
   const source = inspectNativeProject(projectDir);
   const project = source.project;
-  const preferredRoute = taskKind === 'image' && model === 'sol' ? 'image-sol' : PREFERRED_ROUTES[taskKind];
+  const preferredRoute = taskKind === 'image' && ['terra', 'sol'].includes(model)
+    ? `image-${model}` : PREFERRED_ROUTES[taskKind];
   const base = { engine: 'ludory-ai', operation: 'route', project, taskKind,
     requestedModel: model, preferredRoute, writes: [], conflicts: [] };
   if (!hasStudioCreationReceipt(project)) {
@@ -56,30 +57,36 @@ export function planTaskRoute(projectDir, options = {}, { discover = discoverTas
       nextAction: { kind: 'STOP_FROZEN_GAME', executable: false } };
   }
   let capabilities;
-  try { capabilities = discover(project, { taskKind }); }
+  try { capabilities = discover(project, { taskKind, model }); }
   catch { capabilities = null; }
   // Snapshot each candidate once, without invoking inherited or accessor properties.
   const items = { codex: ownData(capabilities, 'codex'), webDev: ownData(capabilities, 'webDev'),
+    imageGpt: ownData(capabilities, 'imageGpt'),
     imageTerra: ownData(capabilities, 'imageTerra'), imageSol: ownData(capabilities, 'imageSol') };
-  const capabilityReasons = taskKind === 'image' ? {
+  const gptRequested = model === 'flare' ? 'gpt-image-2.5-flare' : 'gpt-image-2.5-sunburst';
+  const capabilityReasons = taskKind === 'image' ? ['terra', 'sol'].includes(model) ? {
     terra: capabilityReason(items.imageTerra, 'imageTerra'),
     sol: capabilityReason(items.imageSol, 'imageSol'),
-  } : null;
+  } : { gptImage: capabilityReason(items.imageGpt, 'imageGpt') } : null;
   let route = null;
   if (preferredRoute === 'codex') {
     if (isVerifiedCapability(items.codex, 'codex')) route = 'codex';
   } else if (preferredRoute === 'web-dev') {
     if (isVerifiedCapability(items.webDev, 'webDev')) route = 'web-dev';
   } else if (taskKind === 'image') {
-    if (model !== 'sol' && isVerifiedCapability(items.imageTerra, 'imageTerra')) route = 'image-terra';
-    else if (model !== 'terra' && isVerifiedCapability(items.imageSol, 'imageSol')) route = 'image-sol';
+    if (preferredRoute === 'gpt-image' && isVerifiedCapability(items.imageGpt, 'imageGpt') &&
+        ownData(items.imageGpt, 'modelRequested') === gptRequested) route = 'gpt-image';
+    else if (model === 'terra' && isVerifiedCapability(items.imageTerra, 'imageTerra')) route = 'image-terra';
+    else if (model === 'sol' && isVerifiedCapability(items.imageSol, 'imageSol')) route = 'image-sol';
   }
   if (route) {
     const capability = route === 'codex' ? items.codex : route === 'web-dev' ? items.webDev
-      : route === 'image-terra' ? items.imageTerra : items.imageSol;
+      : route === 'gpt-image' ? items.imageGpt
+        : route === 'image-terra' ? items.imageTerra : items.imageSol;
     const modelObserved = ownData(capability, 'modelObserved');
     return { ...base, status: 'READY', selectedRoute: route, reasonCode: 'AI_ROUTING_ROUTE_VERIFIED',
-      ...(modelObserved && { modelObserved }),
+      ...(route === 'gpt-image' ? { modelRequested: ownData(capability, 'modelRequested'),
+        modelObserved: null } : modelObserved && { modelObserved }),
       ...(capabilityReasons && { capabilityReasons }),
       nextAction: { kind: 'REVIEW_ROUTE', executable: false } };
   }
@@ -87,7 +94,7 @@ export function planTaskRoute(projectDir, options = {}, { discover = discoverTas
     ? model === 'auto' ? 'AI_ROUTING_IMAGE_GEN_UNAVAILABLE' : 'AI_ROUTING_PINNED_MODEL_UNAVAILABLE'
     : preferredRoute === 'web-dev' ? 'AI_ROUTING_WEB_DEV_UNAVAILABLE' : 'AI_ROUTING_CODEX_UNAVAILABLE';
   const capabilityReasonCode = taskKind === 'image' ? model === 'auto' ? null
-    : capabilityReasons[model]
+    : capabilityReasons[['terra', 'sol'].includes(model) ? model : 'gptImage']
     : capabilityReason(items[preferredRoute === 'codex' ? 'codex' : 'webDev'],
       preferredRoute === 'codex' ? 'codex' : 'webDev');
   return { ...base, status: 'NEEDS_USER_ACTION', selectedRoute: 'manual', reasonCode,
