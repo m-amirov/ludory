@@ -5,9 +5,15 @@ const checkCodexVersion = plan => checkCodexAvailable(plan, { timeoutMs: 5_000 }
 const validModelId = value => typeof value === 'string' &&
   /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(value);
 
+function isRecord(value) {
+  if (!value || typeof value !== 'object') return false;
+  try { return !Array.isArray(value); }
+  catch { return false; }
+}
+
 /** Read only a direct data property; inherited values and getters are not attestation. */
 export function ownData(record, key) {
-  if (!record || typeof record !== 'object' || Array.isArray(record)) return undefined;
+  if (!isRecord(record)) return undefined;
   try {
     const descriptor = Object.getOwnPropertyDescriptor(record, key);
     return descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined;
@@ -17,8 +23,7 @@ export function ownData(record, key) {
 function normalizeHost(record, kind) {
   const modelObserved = ownData(record, 'modelObserved');
   const available = ownData(record, 'available');
-  if (!record || typeof record !== 'object' || Array.isArray(record) ||
-      (available !== true && available !== false)) {
+  if (!isRecord(record) || (available !== true && available !== false)) {
     return unavailable('AI_ROUTING_HOST_UNVERIFIED');
   }
   if (ownData(record, 'transportVerified') !== true) return unavailable('AI_ROUTING_TRANSPORT_UNVERIFIED');
@@ -62,7 +67,7 @@ export function discoverTaskCapabilities(project, { taskKind, checkCodex = check
   let host = null;
   try { if (typeof hostProbe === 'function') host = hostProbe(project); }
   catch { host = null; }
-  const candidates = host && typeof host === 'object' && !Array.isArray(host) ? host : {};
+  const candidates = isRecord(host) ? host : {};
   return { codex, webDev: normalizeHost(ownData(candidates, 'webDev'), 'webDev'),
     imageTerra: normalizeHost(ownData(candidates, 'imageTerra'), 'imageTerra'),
     imageSol: normalizeHost(ownData(candidates, 'imageSol'), 'imageSol') };

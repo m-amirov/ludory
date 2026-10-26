@@ -344,3 +344,17 @@ test('planner never invokes a mutable getter for candidate capabilities or obser
   assert.equal(Object.hasOwn(plan, 'modelObserved'), false);
   assert.equal(getterReads, 0);
 });
+
+test('revoked host proxies fail closed without escaping capability or planner preflight', t => {
+  const project = freshStudioGame(t);
+  const { proxy, revoke } = Proxy.revocable({}, {});
+  revoke();
+  const fromHost = discoverTaskCapabilities(project, { taskKind: 'image', hostProbe: () => proxy });
+  assert.equal(fromHost.imageTerra.available, false);
+  const fromCandidate = discoverTaskCapabilities(project, { taskKind: 'image',
+    hostProbe: () => ({ imageTerra: proxy }) });
+  assert.equal(fromCandidate.imageTerra.available, false);
+  const fromPlanner = planTaskRoute(project, { taskKind: 'image' }, { discover: () => proxy });
+  assert.equal(fromPlanner.status, 'NEEDS_USER_ACTION');
+  assert.equal(fromPlanner.selectedRoute, 'manual');
+});
