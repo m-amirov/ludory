@@ -2,8 +2,10 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
+import sharp from 'sharp';
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_DECODE_PIXELS = 16 * 1024 * 1024;
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const fail = code => { throw new Error(`IMAGE_ARTIFACT_${code}`); };
 const safeDimensions = (width, height) => {
@@ -158,6 +160,24 @@ export function inspectGeneratedImage(input, { mediaType, maxBytes = MAX_IMAGE_B
     : mediaType === 'image/jpeg' ? jpegDimensions(bytes)
       : mediaType === 'image/webp' ? webpDimensions(bytes) : fail('MIME_UNSUPPORTED');
   return { mediaType, ...dimensions, size: bytes.length, sha256: hash(bytes) };
+}
+
+/** Force libvips to decode JPEG/WebP pixels before these formats enter a native run. */
+export async function decodeGeneratedImage(input, options = {}) {
+  const info = inspectGeneratedImage(input, options);
+  if (!['image/jpeg', 'image/webp'].includes(info.mediaType)) return info;
+  try {
+    const decoded = await sharp(Buffer.from(input), {
+      failOn: 'error', limitInputPixels: MAX_DECODE_PIXELS, pages: 1, sequentialRead: true,
+    }).raw().toBuffer({ resolveWithObject: true });
+    if (!decoded.data.length || decoded.info.width !== info.width || decoded.info.height !== info.height) {
+      fail(`${info.mediaType === 'image/jpeg' ? 'JPEG' : 'WEBP'}_DECODE`);
+    }
+    return info;
+  } catch (error) {
+    if (error?.message?.startsWith('IMAGE_ARTIFACT_')) throw error;
+    fail(`${info.mediaType === 'image/jpeg' ? 'JPEG' : 'WEBP'}_DECODE`);
+  }
 }
 
 /** Pin each input directory before reading. Never follow symlinks, junctions or hardlinks. */

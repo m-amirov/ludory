@@ -7,7 +7,7 @@ import { readNativeRun, planNativeEvent, commitNativeEvent, stageNativeImageArti
 import { hasStudioCreationReceipt } from './executor.mjs';
 import { ownData } from './capabilities.mjs';
 import { validateImageCapability, discoverImageHost } from './image-host.mjs';
-import { inspectGeneratedImage, readProjectImageInput } from './image-artifacts.mjs';
+import { decodeGeneratedImage, readProjectImageInput } from './image-artifacts.mjs';
 
 const MAX_BRIEF = 64 * 1024;
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -163,7 +163,7 @@ export async function executeImageTask(plan, { apply = false, host = null, timeo
   let outputs = [];
   if (acceptedEnvelope && sourceValid) {
     try {
-      for (const input of imageInputs) inspectGeneratedImage(ownData(input, 'bytes'),
+      for (const input of imageInputs) await decodeGeneratedImage(ownData(input, 'bytes'),
         { mediaType: ownData(input, 'mediaType') });
       outputs = stageNativeImageArtifacts(plan.project, plan.runId, requestSha256,
         imageInputs.map(input => ({ bytes: ownData(input, 'bytes'), mediaType: ownData(input, 'mediaType') })));
@@ -196,6 +196,9 @@ export async function planImageImport(projectDir, { run, brief, file } = {}) {
   }
   let input;
   try { input = readProjectImageInput(plan.project, file); }
+  catch (error) { return { ...blocked(plan.project, plan.runId, error.message.startsWith('IMAGE_ARTIFACT_')
+    ? error.message : 'IMAGE_IMPORT_FILE_UNSAFE'), operation: 'image-import' }; }
+  try { await decodeGeneratedImage(input.bytes, { mediaType: input.info.mediaType }); }
   catch (error) { return { ...blocked(plan.project, plan.runId, error.message.startsWith('IMAGE_ARTIFACT_')
     ? error.message : 'IMAGE_IMPORT_FILE_UNSAFE'), operation: 'image-import' }; }
   return { ...plan, operation: 'image-import', status: 'READY', selectedRoute: 'manual',

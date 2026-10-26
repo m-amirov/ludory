@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inspectGeneratedImage, MAX_IMAGE_BYTES } from '../src/image-artifacts.mjs';
+import * as imageArtifacts from '../src/image-artifacts.mjs';
+import * as ai from '../src/index.mjs';
+const { inspectGeneratedImage, MAX_IMAGE_BYTES } = imageArtifacts;
 import { png, jpeg, webp } from './helpers/images.mjs';
 
 test('actual 1×1 PNG, JPEG and WebP originals have bounded inspected dimensions and SHA', () => {
@@ -64,4 +66,26 @@ test('oversized payload is rejected before Buffer.from attempts to copy it', () 
     assert.throws(() => inspectGeneratedImage(large, { mediaType: 'image/png' }), /IMAGE_ARTIFACT_TOO_LARGE/);
     assert.equal(copied, false);
   } finally { Buffer.from = original; }
+});
+
+test('full decoder rejects structurally valid JPEG and WebP payload corruption', async () => {
+  assert.equal(typeof imageArtifacts.decodeGeneratedImage, 'function');
+  const malformedJpeg = Buffer.from(jpeg);
+  const table = malformedJpeg.indexOf(Buffer.from([0xff, 0xc4]));
+  assert.ok(table > 0);
+  malformedJpeg[table + 5] = 2; // Invalid Huffman table count; structure still parses.
+  assert.equal(inspectGeneratedImage(malformedJpeg, { mediaType: 'image/jpeg' }).width, 1);
+
+  const malformedWebp = Buffer.from(webp);
+  malformedWebp[20] = 0; // Preserve RIFF/chunk framing, corrupt VP8 payload.
+  assert.equal(inspectGeneratedImage(malformedWebp, { mediaType: 'image/webp' }).width, 1);
+
+  await assert.rejects(imageArtifacts.decodeGeneratedImage(malformedJpeg, { mediaType: 'image/jpeg' }),
+    /IMAGE_ARTIFACT_JPEG_DECODE/);
+  await assert.rejects(imageArtifacts.decodeGeneratedImage(malformedWebp, { mediaType: 'image/webp' }),
+    /IMAGE_ARTIFACT_WEBP_DECODE/);
+});
+
+test('full decoder is available through the public AI contract', () => {
+  assert.equal(typeof ai.decodeGeneratedImage, 'function');
 });

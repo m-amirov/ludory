@@ -3,7 +3,7 @@ export { inspectNativeProject, verifyNativeSource, snapshotArtifact } from './so
 export { planNewRun, commitNewRun, readNativeRun, listNativeRuns, planNativeEvent, commitNativeEvent } from './store.mjs';
 export { discoverDevHost } from './dev-host.mjs';
 export { discoverImageHost, validateImageCapability } from './image-host.mjs';
-export { inspectGeneratedImage } from './image-artifacts.mjs';
+export { inspectGeneratedImage, decodeGeneratedImage } from './image-artifacts.mjs';
 export { planImageTask, verifyImagePlan, executeImageTask, planImageImport, executeImageImport } from './image-tasks.mjs';
 export { planDevDraft, verifyDevDraftPlan, executeDevDraft,
   planDevDraftImport, executeDevDraftImport } from './draft-tasks.mjs';
