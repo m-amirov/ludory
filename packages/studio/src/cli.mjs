@@ -3,7 +3,8 @@ import { inspectProject, planInit, planMigration, applyPlan } from './projects.m
 import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
-import { planWorkflow, executeWorkflow, planTaskRoute } from '@ludory/ai';
+import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNativeRun,
+  planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport } from '@ludory/ai';
 
 const usage = `Ludory Studio 0.1.0 — native game-development workflows
 
@@ -20,6 +21,8 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory create --project <empty-directory> --id <slug> --title <name> --lang <locale> --profile <id> --template <id> --targets <comma-separated> [--version <semver>] [--catalog <directory>] [--apply] [--json]
   ludory workflow doctor --project <game-directory> [--json]
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--model <auto|terra|sol>] [--json]
+  ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--apply] [--json]
+  ludory workflow draft-import --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> --file <relative-draft> [--apply] [--json]
   ludory workflow status --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow start --project <game-directory> --pipeline <audit-repair-loop|production-art> --target <text> --in-scope <a;b> --acceptance <text> --mutation-boundary <text> [--out-of-scope <a;b>] [--apply] [--json]
@@ -34,6 +37,8 @@ create --apply only creates new template files, manifest and Studio receipt in a
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
 workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
 workflow route is read-only: it checks executor eligibility; Web DEV and Image Gen require verified host adapters.
+workflow draft preview never calls the DEV host; --apply probes only the isolated DEV helper and saves a review-only draft if the actual selected model is attested.
+Without a verified DEV host, draft returns a manual handoff packet; draft-import records USER_DECLARED provenance, never HOST_OBSERVED or narrative PASS.
 For image tasks, auto prefers Terra then SOL at preflight; pinned models never switch silently.
 Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.
 workflow cycle checks Codex-observed Node test execution with at most two repairs; it never automatically advances a stage.
@@ -52,6 +57,8 @@ function argumentsFor(command, argv) {
   const workflowCommon = [...common];
   const allowed = command.startsWith('workflow-')
     ? new Set(command === 'workflow-route' ? [...workflowCommon, '--task', '--model']
+      : command === 'workflow-draft' ? [...workflowCommon, '--run', '--task', '--brief', '--source', '--apply']
+      : command === 'workflow-draft-import' ? [...workflowCommon, '--run', '--task', '--brief', '--file', '--apply']
       : command === 'workflow-doctor' ? workflowCommon
       : command === 'workflow-status' || command === 'workflow-next' ? [...workflowCommon, '--run']
           : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
@@ -119,10 +126,44 @@ function displayWorkflow(result, json, out) {
   }
   if (result.warning) out(`  warning: ${result.warning}\n`);
   if (result.executorCode) out(`  result: ${result.executorCode}\n`);
+  if (result.provenance) out(`  provenance: ${result.provenance}\n`);
+  if (result.output?.outputPath) out(`  draft: ${result.output.outputPath}\n`);
   if (result.nextAction?.kind) out(`  next: ${result.nextAction.kind}\n`);
   for (const run of result.runs ?? []) out(`  run: ${run.runId} · ${run.status} · ${run.nextStage ?? 'terminal'}\n`);
   if (result.status === 'READY') for (const item of result.writes ?? []) out(`  planned: ${item}\n`);
   for (const conflict of result.conflicts ?? []) out(`  blocked: ${conflict}\n`);
+}
+
+async function runDraftCommand(operation, flags, { out, devHost }) {
+  const project = flags.get('--project');
+  const options = { run: flags.get('--run'), taskKind: flags.get('--task'), brief: flags.get('--brief') };
+  let result;
+  if (operation === 'draft-import') {
+    const preview = planDevDraftImport(project, { ...options, file: flags.get('--file') });
+    result = executeDevDraftImport(preview, { apply: flags.has('--apply') });
+  } else {
+    const sourceText = flags.get('--source');
+    const sources = sourceText === undefined ? [] : sourceText.split(';');
+    const preview = planDevDraft(project, { ...options, sources });
+    if (!flags.has('--apply') || preview.status === 'BLOCKED') result = preview;
+    else {
+      const host = devHost();
+      if (!host || typeof host.probe !== 'function') result = preview;
+      else {
+        try {
+          const capability = await host.probe();
+          const ready = planDevDraft(project, { ...options, sources }, { discover: () => capability });
+          result = await executeDevDraft(ready, { apply: true, host });
+        } finally {
+          if (typeof host.close === 'function') {
+            try { await host.close(); } catch { /* Result or pending state remains authoritative. */ }
+          }
+        }
+      }
+    }
+  }
+  displayWorkflow(result, flags.has('--json'), out);
+  return result.status === 'BLOCKED' || (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
 }
 
 function parsedTargets(flags) {
@@ -187,7 +228,8 @@ function display(result, json, out) {
 }
 
 /** Pure command boundary; inject streams to test status/output without child processes. */
-export function runCli(argv, { out = text => process.stdout.write(text), err = text => process.stderr.write(text), executor } = {}) {
+export function runCli(argv, { out = text => process.stdout.write(text), err = text => process.stderr.write(text),
+  executor, devHost = discoverDevHost } = {}) {
   try {
     const [command = 'help', ...rest] = argv;
     if (command === 'help' || command === '--help') {
@@ -197,10 +239,29 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'workflow') {
       const [operation, ...args] = rest;
-      if (!['doctor', 'route', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
+      if (!['doctor', 'route', 'draft', 'draft-import', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
         throw new Error(`Unknown workflow operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`workflow-${operation}`, args);
+      if (operation === 'draft' || operation === 'draft-import') {
+        return runDraftCommand(operation, flags, { out, devHost }).catch(error => {
+          let pending = false;
+          try { pending = operation === 'draft' && flags.has('--apply') &&
+            readNativeRun(flags.get('--project'), flags.get('--run')).pendingExecutor === 'web-dev'; }
+          catch { /* Unavailable run is an ordinary failure, not verified uncertainty. */ }
+          const result = pending ? {
+            engine: 'ludory-ai', operation, status: 'PENDING_RECOVERY',
+            project: flags.get('--project'), nativeStatus: 'WAITING_FOR_EVIDENCE',
+            reasonCode: 'DEV_EXECUTION_OUTCOME_UNKNOWN', writes: [], conflicts: [],
+            warning: 'A DEV request may still be running. Stop/verify the old helper before workflow recover --confirm-no-executor --apply.',
+            nextAction: { kind: 'CONFIRM_EXECUTOR_STOPPED', executable: false },
+          } : { operation, status: 'FAILED', project: flags.get('--project'),
+            writes: [], conflicts: [error.message] };
+          if (flags.has('--json') || pending) displayWorkflow(result, flags.has('--json'), out);
+          else err(`Ludory: ${error.message}\n`);
+          return pending ? 3 : 1;
+        });
+      }
       if (operation === 'route') {
         const plan = planTaskRoute(flags.get('--project'), {
           taskKind: flags.get('--task'), model: flags.get('--model') ?? 'auto',

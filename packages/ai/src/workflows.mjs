@@ -66,13 +66,15 @@ function fromRun(project, operation, current) {
   const nextAction = current.terminal ? { kind: 'STOP_TERMINAL', stage: null, executable: false }
     : current.pendingExecutor
       ? { kind: 'AWAIT_EXECUTOR_RESULT', stage: current.nextStage, executable: false }
+    : current.reviewPending
+      ? { kind: 'REVIEW_DRAFT', stage: current.nextStage, executable: false }
     : ['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(current.status)
       ? { kind: 'AWAIT_EVIDENCE', stage: current.nextStage, executable: false }
       : current.status === 'EXECUTION_FAILED' ? { kind: 'RETRY_EXECUTOR', stage: current.nextStage, executable: false }
       : { kind: 'PERFORM_STAGE', stage: current.nextStage, executable: false };
   return { engine: 'ludory-ai', project, operation, status: 'OK', writes: [], conflicts: [],
     runId: current.run.runId, nextStage: current.nextStage, nativeStatus: current.status,
-    nextAction, terminal: current.terminal };
+    nextAction, terminal: current.terminal, reviewPending: current.reviewPending };
 }
 
 /** Plan a native operation without executing any CEOS process. */
@@ -148,7 +150,7 @@ export function planWorkflow(projectDir, operation, options = {}) {
       test: options.test, requiredCommand, repairs, executor: 'codex',
       warning: 'Test execution is observed only via Codex sandbox JSONL, not independently verified. No automatic checkpoint, stage advancement or Release PASS.' };
   }
-  if (operation === 'recover' && current.pendingExecutor !== 'codex') {
+  if (operation === 'recover' && !['codex', 'web-dev'].includes(current.pendingExecutor)) {
     return blocked(project, operation, 'NATIVE_RECOVERY_NO_PENDING_EXECUTOR');
   }
   let nativePlan;
@@ -158,10 +160,12 @@ export function planWorkflow(projectDir, operation, options = {}) {
       ...(options.executor === 'codex' && { executor: 'codex' }),
     });
     else if (operation === 'recover') nativePlan = planNativeEvent(project, current.run.runId, {
-      kind: 'EXECUTION_RESULT', stage: current.nextStage, result: {
-        ok: false, code: 'EXECUTOR_INTERRUPTED', exitCode: null,
-        transcriptSha256: EMPTY_TRANSCRIPT_SHA256, eventCount: 0, completed: false,
-      },
+      kind: 'EXECUTION_RESULT', stage: current.nextStage,
+      result: current.pendingExecutor === 'web-dev'
+        ? { ok: false, code: 'DEV_EXECUTOR_INTERRUPTED', reviewStatus: 'PENDING_REVIEW',
+          modelObserved: null, outputPath: null, outputSha256: null, outputSize: null }
+        : { ok: false, code: 'EXECUTOR_INTERRUPTED', exitCode: null,
+          transcriptSha256: EMPTY_TRANSCRIPT_SHA256, eventCount: 0, completed: false },
     });
     else {
       const stage = text(options.stage, 'stage');
@@ -177,7 +181,9 @@ export function planWorkflow(projectDir, operation, options = {}) {
   const executorPlan = operation === 'continue' && options.executor === 'codex'
     ? prepareCodexExecution(project, current.run.scope, current.nextStage, { gitRoot: source.gitRoot }) : null;
   const recoveryWarning = operation === 'recover'
-    ? 'Recovery cannot reliably inspect the old Codex child; confirm that no Codex process can still modify this project before --apply.'
+    ? current.pendingExecutor === 'web-dev'
+      ? 'Recovery cannot prove whether the old DEV helper completed its request; confirm the DEV browser helper is stopped and no response is in flight before --apply. Any generated but unjournaled draft remains unapproved.'
+      : 'Recovery cannot reliably inspect the old Codex child; confirm that no Codex process can still modify this project before --apply.'
     : null;
   return { engine: 'ludory-ai', project, operation, status: 'READY', writes: nativePlan.writes,
     conflicts: [], runId: current.run.runId, nextStage: current.nextStage, nativePlan,

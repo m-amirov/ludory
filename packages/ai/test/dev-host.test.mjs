@@ -1,0 +1,318 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { discoverDevHost } from '../src/dev-host.mjs';
+
+function fixture(helperSource, mutate = () => {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-dev-host-'));
+  const home = path.join(root, 'dev');
+  const stableHome = path.join(root, 'stable');
+  const runtime = path.join(home, 'runtime');
+  fs.mkdirSync(runtime, { recursive: true });
+  const script = path.join(runtime, 'helper.cjs');
+  fs.writeFileSync(script, helperSource);
+  const descriptor = {
+    profile: 'development', kind: 'codex-web-gpt-launcher',
+    helper: { executable: process.execPath, script },
+  };
+  mutate(descriptor);
+  fs.writeFileSync(path.join(runtime, 'launcher-browser.json'), JSON.stringify(descriptor));
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
+    version: 3, releaseVersion: '6.1.11', mode: 'browser-only',
+    browserHostDescriptorPath: path.join(runtime, 'launcher-browser.json'),
+  }));
+  return { home, stableHome, root };
+}
+
+const helper = ({ observed = true, submit = true } = {}) => `
+const readline = require('node:readline');
+const accepted = ${JSON.stringify(observed)};
+const submit = ${JSON.stringify(submit)};
+const send = value => process.stdout.write(JSON.stringify(value) + '\\n');
+send({ type: 'ready', protocolVersion: 1 });
+readline.createInterface({input:process.stdin}).on('line', line => {
+  const message = JSON.parse(line);
+  if (message.type === 'capabilities') {
+    send({ type: 'capabilities', id:message.id, ...(accepted ? {
+      transportVerified:true, entitlementVerified:true, routeObserved:'web-dev',
+      modelObserved:'gpt-6-sol', localToolsEnabled:false
+    } : { transportVerified:true, entitlementVerified:false }) });
+  } else if (message.type === 'run') {
+    send({ type:'event', id:message.id, event:'prepared_selected' });
+  } else if (message.type === 'prepared_selected_ack') {
+    if (!message.prepared.text.includes('source-bound')) process.exit(3);
+    send({ type:'event', id:message.id, event:'send_activated' });
+  } else if (message.type === 'send_activation_ack') {
+    if (submit) send({ type:'event', id:message.id, event:'submitted' });
+    send({ type:'result', id:message.id, text:'# Draft\\nA new scene',
+      ...(accepted ? {modelObserved:'gpt-6-sol', routeObserved:'web-dev',
+        transportVerified:true, entitlementVerified:true, localToolsEnabled:false} : {}) });
+  }
+});
+`;
+
+test('missing DEV profile and identical Stable home deny all execution', async t => {
+  const absent = discoverDevHost({ devHome: path.join(os.tmpdir(), 'ludory-dev-host-no-such-home'),
+    stableHome: path.join(os.tmpdir(), 'ludory-dev-host-no-such-stable') });
+  assert.equal(absent.available, false);
+  assert.equal(absent.reasonCode, 'DEV_HOST_UNAVAILABLE');
+
+  const { home, root } = fixture(helper());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const unsafe = discoverDevHost({ devHome: home, stableHome: home });
+  assert.equal(unsafe.available, false);
+  assert.equal(unsafe.reasonCode, 'DEV_PROFILE_NOT_ISOLATED');
+});
+
+test('descriptor cannot redirect helper execution outside the isolated DEV home', async t => {
+  const { home, stableHome, root } = fixture(helper(), d => { d.helper.script = '/tmp/foreign-helper.cjs'; });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const unsafe = discoverDevHost({ devHome: home, stableHome });
+  assert.equal(unsafe.available, false);
+  assert.equal(unsafe.reasonCode, 'DEV_DESCRIPTOR_UNTRUSTED');
+});
+
+test('DEV symlink alias to Stable or symlinked ancestor is rejected without spawning', t => {
+  const { home, stableHome, root } = fixture(helper());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const alias = path.join(root, 'alias-to-stable');
+  fs.symlinkSync(home, alias, 'dir');
+  fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
+    version: 3, releaseVersion: '6.1.11', mode: 'browser-only',
+    browserHostDescriptorPath: path.join(alias, 'runtime', 'launcher-browser.json'),
+  }));
+  const descriptorFile = path.join(home, 'runtime', 'launcher-browser.json');
+  const descriptor = JSON.parse(fs.readFileSync(descriptorFile, 'utf8'));
+  descriptor.helper.script = path.join(alias, 'runtime', 'helper.cjs');
+  fs.writeFileSync(descriptorFile, JSON.stringify(descriptor));
+  let spawned = false;
+  const settings = { spawnImpl: () => { spawned = true; throw new Error('should not launch'); } };
+  const samePhysicalProfile = discoverDevHost({ ...settings, devHome: alias, stableHome: home });
+  assert.equal(samePhysicalProfile.available, false);
+  assert.equal(samePhysicalProfile.reasonCode, 'DEV_PROFILE_NOT_ISOLATED');
+  assert.equal(spawned, false);
+  const parentAlias = path.join(path.dirname(root), `${path.basename(root)}-parent-alias`);
+  fs.symlinkSync(root, parentAlias, 'dir');
+  t.after(() => fs.unlinkSync(parentAlias));
+  const aliasedAncestor = discoverDevHost({ ...settings, devHome: path.join(parentAlias, 'dev'), stableHome });
+  assert.equal(aliasedAncestor.available, false);
+  assert.equal(spawned, false);
+});
+
+test('witnessed helper route permits one source-bound browser-only text turn', async t => {
+  const { home, stableHome, root } = fixture(helper());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const host = discoverDevHost({ devHome: home, stableHome });
+  t.after(() => host.close?.());
+  assert.equal(host.available, false); // Installation is not entitlement.
+  const cap = await host.probe();
+  assert.equal(cap.available, true);
+  assert.equal(cap.modelObserved, 'gpt-6-sol');
+  const result = await host.turn({ prompt: 'source-bound instructions', taskId: 'test-run-1' });
+  assert.equal(result.status, 'HOST_OBSERVED');
+  assert.equal(result.text, '# Draft\nA new scene');
+  assert.equal(result.modelObserved, 'gpt-6-sol');
+});
+
+test('helper without model-entitlement observation never becomes runnable', async t => {
+  const { home, stableHome, root } = fixture(helper({ observed: false }));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const host = discoverDevHost({ devHome: home, stableHome });
+  t.after(() => host.close?.());
+  const cap = await host.probe();
+  assert.equal(cap.available, false);
+  assert.equal(cap.reasonCode, 'DEV_ROUTE_UNVERIFIED');
+  await assert.rejects(host.turn({ prompt: 'source-bound instructions', taskId: 'test-run-2' }),
+    /DEV_ROUTE_UNVERIFIED/);
+});
+
+test('legacy helper without capability handshake is closed after a bounded probe', async t => {
+  const olderHelper = `
+    const readline = require('node:readline');
+    process.stdout.write(JSON.stringify({type:'ready',protocolVersion:1})+'\\n');
+    readline.createInterface({input:process.stdin}).on('line', () => {});
+  `;
+  const { home, stableHome, root } = fixture(olderHelper);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const host = discoverDevHost({ devHome: home, stableHome, probeTimeoutMs: 75 });
+  t.after(() => host.close?.());
+  const cap = await host.probe();
+  assert.equal(cap.available, false);
+  assert.equal(cap.reasonCode, 'DEV_ROUTE_UNVERIFIED');
+  assert.equal(host.child, null, 'a legacy helper must not remain running after denied preflight');
+});
+
+test('isolated DEV process receives only a constrained environment, not ambient service credentials', async t => {
+  const { home, stableHome, root } = fixture(helper());
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let environment;
+  let childCwd;
+  const host = discoverDevHost({ devHome: home, stableHome,
+    spawnImpl: (exe, args, options) => {
+      environment = options.env;
+      childCwd = options.cwd;
+      return spawn(exe, args, options);
+    } });
+  t.after(() => host.close?.());
+  const capability = await host.probe();
+  assert.equal(capability.available, true);
+  assert.equal(childCwd, home, 'helper must not inherit the game or invoking CLI directory');
+  assert.equal(environment.CODEX_WEB_GPT_DEV_HOME, home);
+  const allowed = new Set(['PATH', 'Path', 'SystemRoot', 'WINDIR', 'ComSpec', 'PATHEXT',
+    'TMP', 'TEMP', 'TMPDIR', 'USERPROFILE', 'HOME', 'APPDATA', 'LOCALAPPDATA',
+    'ProgramFiles', 'ProgramFiles(x86)', 'LANG', 'LC_ALL', 'XDG_RUNTIME_DIR',
+    'DISPLAY', 'WAYLAND_DISPLAY', 'DBUS_SESSION_BUS_ADDRESS',
+    'CODEX_WEB_GPT_DEV_HOME', 'CODEX_CHATGPT_WEB_HOME', 'CODEX_HOME',
+    'ELECTRON_RUN_AS_NODE', 'CODEX_CHATGPT_WEB_BROWSER_HELPER_PROCESS']);
+  assert.deepEqual(Object.keys(environment).filter(key => !allowed.has(key)), []);
+});
+
+test('post-ready aggregate stdout overflow closes the helper instead of waiting for a turn timeout', async t => {
+  const flood = `
+const readline = require('node:readline');
+const send = obj => process.stdout.write(JSON.stringify(obj) + '\\n');
+send({type:'ready',protocolVersion:1});
+readline.createInterface({input:process.stdin}).on('line', line => {
+  const message = JSON.parse(line);
+  if (message.type === 'capabilities') send({type:'capabilities',id:message.id,
+    transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',modelObserved:'gpt-6-sol',localToolsEnabled:false});
+  if (message.type === 'run') {
+    for(let i=0;i<120;i++) send({type:'event',id:'foreign-'+i,event:'noise',padding:'x'.repeat(100000)});
+  }
+});`;
+  const { home, stableHome, root } = fixture(flood);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dev = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 3000 });
+  t.after(() => dev.close?.());
+  assert.equal((await dev.probe()).available, true);
+  await assert.rejects(dev.turn({ prompt: 'source-bound test', taskId: 'overflow' }), /DEV_HELPER_OUTPUT_LIMIT/);
+  assert.equal(dev.child, null);
+});
+
+test('turn timeout terminates the helper instead of retaining an unresponsive child', async t => {
+  const neverCompletes = helper().replace("send({ type:'result', id:message.id, text:'# Draft\\nA new scene',",
+    "return; /* no result */ send({ type:'result', id:message.id, text:'# Draft\\nA new scene',");
+  const { home, stableHome, root } = fixture(neverCompletes);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dev = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 100 });
+  t.after(() => dev.close?.());
+  assert.equal((await dev.probe()).available, true);
+  await assert.rejects(dev.turn({ prompt: 'source-bound test', taskId: 'timeout' }), /DEV_HELPER_TIMEOUT/);
+  assert.equal(dev.child, null);
+});
+
+test('a helper that stops reading stdin cannot hang a bounded turn beyond its timeout', async t => {
+  const blockedStdin = `
+const readline = require('node:readline');
+const send = value => process.stdout.write(JSON.stringify(value)+'\\n');
+send({type:'ready',protocolVersion:1});
+const rl = readline.createInterface({input:process.stdin});
+rl.on('line', line => {
+  const item = JSON.parse(line);
+  if(item.type==='capabilities') {
+    send({type:'capabilities',id:item.id,transportVerified:true,entitlementVerified:true,
+      routeObserved:'web-dev',modelObserved:'gpt-6-sol',localToolsEnabled:false});
+    rl.pause();
+  }
+});`;
+  const { home, stableHome, root } = fixture(blockedStdin);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dev = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 150 });
+  t.after(() => dev.close?.());
+  assert.equal((await dev.probe()).available, true);
+  // Deterministically model an unresolved child stdin callback (pipe backpressure).
+  const originalWrite = dev.child.stdin.write;
+  dev.child.stdin.write = function (chunk, callback) {
+    if (String(chunk).includes('"type":"run"')) return true;
+    return originalWrite.call(this, chunk, callback);
+  };
+  const guarded = Promise.race([
+    dev.turn({ prompt: 'x'.repeat(60 * 1024), taskId: 'stdin-stall' }),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('TEST_SEND_HUNG')), 1700)),
+  ]);
+  await assert.rejects(guarded, /DEV_HELPER_TIMEOUT/);
+  assert.equal(dev.child, null);
+});
+
+test('out-of-order submitted/result frames never attest a prompt that was not sent', async t => {
+  const skippedHandshake = `
+const rl = require('node:readline');
+const send = obj => process.stdout.write(JSON.stringify(obj)+'\\n');
+send({type:'ready',protocolVersion:1});
+rl.createInterface({input:process.stdin}).on('line', line => {
+  const item = JSON.parse(line);
+  if (item.type==='capabilities') send({type:'capabilities',id:item.id,
+    transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',
+    modelObserved:'gpt-6-sol',localToolsEnabled:false});
+  if (item.type==='run') {
+    send({type:'event',id:item.id,event:'submitted'});
+    send({type:'result',id:item.id,text:'Fabricated',modelObserved:'gpt-6-sol',
+      transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',localToolsEnabled:false});
+  }
+});`;
+  const { home, stableHome, root } = fixture(skippedHandshake);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dev = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 300 });
+  t.after(() => dev.close?.());
+  assert.equal((await dev.probe()).available, true);
+  await assert.rejects(dev.turn({ prompt: 'source-bound prompt never sent', taskId: 'fake' }),
+    /DEV_HELPER_PROTOCOL_INVALID|DEV_ROUTE_UNVERIFIED/);
+});
+
+test('ack-dependent helper frames cannot claim receipt of a prompt before acknowledgement was written', async t => {
+  const premature = `
+const rl = require('node:readline');
+const send = obj => process.stdout.write(JSON.stringify(obj)+'\\n');
+send({type:'ready',protocolVersion:1});
+rl.createInterface({input:process.stdin}).on('line', line => {
+ const item=JSON.parse(line);
+ if(item.type==='capabilities') send({type:'capabilities',id:item.id,
+  transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',
+  modelObserved:'gpt-6-sol',localToolsEnabled:false});
+ if(item.type==='run') {
+  send({type:'event',id:item.id,event:'prepared_selected'});
+  send({type:'event',id:item.id,event:'send_activated'});
+  send({type:'event',id:item.id,event:'submitted'});
+  send({type:'result',id:item.id,text:'Fake',modelObserved:'gpt-6-sol',
+   transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',localToolsEnabled:false});
+ }
+});`;
+  const { home, stableHome, root } = fixture(premature);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dev = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 300 });
+  t.after(() => dev.close?.());
+  assert.equal((await dev.probe()).available, true);
+  await assert.rejects(dev.turn({ prompt: 'source-bound', taskId: 'premature' }),
+    /DEV_HELPER_PROTOCOL_INVALID/);
+});
+
+test('nonobject protocol frame and a closing stdin fail closed without crashing Node', async t => {
+  for (const afterCapabilities of [
+    `process.stdout.write('null\\n');`,
+    `process.stdin.destroy();`,
+  ]) {
+    const source = `
+const rl = require('node:readline');
+const send = obj => process.stdout.write(JSON.stringify(obj)+'\\n');
+send({type:'ready',protocolVersion:1});
+rl.createInterface({input:process.stdin}).on('line', line => {
+ const item=JSON.parse(line);
+ if(item.type==='capabilities') {
+  send({type:'capabilities',id:item.id,transportVerified:true,entitlementVerified:true,
+   modelObserved:'gpt-6-sol',routeObserved:'web-dev',localToolsEnabled:false});
+  ${afterCapabilities}
+ }
+});`;
+    const { home, stableHome, root } = fixture(source);
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const dev = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 250 });
+    t.after(() => dev.close?.());
+    const cap = await dev.probe();
+    if (cap.available) await assert.rejects(dev.turn({ prompt: 'source-bound', taskId: 'closed' }),
+      /DEV_HELPER_/);
+    else assert.equal(cap.available, false);
+  }
+});

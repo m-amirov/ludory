@@ -196,3 +196,39 @@ Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `epis
 
 `workflow route` never writes project files or workflow events; it rejects `--apply`. Exit code `0` covers a valid preview, including a manual handoff; `2` means the project is blocked (for example, no Studio creation receipt); `1` means invalid arguments or inspection error. Historical games stay frozen. No image, script, art review, independent acceptance, or Release PASS is produced by a route preview.
 JSON previews preserve the general `reasonCode` and, on unavailable routes, a more specific `capabilityReasonCode`. Image previews additionally expose `capabilityReasons.terra` and `capabilityReasons.sol`, including why the preferred Terra preflight was rejected when SOL is selected. Untrusted or missing attestation fields never establish availability.
+
+## Web DEV reviewable drafts (Slice B, experimental)
+
+For a game created with `ludory create` and an active native workflow run:
+
+```sh
+# Read-only preview, including a source-hash-bound handoff packet. Does not start DEV.
+node packages/studio/bin/ludory.mjs workflow draft --project /path/to/new-studio-game \
+  --run RUN_ID --task episode-script --brief narrative/episode-brief.md \
+  --source narrative/graph.json --json
+
+# Explicit execution. Invokes DEV only if the installed isolated helper attests
+# actual authenticated transport, effective selected gpt-*-sol model, and browser-only mode.
+node packages/studio/bin/ludory.mjs workflow draft --project /path/to/new-studio-game \
+  --run RUN_ID --task art-concept --brief narrative/art-brief.md --apply --json
+
+# No supported DEV host? Prepare the draft yourself, then import by user declaration.
+node packages/studio/bin/ludory.mjs workflow draft-import --project /path/to/new-studio-game \
+  --run RUN_ID --task episode-script --brief narrative/episode-brief.md \
+  --file narrative/my-draft.md --json
+node packages/studio/bin/ludory.mjs workflow draft-import --project /path/to/new-studio-game \
+  --run RUN_ID --task episode-script --brief narrative/episode-brief.md \
+  --file narrative/my-draft.md --apply --json
+```
+
+The optional host is a separate user-installed DEV browser-helper with an isolated profile and a protocol that **observes** transport authorization and the actually selected model. Merely launching a helper, reading the configured model, or seeing it submit a prompt does not establish model provenance. The older helper without a capabilities/route observation frame is unsupported and returns `DEV_ROUTE_UNVERIFIED`. Ludory does not read or copy the Stable browser profile, acquire ChatGPT cookies, or expose local tools to Web DEV. It does not bundle a DEV executable.
+
+`workflow draft` preview never writes files or starts a host. `--apply` journals an immutable `web-dev` request **before** the helper call; an observed response becomes a SHA-256-bound draft under `.ludory/ai/runs/<id>/drafts/` with `HOST_OBSERVED` provenance. Unexpected exit or timeout leaves the request pending, blocks duplicates and checkpoints, and requires `workflow recover --run RUN_ID --confirm-no-executor --apply` only after confirming that the old DEV helper is no longer active. No hidden retry or route downgrade occurs.
+
+Only deliberately named UTF-8 `--brief` and `--source` files are sent as text to the external DEV session. The complete bounded prompt must fit 64 KiB; an oversized or binary reference blocks before any external call. Review these files for credentials and private content before using `--apply`. A helper failure *after intent was committed* is surfaced as `PENDING_RECOVERY` (CLI exit 3), not as proven non-execution. The helper runs with an allowlisted environment and strict isolation from any Stable profile path, including symlink/junction aliases.
+
+`workflow draft-import` accepts an existing safe project-relative UTF-8 text file, records a separate `DRAFT_IMPORTED` event with `USER_DECLARED` provenance and copies immutable bytes into the native run. It never claims DEV execution. All automatically generated or imported drafts remain `PENDING_REVIEW`; neither route advances the workflow stage, rewrites gameplay scenes, validates narrative consistency, nor establishes release readiness. Source files, symlinks, game receipts, stale hashes and pending executors are checked fail-closed. Each task kind permits a single declared manual import per run.
+
+An interrupted import can leave an unreferenced uniquely named draft in the private run directory. It is not treated as an accepted import or used by runtime; a later explicit import may safely create a new file. Orphan cleanup is manual after inspecting provenance and contents. `workflow status/next` advertises `REVIEW_DRAFT` while review-only evidence exists; narrative review completion remains a separate future gate.
+
+CLI `--apply` without an authenticated compatible DEV helper produces a manual handoff (`NEEDS_USER_ACTION`, exit 2) without game writes. Local mock-host tests are not evidence of successful real Windows DEV model selection. Live Windows DEV host and NTFS acceptance are still required; image adapter work follows in Slice C.

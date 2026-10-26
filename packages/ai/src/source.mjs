@@ -85,17 +85,20 @@ export function verifyNativeSource(binding) {
 }
 
 /** Hash file bytes from the verified game root without following symbolic entries. */
-export function snapshotArtifact(projectDir, relativePath) {
+export function snapshotArtifact(projectDir, relativePath, { maxBytes = Number.MAX_SAFE_INTEGER } = {}) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new Error('SOURCE_ARTIFACT_LIMIT_INVALID');
   const project = nativeRoot(projectDir);
   const file = regularFile(project, relativePath);
-  const fd = fs.openSync(file, 'r');
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
   const hash = crypto.createHash('sha256');
   const buffer = Buffer.allocUnsafe(64 * 1024);
   let size = 0;
   try {
+    if (fs.fstatSync(fd).size > maxBytes) throw new Error('SOURCE_ARTIFACT_TOO_LARGE');
     let count;
     while ((count = fs.readSync(fd, buffer, 0, buffer.length, null)) !== 0) {
       size += count;
+      if (size > maxBytes) throw new Error('SOURCE_ARTIFACT_TOO_LARGE');
       hash.update(buffer.subarray(0, count));
     }
     if (!fs.fstatSync(fd).isFile() || !samePath(fs.realpathSync.native(file), file)) {
