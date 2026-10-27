@@ -100,6 +100,8 @@ test('report parser computes P0/P1 rework and ignores P2 cosmetic polish for the
   assert.equal(interpretArtReview(response([]).replace('"imageVisible":true', '"imageVisible":false'), expected).verdict, 'BLOCKED');
   const escapedArray = response([]).replace('"findings":[]', '"findings":\\[\\]');
   assert.equal(interpretArtReview(escapedArray, expected).verdict, 'PASS_ART');
+  const escapedVerdict = response([]).replace('"verdict":"PASS_ART"', '"verdict":"PASS\\_ART"');
+  assert.equal(interpretArtReview(escapedVerdict, expected).verdict, 'PASS_ART');
   assert.equal(interpretArtReview(response([]).replace('a'.repeat(64), 'b'.repeat(64)), expected).verdict, 'BLOCKED');
   assert.equal(interpretArtReview('PASS. Looks great!', expected).verdict, 'BLOCKED');
   assert.equal(interpretArtReview(response([]).replace('"verdict":"PASS_ART"', '"verdict":"REWORK"'),

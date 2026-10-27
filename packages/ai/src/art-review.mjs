@@ -187,10 +187,10 @@ export function interpretArtReview(text, expected) {
   if (typeof text !== 'string' || Buffer.byteLength(text) > 64 * 1024 ||
       !/^[a-f0-9]{64}$/.test(expected?.imageSha256 ?? '')) return blockedReport('ART_REPORT_INVALID');
   let value;
-  // The current Web DOM extractor can preserve LaTeX-style escapes around a streamed JSON
-  // array (`\[` / `\]`). Normalize only those two punctuation escapes; all schema and
-  // source-bound checks below remain strict, and other malformed text still blocks.
-  try { value = JSON.parse(text.replaceAll('\\[', '[').replaceAll('\\]', ']')); }
+  // The current Web DOM extractor can preserve LaTeX-style escapes around streamed JSON
+  // punctuation (`\_`, `\[` / `\]`). Normalize only those known presentation escapes;
+  // all schema and source-bound checks below remain strict, and other malformed text still blocks.
+  try { value = JSON.parse(text.replaceAll('\\_', '_').replaceAll('\\[', '[').replaceAll('\\]', ']')); }
   catch { return blockedReport('ART_REPORT_INVALID'); }
   if (!value || typeof value !== 'object' || Array.isArray(value) || value.schemaVersion !== 1 ||
       value.imageSha256 !== expected.imageSha256 ||
