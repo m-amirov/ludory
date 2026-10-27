@@ -5,6 +5,7 @@ import { planCreate, applyCreatePlan } from './scaffold.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
 import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNativeRun,
   planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport,
+  planNarrativeReview, executeNarrativeReview,
   planImageTask,
   planImageImport, executeImageImport, planArtReview, executeArtReview } from '@ludory/ai';
 
@@ -25,6 +26,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--context-reviewed] [--apply] [--json]
   ludory workflow draft-import --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> --file <relative-draft> [--apply] [--json]
+  ludory workflow narrative-review --project <new-studio-game> [--run <id|latest>] [--apply] [--json]
   ludory workflow image --project <new-studio-game> --run <id> --brief <relative-art-brief> [--apply] [--json]
   ludory workflow image-import --project <new-studio-game> --run <id> --brief <relative-text> --file <relative-image> --handoff-sha256 <sha256> [--apply] [--json]
   ludory workflow art-review --project <new-studio-game> --run <id> --image <imported-original> --source <scene:...;characters:...;location:...;style:...> --context-reviewed [--apply] [--json]
@@ -44,6 +46,7 @@ workflow runs natively in Ludory AI; mutations require --apply and historical CE
 workflow route is read-only: image routing hands the brief to a dedicated Codex image-generator subagent.
 workflow draft preview never calls the DEV host; --apply probes only the isolated DEV helper and saves a review-only draft if the actual selected model is attested.
 Without a verified DEV host, draft returns a manual handoff packet; draft-import records USER_DECLARED provenance, never HOST_OBSERVED or narrative PASS.
+Episode-script drafts are automatically sent to a separate Web DEV narrative review turn after saving. A verified reviewer can ACCEPT or request REWORK, without granting release PASS or modifying scenes. Missing host leaves PENDING_REVIEW.
 First, Web DEV drafts a source-aware art concept when authenticated and given adequate scene/style context;
 otherwise the primary task model authors the brief in its own session (standalone CLI gives manual handoff).
 Then the primary Codex agent delegates to a separate image-generator subagent inheriting its model.
@@ -75,6 +78,7 @@ function argumentsFor(command, argv) {
     ? new Set(command === 'workflow-route' ? [...workflowCommon, '--task']
       : command === 'workflow-draft' ? [...workflowCommon, '--run', '--task', '--brief', '--source', '--context-reviewed', '--apply']
       : command === 'workflow-draft-import' ? [...workflowCommon, '--run', '--task', '--brief', '--file', '--apply']
+      : command === 'workflow-narrative-review' ? [...workflowCommon, '--run', '--apply']
       : command === 'workflow-image' ? [...workflowCommon, '--run', '--brief', '--apply']
       : command === 'workflow-image-import' ? [...workflowCommon, '--run', '--brief', '--file', '--handoff-sha256', '--apply']
       : command === 'workflow-art-review' ? [...workflowCommon, '--run', '--image', '--source', '--context-reviewed', '--apply']
@@ -148,6 +152,8 @@ function displayWorkflow(result, json, out) {
   if (result.provenance) out(`  provenance: ${result.provenance}\n`);
   if (result.verdict) out(`  art verdict: ${result.verdict}\n`);
   if (result.receiptPath) out(`  receipt: ${result.receiptPath}\n`);
+  if (result.narrativeReview?.verdict) out(`  narrative verdict: ${result.narrativeReview.verdict}\n`);
+  if (result.review?.verdict) out(`  narrative verdict: ${result.review.verdict}\n`);
   if (result.manualPacket?.skill === '$imagegen') {
     out('  imagegen: delegate to a separate Codex image-generator subagent inheriting the parent model\n');
     out('  subagent: invoke $imagegen using the source-bound packet; stop if delegation or skill is unavailable\n');
@@ -168,33 +174,89 @@ async function runDraftCommand(operation, flags, { out, devHost }) {
   const project = flags.get('--project');
   const options = { run: flags.get('--run'), taskKind: flags.get('--task'), brief: flags.get('--brief') };
   let result;
-  if (operation === 'draft-import') {
-    const preview = planDevDraftImport(project, { ...options, file: flags.get('--file') });
-    result = executeDevDraftImport(preview, { apply: flags.has('--apply') });
-  } else {
-    const sourceText = flags.get('--source');
-    const sources = sourceText === undefined ? [] : sourceText.split(';');
-    const context = { ...options, sources, contextReviewed: flags.has('--context-reviewed') };
-    const preview = planDevDraft(project, context);
-    if (!flags.has('--apply') || preview.status === 'BLOCKED') result = preview;
-    else {
-      const host = devHost();
-      if (!host || typeof host.probe !== 'function') result = preview;
+  let usedHost = null;
+  const maybeReview = async (draftResult, host) => {
+    if (!flags.has('--apply') || options.taskKind !== 'episode-script' ||
+        draftResult.status !== 'PENDING_REVIEW') return draftResult;
+    const initial = planNarrativeReview(project, { run: draftResult.runId });
+    if (initial.status === 'BLOCKED') return { ...draftResult, status: 'BLOCKED',
+      reasonCode: initial.reasonCode, narrativeReview: initial, nextAction: initial.nextAction };
+    if (!host || typeof host.probe !== 'function' || typeof host.turn !== 'function') {
+      return { ...draftResult, reasonCode: 'REVIEW_WEB_DEV_UNAVAILABLE', narrativeReview: initial,
+        nextAction: { kind: 'AWAIT_VERIFIED_REVIEWER', executable: false } };
+    }
+    let capability;
+    try { capability = await host.probe(); }
+    catch { return { ...draftResult, reasonCode: 'REVIEW_WEB_DEV_UNAVAILABLE', narrativeReview: initial,
+      nextAction: { kind: 'AWAIT_VERIFIED_REVIEWER', executable: false } }; }
+    const ready = planNarrativeReview(project, { run: draftResult.runId }, { discover: () => capability });
+    if (ready.status !== 'READY') return { ...draftResult,
+      status: ready.status === 'BLOCKED' ? 'BLOCKED' : draftResult.status,
+      reasonCode: ready.reasonCode, narrativeReview: ready, nextAction: ready.nextAction };
+    const reviewed = await executeNarrativeReview(ready, { apply: true, host });
+    return { ...draftResult, status: reviewed.status, narrativeReview: reviewed.review,
+      reviewProvenance: reviewed.provenance, nextAction: reviewed.nextAction };
+  };
+  try {
+    if (operation === 'draft-import') {
+      const preview = planDevDraftImport(project, { ...options, file: flags.get('--file') });
+      result = executeDevDraftImport(preview, { apply: flags.has('--apply') });
+      if (result.status === 'PENDING_REVIEW' && options.taskKind === 'episode-script') {
+        const preflight = planNarrativeReview(project, { run: result.runId });
+        if (preflight.status === 'BLOCKED') result = await maybeReview(result, null);
+        else {
+          usedHost = devHost();
+          result = await maybeReview(result, usedHost);
+        }
+      }
+    } else {
+      const sourceText = flags.get('--source');
+      const sources = sourceText === undefined ? [] : sourceText.split(';');
+      const context = { ...options, sources, contextReviewed: flags.has('--context-reviewed') };
+      const preview = planDevDraft(project, context);
+      if (!flags.has('--apply') || preview.status === 'BLOCKED') result = preview;
       else {
-        try {
+        const host = devHost();
+        usedHost = host;
+        if (!host || typeof host.probe !== 'function') result = preview;
+        else {
           const capability = await host.probe();
           const ready = planDevDraft(project, context, { discover: () => capability });
           result = await executeDevDraft(ready, { apply: true, host });
-        } finally {
-          if (typeof host.close === 'function') {
-            try { await host.close(); } catch { /* Result or pending state remains authoritative. */ }
-          }
+          result = await maybeReview(result, host);
         }
       }
     }
+  } finally {
+    if (typeof usedHost?.close === 'function') {
+      try { await usedHost.close(); } catch { /* Native journal state remains authoritative. */ }
+    }
   }
   displayWorkflow(result, flags.has('--json'), out);
-  return result.status === 'BLOCKED' || (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
+  return ['BLOCKED', 'REWORK'].includes(result.status) ||
+    (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
+}
+
+async function runNarrativeReviewCommand(flags, { out, devHost }) {
+  const project = flags.get('--project');
+  const options = { run: flags.get('--run') ?? 'latest' };
+  let result = planNarrativeReview(project, options);
+  if (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') {
+    const host = devHost();
+    try {
+      if (host && typeof host.probe === 'function') {
+        const capability = await host.probe();
+        const ready = planNarrativeReview(project, options, { discover: () => capability });
+        result = await executeNarrativeReview(ready, { apply: true, host });
+      }
+    } finally {
+      if (typeof host?.close === 'function') { try { await host.close(); } catch { /* recorded */ } }
+    }
+  }
+  displayWorkflow(result, flags.has('--json'), out);
+  return result.status === 'PENDING_RECOVERY' ? 3 :
+    ['BLOCKED', 'REWORK'].includes(result.status) ||
+    (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
 }
 
 async function runImageCommand(operation, flags, { out }) {
@@ -311,26 +373,41 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'workflow') {
       const [operation, ...args] = rest;
-      if (!['doctor', 'route', 'draft', 'draft-import', 'image', 'image-import', 'art-review', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
+      if (!['doctor', 'route', 'draft', 'draft-import', 'narrative-review', 'image', 'image-import', 'art-review', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
         throw new Error(`Unknown workflow operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`workflow-${operation}`, args);
       if (operation === 'draft' || operation === 'draft-import') {
         return runDraftCommand(operation, flags, { out, devHost }).catch(error => {
           let pending = false;
-          try { pending = operation === 'draft' && flags.has('--apply') &&
-            readNativeRun(flags.get('--project'), flags.get('--run')).pendingExecutor === 'web-dev'; }
+          try { const state = readNativeRun(flags.get('--project'), flags.get('--run'));
+            pending = flags.has('--apply') && (state.pendingExecutor === 'web-dev' ||
+              !!state.pendingNarrativeReview); }
           catch { /* Unavailable run is an ordinary failure, not verified uncertainty. */ }
           const result = pending ? {
             engine: 'ludory-ai', operation, status: 'PENDING_RECOVERY',
             project: flags.get('--project'), nativeStatus: 'WAITING_FOR_EVIDENCE',
             reasonCode: 'DEV_EXECUTION_OUTCOME_UNKNOWN', writes: [], conflicts: [],
-            warning: 'A DEV request may still be running. Stop/verify the old helper before workflow recover --confirm-no-executor --apply.',
+            warning: 'A DEV generation or narrative review may still be running. Stop/verify the old helper before workflow recover --confirm-no-executor --apply.',
             nextAction: { kind: 'CONFIRM_EXECUTOR_STOPPED', executable: false },
           } : { operation, status: 'FAILED', project: flags.get('--project'),
             writes: [], conflicts: [error.message] };
           if (flags.has('--json') || pending) displayWorkflow(result, flags.has('--json'), out);
           else err(`Ludory: ${error.message}\n`);
+          return pending ? 3 : 1;
+        });
+      }
+      if (operation === 'narrative-review') {
+        return runNarrativeReviewCommand(flags, { out, devHost }).catch(error => {
+          let pending = false;
+          try { pending = !!readNativeRun(flags.get('--project'), flags.get('--run')).pendingNarrativeReview; }
+          catch { /* No verified review request. */ }
+          const result = { engine: 'ludory-ai', operation, project: flags.get('--project'),
+            status: pending ? 'PENDING_RECOVERY' : 'FAILED', writes: [],
+            reasonCode: pending ? 'REVIEW_OUTCOME_UNKNOWN' : 'REVIEW_FAILED',
+            conflicts: pending ? [] : [error.message],
+            nextAction: { kind: pending ? 'CONFIRM_REVIEWER_STOPPED' : 'STOP', executable: false } };
+          displayWorkflow(result, flags.has('--json'), out);
           return pending ? 3 : 1;
         });
       }

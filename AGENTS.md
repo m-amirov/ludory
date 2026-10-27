@@ -30,6 +30,12 @@ LUDORY is a modular game-development toolkit. `@ludory/core` must remain platfor
 - The subagent returns the actual original PNG/JPEG/WebP path. The primary agent previews and runs `workflow image-import --handoff-sha256 <packet.handoffSha256> --apply` on the bound input, verifies the receipt, and arranges separate Web artistic review. Recompute the packet if any brief/run/source binding changed; never attribute an old image to a newer brief. Import is `USER_DECLARED`/`PENDING_REVIEW`, never proof of an agent call, model identity, art acceptance or release readiness.
 - For independent artistic assessment, use `workflow art-review --run RUN_ID --image <IMAGE_IMPORTED outputPath> --source 'scene:...;characters:...;location:...;style:...' --context-reviewed` to preview, then `--apply` only with an authenticated isolated DEV helper that attests actual image upload and selected `gpt-6-sol` Web. Review and hash the source files first; no unreviewed instructions, credentials or sensitive data should be sent externally. The unmodified upstream browser helper does not yet satisfy the required image attestation protocol: report `NEEDS_USER_ACTION`, do not substitute a text-only Web answer or another model. P0/P1 findings call for rework; P2-only notes are nonblocking. Stop and escalate after two REWORK receipts in one run; a regenerated candidate needs a new run. A host-observed `PASS_ART` is never rights, owner, platform or release PASS.
 
+## Narrative review (new Studio games only)
+
+- When working on an `episode-script`, scene graph or branching visual novel, use the repository-local `ludory-narrative-review` skill in `.agents/skills/`. StoryScope's corpus patterns are advisory and must not become quotas or an authorship detector.
+- A completed `episode-script` draft is submitted to an independent source/hash-bound Web DEV narrative reviewer automatically when the verified host is available. Preserve `NARRATIVE_REVIEW_REQUESTED` / `NARRATIVE_REVIEW_RESULT` receipts; timeouts remain pending until explicit recovery. Do not repeat a paid review silently.
+- `ACCEPT` is narrative readiness only; P0/P1 requires `REWORK`, unverified/missing evidence is `BLOCKED`; neither overrides release verification, player testing, rights review or the owner's integration decision.
+
 ## Git worktrees
 
 - Create every additional worktree inside the repository, exclusively under `D:\HardWork\LUDORY\.worktrees\<name>`.

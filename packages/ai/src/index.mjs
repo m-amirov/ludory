@@ -8,6 +8,7 @@ export { planImageTask, verifyImagePlan, executeImageTask, planImageImport, exec
 export { planArtReview, verifyArtReviewPlan, interpretArtReview, executeArtReview } from './art-review.mjs';
 export { planDevDraft, verifyDevDraftPlan, executeDevDraft,
   planDevDraftImport, executeDevDraftImport } from './draft-tasks.mjs';
+export { planNarrativeReview, executeNarrativeReview, parseNarrativeVerdict } from './narrative-review.mjs';
 export { planWorkflow, executeWorkflow } from './workflows.mjs';
 export { prepareCodexExecution, checkCodexAvailable, runCodexExecution, hasStudioCreationReceipt } from './executor.mjs';
 export { planTaskRoute } from './task-routing.mjs';
