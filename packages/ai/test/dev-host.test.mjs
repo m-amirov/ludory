@@ -446,3 +446,64 @@ test('visual DEV turn rejects helper without witnessed attachment support', asyn
     images: [{ ref: 'candidate', mimeType: 'image/png', bytes: payload,
       sha256: createHash('sha256').update(payload).digest('hex') }] }), /DEV_IMAGE_INPUT_UNVERIFIED/);
 });
+
+test('upstream browser_observation_v2 binds one trace to Sol model, upload proof and source bytes', async t => {
+  const payload = Buffer.from('upstream-v2-image');
+  const expectedHash = createHash('sha256').update(payload).digest('hex');
+  const script = `
+const readline = require('node:readline');
+const crypto = require('node:crypto');
+const send = value => process.stdout.write(JSON.stringify(value)+'\\n');
+send({type:'ready',features:['browser_observation_v2']});
+readline.createInterface({input:process.stdin}).on('line', line => {
+ const item=JSON.parse(line);
+ if(item.type==='inspect') send({type:'result',id:item.id,value:{authenticated:true,newChat:true,url:'https://chatgpt.com/',solAvailable:true,extraHighAvailable:false,proAvailable:true}});
+ if(item.type==='run') send({type:'event',id:item.id,event:'prepared_selected',reused:false});
+ if(item.type==='prepared_selected_ack') {
+  const image=item.prepared.images[0];
+  if(!image) { send({type:'event',id:item.id,event:'send_activated'}); return; }
+  const bytes=Buffer.from(image.imageUrl.split(',')[1],'base64');
+  const sha=crypto.createHash('sha256').update(bytes).digest('hex');
+  send({type:'event',id:item.id,event:'browser_observation_v2',observation:{version:2,traceId:item.id,source:'chatgpt-web-browser',
+    model:{canonicalId:'chatgpt-web/gpt-6-sol',backendModelId:'gpt-5.6-sol',family:'6',effort:'high',selectionLabel:'High'},
+    attachments:[{ref:image.ref,name:'candidate.png',mimeType:'image/png',sha256:sha,bytes:bytes.length,
+      upload:{creationRequestObserved:true,processingRequestObserved:true,processingRequestKind:'process_upload_stream',processingEvent:'file.processing.completed',processingCompleted:true,visibleAttachmentChip:true}}]}});
+  send({type:'event',id:item.id,event:'send_activated'});
+ }
+  if(item.type==='send_activation_ack') {
+    send({type:'event',id:item.id,event:'submitted'});
+    send({type:'event',id:item.id,event:'generation_progress'});
+    send({type:'event',id:item.id,event:'heartbeat'});
+    send({type:'result',id:item.id,text:'real browser response'});
+  }
+});`;
+  const { home, stableHome, root } = fixture(script);
+  const host = discoverDevHost({ devHome: home, stableHome });
+  cleanupHost(t, root, host);
+  const preflight = await host.probe();
+  assert.equal(preflight.browserObservationV2Available, true);
+  assert.equal(preflight.modelObserved, undefined);
+  const result = await host.turn({ prompt: 'source-bound visual task', taskId: 'art-review-v2',
+    images: [{ ref: 'candidate', mimeType: 'image/png', bytes: payload, sha256: expectedHash }] });
+  assert.equal(result.status, 'HOST_OBSERVED');
+  assert.equal(result.modelObserved, 'gpt-6-sol');
+  assert.equal(result.traceId, 'art-review-v2');
+  assert.equal(result.imageSha256, expectedHash);
+  assert.equal(result.imageBytes, payload.length);
+  assert.equal(result.hostObservation.protocolVersion, 2);
+  assert.equal(result.hostObservation.upload.processingCompleted, true);
+});
+
+test('upstream v2 refuses a missing attachment without sending', async t => {
+  const { home, stableHome, root } = fixture(`
+const readline = require('node:readline'); const send = value => process.stdout.write(JSON.stringify(value)+'\\n');
+send({type:'ready',features:['browser_observation_v2']}); readline.createInterface({input:process.stdin}).on('line', line => {
+ const item=JSON.parse(line); if(item.type==='inspect') send({type:'result',id:item.id,value:{authenticated:true,newChat:true,url:'https://chatgpt.com/',solAvailable:true}});
+ if(item.type==='run') send({type:'event',id:item.id,event:'prepared_selected',reused:false});
+ if(item.type==='prepared_selected_ack') send({type:'event',id:item.id,event:'send_activated'});
+});`);
+  const host = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 300 }); cleanupHost(t, root, host);
+  assert.equal((await host.probe()).available, true);
+  await assert.rejects(host.turn({ prompt: 'source-bound visual task', taskId: 'missing-image' }),
+    /DEV_BROWSER_OBSERVATION_UNVERIFIED/);
+});

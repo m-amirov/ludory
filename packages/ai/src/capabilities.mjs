@@ -21,6 +21,16 @@ export function ownData(record, key) {
 }
 
 function normalizeHost(record, kind) {
+  if (kind === 'webDev' && isRecord(record) && ownData(record, 'browserObservationV2Available') === true) {
+    if (ownData(record, 'available') !== true || ownData(record, 'reasonCode') !== 'AVAILABLE' ||
+        ownData(record, 'routeAvailable') !== 'web-dev' || ownData(record, 'modelRouteAvailable') !== 'chatgpt-web/gpt-6-sol' ||
+        ownData(record, 'reasoningRequired') !== 'high' || !isRecord(ownData(record, 'preflight'))) {
+      return unavailable('AI_ROUTING_WEB_OBSERVATION_V2_UNVERIFIED');
+    }
+    return { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
+      modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
+      reasoningRequired: 'high', preflight: ownData(record, 'preflight'), inspect: ownData(record, 'inspect') };
+  }
   const modelObserved = ownData(record, 'modelObserved');
   const available = ownData(record, 'available');
   if (!isRecord(record) || (available !== true && available !== false)) {

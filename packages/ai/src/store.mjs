@@ -601,10 +601,17 @@ export function readNativeArtReviews(projectDir, runRef) {
         receipt.provenance !== 'HOST_OBSERVED' || receipt.modelObserved !== 'gpt-6-sol' ||
         receipt.visualInputObserved !== true ||
         receipt.hostObservation?.protocolVersion !== 2 || receipt.hostObservation?.source !== 'browser-ui' ||
+        receipt.hostObservation?.traceId !== `art-${runId}` ||
         receipt.hostObservation?.selectedModel !== 'gpt-6-sol' || receipt.hostObservation?.reasoning !== 'high' ||
         receipt.hostObservation?.image?.ref !== receipt.image?.ref ||
         receipt.hostObservation?.image?.sha256 !== receipt.image?.sha256 ||
         receipt.hostObservation?.image?.bytes !== receipt.image?.size ||
+        receipt.hostObservation?.upload?.creationRequestObserved !== true ||
+        receipt.hostObservation?.upload?.processingRequestObserved !== true ||
+        !['process_upload_stream', 'claim_and_finish'].includes(receipt.hostObservation?.upload?.processingRequestKind) ||
+        receipt.hostObservation?.upload?.processingEvent !== 'file.processing.completed' ||
+        receipt.hostObservation?.upload?.processingCompleted !== true ||
+        receipt.hostObservation?.upload?.visibleAttachmentChip !== true ||
          !['PASS_ART', 'REWORK', 'BLOCKED'].includes(receipt.verdict) ||
         !['ART_REPORT_STRUCTURED', 'ART_IMAGE_NOT_VISIBLE', 'ART_REPORT_INVALID'].includes(receipt.reasonCode) ||
         !receipt.image || !/^[a-f0-9]{64}$/.test(receipt.image.sha256 ?? '') ||
@@ -627,10 +634,17 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
   if (!report || report.provenance !== 'HOST_OBSERVED' ||
       report.modelObserved !== 'gpt-6-sol' || report.visualInputObserved !== true ||
       report.hostObservation?.protocolVersion !== 2 || report.hostObservation?.source !== 'browser-ui' ||
+      report.hostObservation?.traceId !== `art-${runRef}` ||
       report.hostObservation?.selectedModel !== 'gpt-6-sol' || report.hostObservation?.reasoning !== 'high' ||
       report.hostObservation?.image?.ref !== report.image?.ref ||
       report.hostObservation?.image?.sha256 !== report.image?.sha256 ||
       report.hostObservation?.image?.bytes !== report.image?.size ||
+      report.hostObservation?.upload?.creationRequestObserved !== true ||
+      report.hostObservation?.upload?.processingRequestObserved !== true ||
+      !['process_upload_stream', 'claim_and_finish'].includes(report.hostObservation?.upload?.processingRequestKind) ||
+      report.hostObservation?.upload?.processingEvent !== 'file.processing.completed' ||
+      report.hostObservation?.upload?.processingCompleted !== true ||
+      report.hostObservation?.upload?.visibleAttachmentChip !== true ||
       !['PASS_ART', 'REWORK', 'BLOCKED'].includes(report.verdict) ||
       !['ART_REPORT_STRUCTURED', 'ART_IMAGE_NOT_VISIBLE', 'ART_REPORT_INVALID'].includes(report.reasonCode) ||
       typeof report.summary !== 'string' || report.summary.length > 3000 ||

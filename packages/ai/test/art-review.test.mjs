@@ -9,9 +9,10 @@ import { planImageTask, planImageImport, executeImageImport } from '../src/image
 import { planArtReview, verifyArtReviewPlan, interpretArtReview, executeArtReview } from '../src/art-review.mjs';
 
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
-const observedWeb = { available: true, reasonCode: 'AVAILABLE', transportVerified: true,
-  entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol',
-  imageInputVerified: true };
+const observedWeb = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
+  modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
+  reasoningRequired: 'high', preflight: { authenticated: true, newChat: true,
+    url: 'https://chatgpt.com/', solAvailable: true, extraHighAvailable: false, proAvailable: false } };
 
 function sources(project) {
   const inputs = [
@@ -60,9 +61,9 @@ test('art review requires explicit context and verified Web image route', async 
   assert.equal(planArtReview(item.project, { ...options(item), sources: item.source.slice(1) }, discovered).status, 'BLOCKED');
   assert.equal(planArtReview(item.project, options(item)).status, 'NEEDS_USER_ACTION');
   assert.equal(planArtReview(item.project, options(item),
-    { discover: () => ({ ...observedWeb, modelObserved: 'gpt-5.6-sol' }) }).status, 'NEEDS_USER_ACTION');
+    { discover: () => ({ ...observedWeb, modelRouteAvailable: 'chatgpt-web/gpt-5.6-sol' }) }).status, 'NEEDS_USER_ACTION');
   assert.equal(planArtReview(item.project, options(item),
-    { discover: () => ({ ...observedWeb, imageInputVerified: false }) }).status, 'NEEDS_USER_ACTION');
+    { discover: () => ({ ...observedWeb, browserObservationV2Available: false }) }).status, 'NEEDS_USER_ACTION');
 });
 
 test('art review refuses unimported candidates, image corruption, linked text and edited context before the host', async t => {
@@ -97,6 +98,8 @@ test('report parser computes P0/P1 rework and ignores P2 cosmetic polish for the
   }]), expected);
   assert.equal(major.verdict, 'REWORK');
   assert.equal(interpretArtReview(response([]).replace('"imageVisible":true', '"imageVisible":false'), expected).verdict, 'BLOCKED');
+  const escapedArray = response([]).replace('"findings":[]', '"findings":\\[\\]');
+  assert.equal(interpretArtReview(escapedArray, expected).verdict, 'PASS_ART');
   assert.equal(interpretArtReview(response([]).replace('a'.repeat(64), 'b'.repeat(64)), expected).verdict, 'BLOCKED');
   assert.equal(interpretArtReview('PASS. Looks great!', expected).verdict, 'BLOCKED');
   assert.equal(interpretArtReview(response([]).replace('"verdict":"PASS_ART"', '"verdict":"REWORK"'),
@@ -115,11 +118,13 @@ test('visual review passes only one attested imported image into independent Web
       assert.match(prompt, /characters/i);
       assert.equal(images.length, 1);
       assert.deepEqual(images[0].bytes, png);
-      return { status: 'HOST_OBSERVED', routeObserved: 'web-dev',
+      return { status: 'HOST_OBSERVED', routeObserved: 'web-dev', traceId: `art-${item.run}`,
         modelObserved: 'gpt-6-sol', imageInputObserved: true,
-        imageRef: images[0].ref, imageSha256: sha(png),
+        imageRef: images[0].ref, imageSha256: sha(png), imageBytes: images[0].bytes.length,
         hostObservation: { protocolVersion: 2, source: 'browser-ui', selectedModel: 'gpt-6-sol',
-          reasoning: 'high', image: { ref: images[0].ref, sha256: sha(png), bytes: images[0].bytes.length } },
+          reasoning: 'high', traceId: `art-${item.run}`, image: { ref: images[0].ref, sha256: sha(png), bytes: images[0].bytes.length },
+          upload: { creationRequestObserved: true, processingRequestObserved: true, processingRequestKind: 'process_upload_stream',
+            processingEvent: 'file.processing.completed', processingCompleted: true, visibleAttachmentChip: true } },
         text: JSON.stringify({ schemaVersion: 1, imageSha256: sha(png), imageVisible: true,
           verdict: 'PASS_ART', summary: 'No serious discrepancies.', findings: [] }) };
     },
@@ -134,9 +139,9 @@ test('art review blocks declared host fields without a matching browser observat
   const plan = planArtReview(item.project, options(item), discovered);
   const result = await executeArtReview(plan, { apply: true, host: {
     probe: async () => observedWeb,
-    turn: async ({ images }) => ({ status: 'HOST_OBSERVED', routeObserved: 'web-dev',
+    turn: async ({ images }) => ({ status: 'HOST_OBSERVED', routeObserved: 'web-dev', traceId: `art-${item.run}`,
       modelObserved: 'gpt-6-sol', imageInputObserved: true, imageRef: images[0].ref,
-      imageSha256: sha(png), text: JSON.stringify({ schemaVersion: 1, imageSha256: sha(png),
+      imageSha256: sha(png), imageBytes: images[0].bytes.length, text: JSON.stringify({ schemaVersion: 1, imageSha256: sha(png),
         imageVisible: true, verdict: 'PASS_ART', summary: 'Declared only.', findings: [] }) }),
   } });
   assert.equal(result.status, 'BLOCKED');

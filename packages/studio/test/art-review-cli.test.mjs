@@ -10,9 +10,10 @@ import { planImageTask, planImageImport, executeImageImport } from '../../ai/src
 import { readNativeArtReviews } from '../../ai/src/store.mjs';
 
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
-const capability = { available: true, reasonCode: 'AVAILABLE', transportVerified: true,
-  entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol',
-  imageInputVerified: true };
+const capability = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
+  modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
+  reasoningRequired: 'high', preflight: { authenticated: true, newChat: true,
+    url: 'https://chatgpt.com/', solAvailable: true, extraHighAvailable: false, proAvailable: false } };
 
 async function setup(t) {
   const { project, run } = game(t);
@@ -44,15 +45,17 @@ async function cli(args, injection = {}) {
 function host(verdict = 'PASS_ART', findings = [], mutate = () => {}) {
   let calls = 0;
   const instance = { probe: async () => capability, close: async () => {},
-    turn: async ({ images }) => {
+    turn: async ({ images, taskId }) => {
       calls++;
       assert.equal(images.length, 1);
       assert.deepEqual(images[0].bytes, png);
       mutate();
-      return { status: 'HOST_OBSERVED', routeObserved: 'web-dev', modelObserved: 'gpt-6-sol',
-        imageInputObserved: true, imageRef: images[0].ref, imageSha256: hash(png),
+      return { status: 'HOST_OBSERVED', routeObserved: 'web-dev', traceId: taskId, modelObserved: 'gpt-6-sol',
+        imageInputObserved: true, imageRef: images[0].ref, imageSha256: hash(png), imageBytes: images[0].bytes.length,
         hostObservation: { protocolVersion: 2, source: 'browser-ui', selectedModel: 'gpt-6-sol',
-          reasoning: 'high', image: { ref: images[0].ref, sha256: hash(png), bytes: images[0].bytes.length } },
+          reasoning: 'high', traceId: taskId, image: { ref: images[0].ref, sha256: hash(png), bytes: images[0].bytes.length },
+          upload: { creationRequestObserved: true, processingRequestObserved: true, processingRequestKind: 'process_upload_stream',
+            processingEvent: 'file.processing.completed', processingCompleted: true, visibleAttachmentChip: true } },
         text: JSON.stringify({ schemaVersion: 1, imageVisible: true, imageSha256: hash(png),
           verdict, summary: 'Independent scene inspection.', findings }) };
     } };
