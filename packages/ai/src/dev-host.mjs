@@ -125,7 +125,8 @@ function registeredHelper({ executableFile, scriptFile, home }) {
     if (!sameCanonical(script, expected)) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
   }
   const manifestFile = path.join(path.dirname(script), 'browser-helper.manifest.json');
-  const integrity = verifyHelperArtifact({ scriptFile: script, manifestFile, checkRuntime: true });
+  const integrity = verifyHelperArtifact({ scriptFile: script, manifestFile, checkRuntime: true,
+    requireTrustedV2: true });
   return { executable, script, manifestFile: integrity.manifestFile, integrity };
 }
 
@@ -253,6 +254,7 @@ class BrowserDevHost {
         scriptFile: this.descriptor.helper.script,
         manifestFile: this.descriptor.helper.manifestFile,
         checkRuntime: true,
+        requireTrustedV2: true,
       });
     } catch (error) {
       if (this.child) await this.close();

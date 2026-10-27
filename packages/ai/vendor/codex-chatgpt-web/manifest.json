@@ -23,7 +23,13 @@
   "runtime": {
     "launcher": "Codex Web GPT DEV launcher",
     "helperProcess": "Electron-as-Node supplied by the trusted launcher",
-    "externalRuntimePackages": "Resolved from the DEV profile runtime beside the helper; no stable Codex Web GPT files are replaced.",
+    "nodeModulesDir": "node_modules",
+    "externalRuntimePackages": "Vendored runtime tree is copied into the isolated DEV profile; no stable Codex Web GPT files are replaced.",
+    "tree": {
+      "files": 2217,
+      "bytes": 88160302,
+      "sha256": "ff0928d8053fb0f3e5e82459b1d9f0d3e25a0ac3caadb7e3751ce225fe562a2e"
+    },
     "requiredPackages": [
       { "name": "@mixmark-io/domino", "version": "2.2.0" },
       { "name": "playwright-core", "version": "1.62.0" },
