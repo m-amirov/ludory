@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { inspectNativeProject, verifyNativeSource, snapshotArtifact } from './source.mjs';
-import { readNativeRun, planNativeEvent, commitNativeEvent, commitNativeDraftArtifact,
+import { readNativeRun, episodeDraftOfRun, planNativeEvent, commitNativeEvent, commitNativeDraftArtifact,
   commitNativeManualDraftArtifact } from './store.mjs';
 import { hasStudioCreationReceipt } from './executor.mjs';
 import { isVerifiedCapability, ownData } from './capabilities.mjs';
@@ -80,6 +80,9 @@ export function planDevDraft(projectDir, options = {}, { discover = () => null }
   if (current.terminal || current.pendingExecutor ||
       !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status)) {
     return blocked(project, taskKind, run, 'DEV_RUN_NOT_ACTIVE');
+  }
+  if (taskKind === 'episode-script' && episodeDraftOfRun(current)) {
+    return blocked(project, taskKind, run, 'DEV_EPISODE_DRAFT_ALREADY_EXISTS');
   }
   const resolvedRun = current.run.runId;
   const selected = sources.map(file => {

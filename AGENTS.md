@@ -28,6 +28,12 @@ LUDORY is a modular game-development toolkit. `@ludory/core` must remain platfor
 - If agent delegation or the built-in skill is unavailable in the actual session, report `NEEDS_AGENT_ACTION` and stop. Do not fall back to an Images HTTP API, paid provider, guessed model or fabricated output.
 - The subagent returns the actual original PNG/JPEG/WebP path. The primary agent previews and runs `workflow image-import --handoff-sha256 <packet.handoffSha256> --apply` on the bound input, verifies the receipt, and arranges separate Web artistic review. Recompute the packet if any brief/run/source binding changed; never attribute an old image to a newer brief. Import is `USER_DECLARED`/`PENDING_REVIEW`, never proof of an agent call, model identity, art acceptance or release readiness.
 
+## Narrative review (new Studio games only)
+
+- When working on an `episode-script`, scene graph or branching visual novel, use the repository-local `ludory-narrative-review` skill in `.agents/skills/`. StoryScope's corpus patterns are advisory and must not become quotas or an authorship detector.
+- A completed `episode-script` draft is submitted to an independent source/hash-bound Web DEV narrative reviewer automatically when the verified host is available. Preserve `NARRATIVE_REVIEW_REQUESTED` / `NARRATIVE_REVIEW_RESULT` receipts; timeouts remain pending until explicit recovery. Do not repeat a paid review silently.
+- `ACCEPT` is narrative readiness only; P0/P1 requires `REWORK`, unverified/missing evidence is `BLOCKED`; neither overrides release verification, player testing, rights review or the owner's integration decision.
+
 ## Git worktrees
 
 - Create every additional worktree inside the repository, exclusively under `D:\HardWork\LUDORY\.worktrees\<name>`.
