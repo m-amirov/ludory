@@ -106,7 +106,9 @@ The previously completed Native ImageGen chain remains unchanged:
 - run: 2026-10-27T10-53-31-978Z-edc9a000ef9d;
 - handoff SHA-256:
   e11cef8deb579c8bd4574fbb4b4766c09bd1380903e44adecf7271c2f4f4eb36;
-- original: PNG, 1672x941, 2,717,426 bytes;
+- original: tmp/pr13-native-imagegen-e2e-20261027/art/native-imagegen-original.png;
+- original format and dimensions: PNG, 1672x941;
+- original size: 2,717,426 bytes;
 - original SHA-256:
   66eae8dfbe48ebda6c6002c18c1c15ed84c1d3065f5644efdc7c3335d79eeffb;
 - observed model: chatgpt-web/gpt-6-sol;
@@ -117,7 +119,7 @@ The previously completed Native ImageGen chain remains unchanged:
 
 Receipt:
 
-.ludory/ai/runs/2026-10-27T10-53-31-978Z-edc9a000ef9d/reviews/000001.json
+tmp/pr13-native-imagegen-e2e-20261027/.ludory/ai/runs/2026-10-27T10-53-31-978Z-edc9a000ef9d/reviews/000001.json
 
 Receipt SHA-256:
 73061a44f062a757377f531ed09e8d3447cb430d0e57fb6de95fce0bc75239b7
