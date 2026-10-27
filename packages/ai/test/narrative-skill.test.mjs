@@ -8,7 +8,10 @@ const read = name => fs.readFileSync(fileURLToPath(new URL(name, root)), 'utf8')
 
 test('Codex discovers a repo-local narrative skill with research-grounded, actionable guidance', () => {
   const skill = read('SKILL.md');
-  assert.match(skill, /^---\nname: ludory-narrative-review\ndescription: Use when /);
+  const frontmatter = /^---\r?\nname: ludory-narrative-review\r?\ndescription: Use when /;
+  assert.match(skill, frontmatter);
+  // Git checks out Markdown with CRLF on Windows, even though the blob uses LF.
+  assert.match(skill.replace(/\r?\n/g, '\r\n'), frontmatter);
   for (const trigger of ['episode-script', 'visual novel', 'branch', 'review']) assert.ok(skill.includes(trigger));
   for (const rule of ['NARRATIVE_REVIEW_REQUESTED', 'NARRATIVE_REVIEW_RESULT', 'REWORK',
     'BLOCKED', 'SHA-256', 'P0', 'P1', 'P2']) assert.ok(skill.includes(rule));
