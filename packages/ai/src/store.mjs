@@ -5,6 +5,7 @@ import { getPipeline, checkTransition } from './pipelines.mjs';
 import { inspectNativeProject, verifyNativeSource, snapshotArtifact } from './source.mjs';
 import { inspectGeneratedImage, readProjectImageInput } from './image-artifacts.mjs';
 import { canonicalPhysicalDirectory } from '@ludory/core';
+import { validateNarrativeVerdict } from './narrative-review-contract.mjs';
 
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const serial = value => `${JSON.stringify(value, null, 2)}\n`;
@@ -15,6 +16,7 @@ const EXECUTION_CODES = new Set(['EXECUTED_UNVERIFIED', 'EXECUTOR_INCOMPLETE', '
   'EXECUTOR_MALFORMED_JSONL', 'EXECUTOR_TURN_FAILED', 'EXECUTOR_WRAPPER_UNSUPPORTED',
   'EXECUTOR_INTERRUPTED', 'EXECUTOR_CHECKS_FAILED']);
 const DEV_TASKS = new Set(['episode-script', 'art-concept']);
+const REVIEW_CODES = new Set(['HOST_OBSERVED', 'REVIEW_RESPONSE_UNVERIFIED', 'REVIEW_INTERRUPTED']);
 const DEV_RESULT_CODES = new Set(['HOST_OBSERVED', 'DEV_EXECUTOR_UNVERIFIED', 'DEV_EXECUTOR_INTERRUPTED']);
 const DEV_MODEL = /^gpt-\d+(?:\.\d+)?-sol$/i;
 const IMAGE_MODEL = /^gpt-\d+(?:\.\d+)?-(?:terra|sol)$/i;
@@ -170,6 +172,79 @@ function validateManualImport(value, runId, index) {
   }
   return { taskKind: value.taskKind, provenance: 'USER_DECLARED', reviewStatus: 'PENDING_REVIEW',
     brief: { ...value.brief }, source: { ...value.source }, output: { ...value.output } };
+}
+
+function draftDescriptor(item) {
+  return { path: item.outputPath, sha256: item.outputSha256, size: item.outputSize };
+}
+
+/** Read the latest completed episode draft in a run; never infer an artifact from a filename. */
+export function episodeDraftOfRun(current) {
+  const events = current.events;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event.kind === 'DRAFT_IMPORTED' && event.manual.taskKind === 'episode-script') {
+      return { draft: draftDescriptor(event.manual.output), brief: event.manual.brief,
+        sources: [], taskKind: 'episode-script' };
+    }
+    if (event.kind === 'EXECUTION_RESULT' && event.result.ok &&
+        events[i - 1]?.kind === 'ACTION_REQUESTED' &&
+        events[i - 1].executor === 'web-dev' && events[i - 1].request.taskKind === 'episode-script') {
+      return { draft: draftDescriptor(event.result), brief: events[i - 1].request.brief,
+        sources: events[i - 1].request.sources, taskKind: 'episode-script' };
+    }
+  }
+  return null;
+}
+
+function reviewedEpisodeIsCurrent(current) {
+  const episode = episodeDraftOfRun(current);
+  return !episode || (current.narrativeReview?.verdict === 'ACCEPT' &&
+    current.narrativeReview.draftSha256 === episode.draft.sha256);
+}
+
+function validateNarrativeRequest(value, sourceDraft) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !== 'brief,draft,modelObserved,sources,taskKind' ||
+      value.taskKind !== 'episode-script' || value.modelObserved !== 'gpt-6-sol' ||
+      !sourceDraft || JSON.stringify(value) !== JSON.stringify({
+        taskKind: 'episode-script', modelObserved: 'gpt-6-sol',
+        draft: sourceDraft.draft, brief: sourceDraft.brief, sources: sourceDraft.sources,
+      })) throw new Error('NATIVE_REVIEW_REQUEST_INVALID');
+  return value;
+}
+
+function readBoundText(project, source) {
+  const snapshot = snapshotArtifact(project, source.path, { maxBytes: 256 * 1024 });
+  if (snapshot.sha256 !== source.sha256 || snapshot.size !== source.size) {
+    throw new Error('NATIVE_REVIEW_SOURCE_STALE');
+  }
+  const value = fs.readFileSync(path.join(project, ...source.path.split('/')));
+  if (sha256(value) !== source.sha256 || value.includes(0)) throw new Error('NATIVE_REVIEW_SOURCE_STALE');
+  return new TextDecoder('utf-8', { fatal: true }).decode(value);
+}
+
+function verifyNarrativeInputs(project, request) {
+  const draft = readBoundText(project, request.draft);
+  readBoundText(project, request.brief);
+  for (const source of request.sources) readBoundText(project, source);
+  return draft;
+}
+
+function validateNarrativeResult(value, request, draftText) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).sort().join(',') !== 'code,modelObserved,report' ||
+      !REVIEW_CODES.has(value.code) || !Object.hasOwn(value, 'modelObserved') ||
+      !Object.hasOwn(value, 'report')) throw new Error('NATIVE_REVIEW_RESULT_INVALID');
+  const trusted = value.code === 'HOST_OBSERVED';
+  if (value.modelObserved !== (trusted ? request.modelObserved : null)) {
+    throw new Error('NATIVE_REVIEW_RESULT_INVALID');
+  }
+  let report;
+  try { report = validateNarrativeVerdict(value.report, draftText, request.draft.sha256); }
+  catch { throw new Error('NATIVE_REVIEW_RESULT_INVALID'); }
+  if (!trusted && report.verdict !== 'BLOCKED') throw new Error('NATIVE_REVIEW_RESULT_INVALID');
+  return { code: value.code, modelObserved: value.modelObserved, report };
 }
 
 function verifyDraftInputs(project, files) {
@@ -457,6 +532,12 @@ export function readNativeRun(projectDir, runRef = 'latest') {
   let pendingImageRequest = null;
   const manualTaskKinds = new Set();
   let reviewPending = false;
+  let narrativeDraftPending = false;
+  let otherReviewPending = false;
+  let pendingNarrativeReview = null;
+  let pendingNarrativeRequest = null;
+  let priorNarrativeStatus = null;
+  let narrativeReview = null;
   let manualImageImported = false;
   const events = [];
   for (let index = 0; index < files.length / 2; index++) {
@@ -473,8 +554,16 @@ export function readNativeRun(projectDir, runRef = 'latest') {
     if (event.index !== index + 1 || event.prevSha256 !== precedingHash || event.stage !== next || terminal) {
       throw new Error('NATIVE_INTEGRITY_EVENT_CHAIN');
     }
+    if (pendingNarrativeReview && event.kind !== 'NARRATIVE_REVIEW_RESULT') {
+      throw new Error('NATIVE_INTEGRITY_REVIEW_PENDING');
+    }
     if (event.kind === 'CHECKPOINT') {
       if (pendingExecutor) throw new Error('NATIVE_INTEGRITY_EXECUTOR_PENDING_RESULT');
+      // Historical checkpoints stay readable; new narrative receipts must never approve an obsolete draft.
+      if (event.outcome === 'CONTINUE' && narrativeReview &&
+          !reviewedEpisodeIsCurrent({ events, narrativeReview })) {
+        throw new Error('NATIVE_INTEGRITY_REVIEW_DRAFT_MISMATCH');
+      }
       if (!Array.isArray(event.artifacts)) throw new Error('NATIVE_INTEGRITY_EVENT_ARTIFACTS');
       for (const artifact of event.artifacts) {
         // Hashes describe bytes at checkpoint time, not an eternal promise
@@ -531,7 +620,11 @@ export function readNativeRun(projectDir, runRef = 'latest') {
       }
       catch { throw new Error('NATIVE_INTEGRITY_EXECUTION_RESULT'); }
       status = event.result.ok ? 'EXECUTED_UNVERIFIED' : 'EXECUTION_FAILED';
-      if (['web-dev', 'image-gen'].includes(pendingExecutor) && event.result.ok) reviewPending = true;
+      if (event.result.ok && pendingExecutor === 'web-dev') {
+        if (pendingDevRequest.taskKind === 'episode-script') narrativeDraftPending = true;
+        else otherReviewPending = true;
+      } else if (event.result.ok && pendingExecutor === 'image-gen') otherReviewPending = true;
+      reviewPending = otherReviewPending || narrativeDraftPending;
       pendingExecutor = null;
       pendingRequestSha256 = null;
       pendingDevRequest = null;
@@ -546,7 +639,9 @@ export function readNativeRun(projectDir, runRef = 'latest') {
           throw new Error('NATIVE_MANUAL_DRAFT_CHANGED');
         }
         manualTaskKinds.add(imported.taskKind);
-        reviewPending = true;
+        if (imported.taskKind === 'episode-script') narrativeDraftPending = true;
+        else otherReviewPending = true;
+        reviewPending = otherReviewPending || narrativeDraftPending;
       } catch { throw new Error('NATIVE_INTEGRITY_DEV_MANUAL_IMPORT'); }
     } else if (event.kind === 'IMAGE_IMPORTED') {
       if (pendingExecutor || event.outcome !== null || event.artifacts?.length || manualImageImported) {
@@ -556,14 +651,48 @@ export function readNativeRun(projectDir, runRef = 'latest') {
         const imp = validateImageManualImport(event.manual, runId, event.index, { allowArchived: true });
         verifyStoredImage(project, runId, imp.output);
         manualImageImported = true;
+        otherReviewPending = true;
         reviewPending = true;
       } catch { throw new Error('NATIVE_INTEGRITY_IMAGE_IMPORT'); }
+    } else if (event.kind === 'NARRATIVE_REVIEW_REQUESTED') {
+      if (pendingExecutor || pendingNarrativeReview || narrativeReview || !narrativeDraftPending ||
+          event.outcome !== null || event.artifacts?.length) {
+        throw new Error('NATIVE_INTEGRITY_REVIEW_REQUEST');
+      }
+      try {
+        validateNarrativeRequest(event.review, episodeDraftOfRun({ events }));
+        const draft = snapshotArtifact(project, event.review.draft.path);
+        if (draft.sha256 !== event.review.draft.sha256 || draft.size !== event.review.draft.size) {
+          throw new Error('NATIVE_REVIEW_DRAFT_STALE');
+        }
+      } catch { throw new Error('NATIVE_INTEGRITY_REVIEW_REQUEST'); }
+      pendingNarrativeReview = sha256(bytes);
+      pendingNarrativeRequest = event.review;
+      priorNarrativeStatus = status;
+      status = 'NARRATIVE_REVIEW_PENDING';
+    } else if (event.kind === 'NARRATIVE_REVIEW_RESULT') {
+      if (!pendingNarrativeReview || event.reviewRequestSha256 !== pendingNarrativeReview ||
+          event.outcome !== null || event.artifacts?.length) {
+        throw new Error('NATIVE_INTEGRITY_REVIEW_RESULT');
+      }
+      try {
+        const draftText = readBoundText(project, pendingNarrativeRequest.draft);
+        const validated = validateNarrativeResult(event.reviewResult, pendingNarrativeRequest, draftText);
+        narrativeReview = validated.report;
+      } catch { throw new Error('NATIVE_INTEGRITY_REVIEW_RESULT'); }
+      pendingNarrativeReview = null;
+      pendingNarrativeRequest = null;
+      status = priorNarrativeStatus;
+      priorNarrativeStatus = null;
+      narrativeDraftPending = narrativeReview.verdict !== 'ACCEPT';
+      reviewPending = otherReviewPending || narrativeDraftPending;
     } else throw new Error('NATIVE_INTEGRITY_EVENT_KIND');
     precedingHash = sha256(bytes);
     events.push(event);
   }
   return { run, events, status, nextStage: next, terminal, headSha256: precedingHash,
-    pendingExecutor, pendingRequestSha256, reviewPending,
+    pendingExecutor, pendingRequestSha256, reviewPending, narrativeDraftPending, otherReviewPending,
+    pendingNarrativeReview, pendingNarrativeRequest, narrativeReview,
     integrity: { ok: true, issues: [] } };
 }
 
@@ -572,14 +701,23 @@ export function planNativeEvent(projectDir, runRef, input) {
   const current = readNativeRun(project, runRef);
   const source = inspectNativeProject(project);
   if (current.terminal) throw new Error('NATIVE_TERMINAL_RUN');
-  if (!input || !['CHECKPOINT', 'ACTION_REQUESTED', 'EXECUTION_RESULT', 'DRAFT_IMPORTED', 'IMAGE_IMPORTED'].includes(input.kind)) throw new Error('NATIVE_EVENT_KIND_INVALID');
+  if (!input || !['CHECKPOINT', 'ACTION_REQUESTED', 'EXECUTION_RESULT', 'DRAFT_IMPORTED',
+    'IMAGE_IMPORTED', 'NARRATIVE_REVIEW_REQUESTED', 'NARRATIVE_REVIEW_RESULT'].includes(input.kind)) {
+    throw new Error('NATIVE_EVENT_KIND_INVALID');
+  }
   if (input.stage !== current.nextStage) throw new Error(`NATIVE_INVALID_STAGE: expected ${current.nextStage}`);
   let artifacts = [];
   let outcome = null;
   let result = null;
   let manual = null;
+  if (current.pendingNarrativeReview && input.kind !== 'NARRATIVE_REVIEW_RESULT') {
+    throw new Error('NATIVE_NARRATIVE_REVIEW_PENDING');
+  }
   if (input.kind === 'CHECKPOINT') {
-    if (current.pendingExecutor) throw new Error('NATIVE_EXECUTOR_PENDING_RESULT');
+    if (current.pendingExecutor || current.pendingNarrativeReview) throw new Error('NATIVE_EXECUTOR_PENDING_RESULT');
+    if ((input.outcome ?? 'CONTINUE') === 'CONTINUE' && !reviewedEpisodeIsCurrent(current)) {
+      throw new Error('NATIVE_NARRATIVE_REVIEW_REQUIRED');
+    }
     if (!Array.isArray(input.artifacts)) throw new Error('NATIVE_ARTIFACTS_INVALID');
     artifacts = input.artifacts.map(relative => snapshotArtifact(project, relative));
     outcome = input.outcome ?? 'CONTINUE';
@@ -604,12 +742,26 @@ export function planNativeEvent(projectDir, runRef, input) {
     if (current.pendingExecutor === 'image-gen' && result.ok) for (const image of result.images) {
       verifyStoredImage(project, current.run.runId, image);
     }
+  } else if (input.kind === 'NARRATIVE_REVIEW_REQUESTED') {
+    if (current.pendingExecutor || current.pendingNarrativeReview || current.narrativeReview ||
+        !current.narrativeDraftPending) throw new Error('NATIVE_REVIEW_REQUEST_ALREADY_PENDING');
+    validateNarrativeRequest(input.review, episodeDraftOfRun(current));
+    verifyNarrativeInputs(project, input.review);
+  } else if (input.kind === 'NARRATIVE_REVIEW_RESULT') {
+    if (!current.pendingNarrativeReview || input.reviewRequestSha256 !== current.pendingNarrativeReview) {
+      throw new Error('NATIVE_REVIEW_RESULT_WITHOUT_REQUEST');
+    }
+    validateNarrativeResult(input.reviewResult, current.pendingNarrativeRequest,
+      readBoundText(project, current.pendingNarrativeRequest.draft));
   } else if (input.kind === 'IMAGE_IMPORTED') {
     if (current.pendingExecutor || !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status) ||
         current.events.some(event => event.kind === 'IMAGE_IMPORTED')) throw new Error('NATIVE_IMAGE_IMPORT_DUPLICATE');
     manual = validateImageManualImport(input.manual, current.run.runId, current.events.length + 1);
     verifyStoredImage(project, current.run.runId, manual.output);
   } else if (input.kind === 'DRAFT_IMPORTED') {
+    if (input.manual?.taskKind === 'episode-script' && episodeDraftOfRun(current)) {
+      throw new Error('NATIVE_NARRATIVE_DRAFT_ALREADY_EXISTS');
+    }
     if (current.pendingExecutor || !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status) ||
         current.events.some(event => event.kind === 'DRAFT_IMPORTED' &&
           event.manual.taskKind === input.manual?.taskKind)) throw new Error('NATIVE_DEV_MANUAL_IMPORT_DUPLICATE');
@@ -619,6 +771,8 @@ export function planNativeEvent(projectDir, runRef, input) {
       throw new Error('NATIVE_DEV_MANUAL_IMPORT_STALE');
     }
   } else {
+    if (input.executor === 'web-dev' && input.request?.taskKind === 'episode-script' &&
+        episodeDraftOfRun(current)) throw new Error('NATIVE_NARRATIVE_DRAFT_ALREADY_EXISTS');
     if (['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(current.status)) {
       throw new Error('NATIVE_ACTION_ALREADY_REQUESTED');
     }
@@ -637,6 +791,11 @@ export function planNativeEvent(projectDir, runRef, input) {
     if (input.executor === 'image-gen') event.request = validateImageRequest(input.request);
   }
   if (result) event.requestSha256 = current.pendingRequestSha256;
+  if (input.kind === 'NARRATIVE_REVIEW_REQUESTED') event.review = input.review;
+  if (input.kind === 'NARRATIVE_REVIEW_RESULT') {
+    event.reviewResult = input.reviewResult;
+    event.reviewRequestSha256 = current.pendingNarrativeReview;
+  }
   return { status: 'READY', kind: 'NATIVE_EVENT', project, runId: current.run.runId,
     source, expectedHeadSha256: current.headSha256, event,
     fingerprint: sha256(serial(event)), writes: [
@@ -663,11 +822,19 @@ export function commitNativeEvent(plan) {
     const current = readNativeRun(plan.project, plan.runId);
     if (current.headSha256 !== plan.expectedHeadSha256 ||
         current.nextStage !== plan.event.stage || plan.event.index !== current.events.length + 1 ||
+        (current.pendingNarrativeReview && plan.event.kind !== 'NARRATIVE_REVIEW_RESULT') ||
         (plan.event.kind === 'ACTION_REQUESTED' && ['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(current.status)) ||
-        (plan.event.kind === 'CHECKPOINT' && current.pendingExecutor) ||
+        (plan.event.kind === 'ACTION_REQUESTED' && plan.event.executor === 'web-dev' &&
+          plan.event.request?.taskKind === 'episode-script' && !!episodeDraftOfRun(current)) ||
+        (plan.event.kind === 'CHECKPOINT' && (current.pendingExecutor || current.pendingNarrativeReview ||
+          (plan.event.outcome === 'CONTINUE' && !reviewedEpisodeIsCurrent(current)))) ||
+        (plan.event.kind === 'DRAFT_IMPORTED' && plan.event.manual?.taskKind === 'episode-script' &&
+          !!episodeDraftOfRun(current)) ||
         (plan.event.kind === 'EXECUTION_RESULT' && (current.status !== 'WAITING_FOR_EVIDENCE' ||
           !['codex', 'web-dev', 'image-gen'].includes(current.pendingExecutor) ||
-          plan.event.requestSha256 !== current.pendingRequestSha256))) {
+          plan.event.requestSha256 !== current.pendingRequestSha256)) ||
+        (plan.event.kind === 'NARRATIVE_REVIEW_RESULT' &&
+          plan.event.reviewRequestSha256 !== current.pendingNarrativeReview)) {
       throw new Error('NATIVE_STALE_EVENT_CONFLICT');
     }
     const fresh = verifyNativeSource(plan.source);
@@ -716,6 +883,17 @@ export function commitNativeEvent(plan) {
     }
     if (plan.event.kind === 'ACTION_REQUESTED' && plan.event.executor === 'image-gen') {
       verifyDraftInputs(plan.project, [plan.event.request.brief]);
+    }
+    if (plan.event.kind === 'NARRATIVE_REVIEW_REQUESTED') {
+      if (current.pendingExecutor || current.pendingNarrativeReview || current.narrativeReview ||
+          !current.narrativeDraftPending) throw new Error('NATIVE_REVIEW_REQUEST_ALREADY_PENDING');
+      validateNarrativeRequest(plan.event.review, episodeDraftOfRun(current));
+      verifyNarrativeInputs(plan.project, plan.event.review);
+    }
+    if (plan.event.kind === 'NARRATIVE_REVIEW_RESULT') {
+      if (!current.pendingNarrativeReview) throw new Error('NATIVE_REVIEW_RESULT_WITHOUT_REQUEST');
+      validateNarrativeResult(plan.event.reviewResult, current.pendingNarrativeRequest,
+        readBoundText(plan.project, current.pendingNarrativeRequest.draft));
     }
     for (const artifact of plan.event.artifacts) {
       const snapshot = snapshotArtifact(plan.project, artifact.path);

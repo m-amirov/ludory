@@ -119,6 +119,8 @@ ownership. Profile application does not activate game-engine functionality.
 
 ## Native Ludory AI workflows through Studio
 
+The optional `narrative-game` profile can use a [StoryScope-inspired Codex narrative-review skill](.agents/skills/ludory-narrative-review/SKILL.md). For newly generated or imported `episode-script` drafts, Studio now requests a separate authenticated Web DEV review automatically after saving the draft. The reviewer checks canon, choices, routes and romantic arcs, stores evidence-bound `ACCEPT`/`REWORK`/`BLOCKED` results, and never declares release PASS or rewrites scenes automatically. Missing host leaves a pending review; interrupted review requires explicit stopped-helper recovery. See [Studio's narrative review workflow](packages/studio/README.md#automatic-narrative-review-storyscope-inspired).
+
 Studio invokes its own `@ludory/ai` workflow engine **without installing or invoking CEOS**. Native runs are stored under `.ludory/ai/`. A valid `ludory.project.json` is required; Git is optional during development. **Manual workflow commands** leave game code, assets and saves untouched; the explicit `--executor codex --apply` mode may edit game files. Native history remains readable after ordinary source edits, commits or relocating the game; API-level append-only checkpoint receipts record hashes from the time of each action (not cryptographic authentication against a privileged writer).
 
 ```sh

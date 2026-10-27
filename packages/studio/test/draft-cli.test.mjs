@@ -125,3 +125,92 @@ test('import rejects frozen game, unsafe file and route --apply remains read-onl
   assert.equal((await cli(['workflow', 'draft-import', '--project', frozen.project, '--run', frozen.run,
     '--task', 'art-concept', '--brief', 'episode.md', '--file', 'candidate.md', '--apply', '--json'])).code, 2);
 });
+
+test('episode-script generation automatically invokes an independent reviewer and preserves acceptance receipts', async t => {
+  const { project, run } = game(t);
+  let calls = 0;
+  const draft = 'S01 Maya trusts Leo. S02 He follows through with the harbor rescue.';
+  const auto = await cli(['workflow', 'draft', '--project', project, '--run', run,
+    '--task', 'episode-script', '--brief', 'episode.md', '--json', '--apply'], {
+    devHost: () => host(async ({ prompt }) => {
+      calls++;
+      if (calls === 1) return { status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
+        routeObserved: 'web-dev', text: draft };
+      assert.match(prompt, /INDEPENDENT narrative reviewer/);
+      return { status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', routeObserved: 'web-dev',
+        text: JSON.stringify({ schemaVersion: 1, draftSha256: hash(draft), verdict: 'ACCEPT',
+          summary: 'Continuity and choices agree with the brief.', findings: [] }) };
+    }),
+  });
+  assert.equal(auto.code, 0, auto.stderr);
+  assert.equal(auto.result.status, 'ACCEPTED');
+  assert.equal(calls, 2);
+  const state = readNativeRun(project, run);
+  assert.deepEqual(state.events.map(x => x.kind), ['ACTION_REQUESTED', 'EXECUTION_RESULT',
+    'NARRATIVE_REVIEW_REQUESTED', 'NARRATIVE_REVIEW_RESULT']);
+  assert.equal(state.narrativeReview.verdict, 'ACCEPT');
+  assert.equal((await cli(['workflow', 'next', '--project', project, '--run', run, '--json']))
+    .result.nextAction.kind, 'REVIEW_ACCEPTED_DRAFT');
+});
+
+test('manual episode import triggers automatic REWORK on grounded P1 evidence', async t => {
+  const { project, run } = game(t);
+  const draft = 'A new episode draft, awaiting review.';
+  const auto = await cli(['workflow', 'draft-import', '--project', project, '--run', run,
+    '--task', 'episode-script', '--brief', 'episode.md', '--file', 'candidate.md', '--json', '--apply'], {
+    devHost: () => host(async () => ({ status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
+      routeObserved: 'web-dev', text: JSON.stringify({ schemaVersion: 1,
+        draftSha256: hash(draft), verdict: 'REWORK', summary: 'Choice does not affect the route.',
+        findings: [{ severity: 'P1', category: 'choice', location: 'opening',
+          excerpt: 'A new episode draft', description: 'The choice is decorative.' }] }) })),
+  });
+  assert.equal(auto.code, 2);
+  assert.equal(auto.result.status, 'REWORK');
+  assert.equal(readNativeRun(project, run).narrativeReview.findings[0].severity, 'P1');
+});
+
+test('episode import without a verified reviewer retains PENDING_REVIEW and the separate review command stays read-only in preview', async t => {
+  const { project, run } = game(t);
+  const args = ['workflow', 'draft-import', '--project', project, '--run', run,
+    '--task', 'episode-script', '--brief', 'episode.md', '--file', 'candidate.md', '--json', '--apply'];
+  const imported = await cli(args, { devHost: () => ({ available: false }) });
+  assert.equal(imported.result.status, 'PENDING_REVIEW');
+  assert.equal(imported.result.narrativeReview.status, 'NEEDS_USER_ACTION');
+  assert.equal(readNativeRun(project, run).events.length, 1);
+  const preview = await cli(['workflow', 'narrative-review', '--project', project, '--run', run, '--json'], {
+    devHost: () => { throw new Error('preview must not touch Web DEV'); },
+  });
+  assert.equal(preview.result.status, 'NEEDS_USER_ACTION');
+  assert.equal(readNativeRun(project, run).events.length, 1);
+});
+
+test('automatic review reports an overlarge prompt as BLOCKED before launching the helper', async t => {
+  const { project, run } = game(t);
+  fs.writeFileSync(path.join(project, 'candidate.md'), `S01 Maya thinks. ${'x'.repeat(67_000)}`);
+  let launches = 0;
+  const result = await cli(['workflow', 'draft-import', '--project', project, '--run', run,
+    '--task', 'episode-script', '--brief', 'episode.md', '--file', 'candidate.md', '--json', '--apply'], {
+    devHost: () => { launches++; return host(async () => { throw new Error('should not turn'); }); },
+  });
+  assert.equal(result.code, 2);
+  assert.equal(result.result.status, 'BLOCKED');
+  assert.equal(result.result.reasonCode, 'REVIEW_PROMPT_TOO_LARGE');
+  assert.equal(launches, 0);
+  assert.equal(readNativeRun(project, run).events.length, 1);
+});
+
+test('review timeout exposes pending recovery and never automatically repeats the reviewer', async t => {
+  const { project, run } = game(t);
+  let turns = 0;
+  const result = await cli(['workflow', 'draft-import', '--project', project, '--run', run,
+    '--task', 'episode-script', '--brief', 'episode.md', '--file', 'candidate.md', '--json', '--apply'], {
+    devHost: () => host(async () => { turns++; throw new Error('DEV_HELPER_TIMEOUT'); }),
+  });
+  assert.equal(result.code, 3);
+  assert.equal(result.result.status, 'PENDING_RECOVERY');
+  assert.equal(turns, 1);
+  assert.equal(readNativeRun(project, run).pendingNarrativeReview !== null, true);
+  const blocked = await cli(['workflow', 'narrative-review', '--project', project, '--run', run,
+    '--json', '--apply'], { devHost: () => { throw new Error('no retry'); } });
+  assert.equal(blocked.result.status, 'PENDING_RECOVERY');
+});
