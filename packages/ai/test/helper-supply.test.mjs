@@ -11,7 +11,8 @@ function profileFixture() {
   const home = path.join(root, 'dev');
   const stableHome = path.join(root, 'stable');
   const runtime = path.join(home, 'runtime');
-  const launcher = path.join(root, 'launcher', 'Codex Web GPT.exe');
+  const launcher = path.join(root, 'launcher',
+    process.platform === 'win32' ? 'Codex Web GPT.exe' : 'codex-web-gpt');
   fs.mkdirSync(runtime, { recursive: true });
   fs.mkdirSync(path.dirname(launcher), { recursive: true });
   fs.copyFileSync(process.execPath, launcher);
