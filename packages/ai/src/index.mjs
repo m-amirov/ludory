@@ -2,9 +2,11 @@ export { getPipeline, nextStage, checkTransition } from './pipelines.mjs';
 export { inspectNativeProject, verifyNativeSource, snapshotArtifact } from './source.mjs';
 export { planNewRun, commitNewRun, readNativeRun, listNativeRuns, planNativeEvent, commitNativeEvent } from './store.mjs';
 export { discoverDevHost } from './dev-host.mjs';
+export { verifyHelperArtifact, readVendoredHelperManifest, installVendoredDevHelper } from './helper-supply.mjs';
 export { discoverImageHost, validateImageCapability } from './image-host.mjs';
 export { inspectGeneratedImage, decodeGeneratedImage } from './image-artifacts.mjs';
 export { planImageTask, verifyImagePlan, executeImageTask, planImageImport, executeImageImport } from './image-tasks.mjs';
+export { planArtReview, verifyArtReviewPlan, interpretArtReview, executeArtReview } from './art-review.mjs';
 export { planDevDraft, verifyDevDraftPlan, executeDevDraft,
   planDevDraftImport, executeDevDraftImport } from './draft-tasks.mjs';
 export { planNarrativeReview, executeNarrativeReview, parseNarrativeVerdict } from './narrative-review.mjs';

@@ -86,6 +86,11 @@ export async function planImageTask(projectDir, options = {}, { discover = async
       manualPacket: { taskKind: 'image', runId: current.run.runId, handoffSha256,
         skill: '$imagegen', mode: 'built-in', modelSelection: 'provider-default',
         qualityPreference: 'highest-available',
+        executionContract: { schemaVersion: 1, authority: 'codex-native-session',
+          ceosChallenge: 'NOT_REQUIRED_BY_LUDORY',
+          externalMandatoryPolicy: 'STOP_ON_CONFLICT',
+          toolInvocation: 'AGENT_OBSERVED_REQUIRED',
+          importProvenance: 'USER_DECLARED' },
         agent: { role: 'image-generator', executor: 'codex-subagent',
           model: 'inherit-parent', requiredSkill: '$imagegen' },
         prompt: `Create a production-quality game illustration faithful to the following approved art brief. ` +
@@ -96,7 +101,8 @@ export async function planImageTask(projectDir, options = {}, { discover = async
         steps: ['The primary agent must delegate this packet to a separate Codex subagent with the parent model; stop without generating if delegation or its skill is unavailable.',
           'In the image-generator subagent, invoke the built-in $imagegen skill with this prompt and project references.',
           'Save the original generated PNG/JPEG/WebP into the project as a relative path.',
-          'Return the output path to the primary agent; it runs ludory workflow image-import with --handoff-sha256 from this packet and --apply, then requests independent review.'],
+          'Return the output path to the primary agent; it runs ludory workflow image-import with --handoff-sha256 from this packet and --apply, then requests independent review.',
+          'Use the Codex-native image workflow, not the legacy CEOS production-art skill, CEOS project manifest or CEOS capability challenge. Ludory does not require them. If an independently mandatory active session policy conflicts, stop and report that policy instead of bypassing it.'],
         output: 'PNG/JPEG/WebP originals for explicit review; do not claim release or host-attested model PASS' },
       nextAction: { kind: 'SPAWN_IMAGE_AGENT', executable: false,
         agentRole: 'image-generator', model: 'inherit-parent' } };

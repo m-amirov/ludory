@@ -20,6 +20,14 @@ test('unselected image model creates a source-bound Codex ImageGen skill handoff
   assert.equal(plan.manualPacket.mode, 'built-in');
   assert.equal(plan.manualPacket.modelSelection, 'provider-default');
   assert.equal(plan.manualPacket.qualityPreference, 'highest-available');
+  assert.deepEqual(plan.manualPacket.executionContract, {
+    schemaVersion: 1,
+    authority: 'codex-native-session',
+    ceosChallenge: 'NOT_REQUIRED_BY_LUDORY',
+    externalMandatoryPolicy: 'STOP_ON_CONFLICT',
+    toolInvocation: 'AGENT_OBSERVED_REQUIRED',
+    importProvenance: 'USER_DECLARED',
+  });
   assert.deepEqual(plan.manualPacket.agent, {
     role: 'image-generator', executor: 'codex-subagent', model: 'inherit-parent',
     requiredSkill: '$imagegen',

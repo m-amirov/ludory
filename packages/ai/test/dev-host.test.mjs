@@ -4,27 +4,48 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { discoverDevHost } from '../src/dev-host.mjs';
 
-function fixture(helperSource, mutate = () => {}) {
+function fixture(helperSource, mutate = () => {}, { trustedV2 = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-dev-host-'));
   const home = path.join(root, 'dev');
   const stableHome = path.join(root, 'stable');
   const runtime = path.join(home, 'runtime');
   fs.mkdirSync(runtime, { recursive: true });
-  const script = path.join(runtime, 'helper.cjs');
-  fs.writeFileSync(script, helperSource);
+  const script = path.join(runtime, 'browser-helper.cjs');
+  const manifestFile = path.join(runtime, 'browser-helper.manifest.json');
+  let manifest;
+  if (trustedV2) {
+    fs.copyFileSync(path.resolve('packages/ai/vendor/codex-chatgpt-web/browser-helper.cjs'), script);
+    fs.copyFileSync(path.resolve('packages/ai/vendor/codex-chatgpt-web/manifest.json'), manifestFile);
+    fs.cpSync(path.resolve('packages/ai/vendor/codex-chatgpt-web/node_modules'),
+      path.join(runtime, 'node_modules'), { recursive: true });
+    manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+  } else {
+    fs.writeFileSync(script, helperSource);
+    const helperBytes = fs.readFileSync(script);
+    manifest = {
+      schemaVersion: 1,
+      distribution: 'test-fixture',
+      artifact: { file: path.basename(script), bytes: helperBytes.length,
+        sha256: createHash('sha256').update(helperBytes).digest('hex') },
+      protocol: { kind: 'compatibility-v1', features: [] },
+    };
+  }
   const descriptor = {
     profile: 'development', kind: 'codex-web-gpt-launcher',
     helper: { executable: process.execPath, script },
   };
-  mutate(descriptor);
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
+  mutate(descriptor, { root, home, stableHome, runtime, script }, manifest);
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
   fs.writeFileSync(path.join(runtime, 'launcher-browser.json'), JSON.stringify(descriptor));
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
     version: 3, releaseVersion: '6.1.11', mode: 'browser-only',
     browserHostDescriptorPath: path.join(runtime, 'launcher-browser.json'),
   }));
-  return { home, stableHome, root };
+  return { home, stableHome, root, spawnSource: trustedV2 ? helperSource : null };
 }
 
 const helper = ({ observed = true, submit = true } = {}) => `
@@ -80,6 +101,71 @@ test('descriptor cannot redirect helper execution outside the isolated DEV home'
   const unsafe = discoverDevHost({ devHome: home, stableHome });
   assert.equal(unsafe.available, false);
   assert.equal(unsafe.reasonCode, 'DEV_DESCRIPTOR_UNTRUSTED');
+});
+
+test('officially registered launcher helper may live beside the installed Codex Web GPT executable', async t => {
+  const previous = process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+  const { home, stableHome, root } = fixture(helper(), (descriptor, paths) => {
+    const install = path.join(paths.root, 'Codex Web GPT');
+    const registeredScript = path.join(install, 'resources', 'runtime', 'app', 'browser-helper.cjs');
+    const registeredExecutable = path.join(install,
+      process.platform === 'win32' ? 'Codex Web GPT.exe' : 'codex-web-gpt');
+    fs.mkdirSync(path.dirname(registeredScript), { recursive: true });
+    fs.copyFileSync(process.execPath, registeredExecutable);
+    fs.copyFileSync(paths.script, registeredScript);
+    fs.copyFileSync(path.join(paths.runtime, 'browser-helper.manifest.json'),
+      path.join(path.dirname(registeredScript), 'browser-helper.manifest.json'));
+    descriptor.helper = { executable: registeredExecutable, script: registeredScript };
+    process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = registeredExecutable;
+  });
+  t.after(() => {
+    if (previous === undefined) delete process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+    else process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = previous;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const host = discoverDevHost({ devHome: home, stableHome });
+  assert.equal(typeof host.probe, 'function');
+  await host.close();
+});
+
+test('manifestless compatibility-v1 profile is blocked before execution and exact artifact SHA-256 is required', t => {
+  const missing = fixture(helper());
+  fs.rmSync(path.join(missing.home, 'runtime', 'browser-helper.manifest.json'));
+  t.after(() => fs.rmSync(missing.root, { recursive: true, force: true }));
+  let spawned = false;
+  const missingHost = discoverDevHost({ devHome: missing.home, stableHome: missing.stableHome,
+    spawnImpl: () => { spawned = true; throw new Error('manifestless profile must not spawn'); } });
+  assert.equal(missingHost.available, false);
+  assert.equal(missingHost.reasonCode, 'DEV_HELPER_MANIFEST_MISSING');
+  assert.equal(spawned, false);
+
+  const wrong = fixture(helper(), (_descriptor, _paths, manifest) => {
+    manifest.artifact.sha256 = '0'.repeat(64);
+  });
+  t.after(() => fs.rmSync(wrong.root, { recursive: true, force: true }));
+  const wrongHost = discoverDevHost({ devHome: wrong.home, stableHome: wrong.stableHome });
+  assert.equal(wrongHost.available, false);
+  assert.equal(wrongHost.reasonCode, 'DEV_HELPER_HASH_MISMATCH');
+});
+
+test('helper integrity is rechecked after discovery before every launch', async t => {
+  const { home, stableHome, root } = fixture(helper());
+  const host = discoverDevHost({ devHome: home, stableHome });
+  cleanupHost(t, root, host);
+  fs.appendFileSync(path.join(home, 'runtime', 'browser-helper.cjs'), '\n// replaced after installation\n');
+  const result = await host.probe();
+  assert.equal(result.available, false);
+  assert.equal(result.reasonCode, 'DEV_HELPER_HASH_MISMATCH');
+});
+
+test('non-vendored v2 helper is rejected before the ready handshake', async t => {
+  const { home, stableHome, root } = fixture(helper(), (_descriptor, _paths, manifest) => {
+    manifest.protocol = { kind: 'browser-observation-v2', features: ['browser_observation_v2'] };
+  });
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const host = discoverDevHost({ devHome: home, stableHome });
+  assert.equal(host.available, false);
+  assert.equal(host.reasonCode, 'DEV_HELPER_ARTIFACT_UNTRUSTED');
 });
 
 test('DEV symlink alias to Stable or symlinked ancestor is rejected without spawning', t => {
@@ -326,4 +412,162 @@ rl.createInterface({input:process.stdin}).on('line', line => {
       /DEV_HELPER_/);
     else assert.equal(cap.available, false);
   }
+});
+
+test('visual DEV turn submits the exact binary and requires a witnessed image receipt', async t => {
+  const payload = Buffer.from('fixture-image-binary-not-rendered');
+  const expectedHash = createHash('sha256').update(payload).digest('hex');
+  const script = `
+const readline = require('node:readline');
+const crypto = require('node:crypto');
+const send = value => process.stdout.write(JSON.stringify(value)+'\\n');
+send({type:'ready',protocolVersion:1});
+let observed;
+readline.createInterface({input:process.stdin}).on('line', line => {
+ const item=JSON.parse(line);
+ if(item.type==='capabilities') send({type:'capabilities',id:item.id,
+  transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',
+  modelObserved:'gpt-6-sol',localToolsEnabled:false,imageInputVerified:true});
+ if(item.type==='run') send({type:'event',id:item.id,event:'prepared_selected'});
+ if(item.type==='prepared_selected_ack') {
+  const image=item.prepared.images[0];
+  if(!image || image.detail!=='high' || !image.imageUrl.startsWith('data:image/png;base64,')) process.exit(7);
+  const bytes=Buffer.from(image.imageUrl.split(',')[1],'base64');
+  observed={ref:image.ref,sha256:crypto.createHash('sha256').update(bytes).digest('hex'),bytes:bytes.length};
+  send({type:'event',id:item.id,event:'image_attached',imageRef:observed.ref,imageSha256:observed.sha256,
+   hostObservation:{protocolVersion:2,source:'browser-ui',selectedModel:'gpt-6-sol',reasoning:'high',image:observed}});
+  send({type:'event',id:item.id,event:'send_activated'});
+ }
+ if(item.type==='send_activation_ack') {
+  send({type:'event',id:item.id,event:'submitted'});
+  send({type:'result',id:item.id,text:'review payload',transportVerified:true,
+   entitlementVerified:true,routeObserved:'web-dev',modelObserved:'gpt-6-sol',
+   localToolsEnabled:false,imageInputObserved:true,imageRef:observed.ref,imageSha256:observed.sha256,
+   hostObservation:{protocolVersion:2,source:'browser-ui',selectedModel:'gpt-6-sol',reasoning:'high',image:observed}});
+ }
+});`;
+  const { home, stableHome, root } = fixture(script);
+  const host = discoverDevHost({ devHome: home, stableHome });
+  cleanupHost(t, root, host);
+  assert.equal((await host.probe()).imageInputVerified, true);
+  const result = await host.turn({ prompt: 'source-bound visual task', taskId: 'art-review-1',
+    images: [{ ref: 'candidate-1', mimeType: 'image/png', bytes: payload, sha256: expectedHash }] });
+  assert.equal(result.imageInputObserved, true);
+  assert.equal(result.imageSha256, expectedHash);
+  assert.equal(result.imageRef, 'candidate-1');
+  assert.equal(result.modelObserved, 'gpt-6-sol');
+  assert.deepEqual(result.hostObservation, { protocolVersion: 2, source: 'browser-ui',
+    selectedModel: 'gpt-6-sol', reasoning: 'high', image: { ref: 'candidate-1',
+      sha256: expectedHash, bytes: payload.length } });
+});
+
+test('visual DEV turn rejects declared model and image fields without browser observation', async t => {
+  const payload = Buffer.from('declared-but-not-browser-observed');
+  const expectedHash = createHash('sha256').update(payload).digest('hex');
+  const script = `
+const readline = require('node:readline');
+const crypto = require('node:crypto');
+const send = value => process.stdout.write(JSON.stringify(value)+'\\n');
+send({type:'ready',protocolVersion:1});
+let observed;
+readline.createInterface({input:process.stdin}).on('line', line => {
+ const item=JSON.parse(line);
+ if(item.type==='capabilities') send({type:'capabilities',id:item.id,
+  transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',
+  modelObserved:'gpt-6-sol',localToolsEnabled:false,imageInputVerified:true});
+ if(item.type==='run') send({type:'event',id:item.id,event:'prepared_selected'});
+ if(item.type==='prepared_selected_ack') {
+  const image=item.prepared.images[0];
+  observed={ref:image.ref,sha256:crypto.createHash('sha256').update(Buffer.from(image.imageUrl.split(',')[1],'base64')).digest('hex')};
+  send({type:'event',id:item.id,event:'image_attached',imageRef:observed.ref,imageSha256:observed.sha256});
+  send({type:'event',id:item.id,event:'send_activated'});
+ }
+ if(item.type==='send_activation_ack') {
+  send({type:'event',id:item.id,event:'submitted'});
+  send({type:'result',id:item.id,text:'declared-only',transportVerified:true,
+   entitlementVerified:true,routeObserved:'web-dev',modelObserved:'gpt-6-sol',
+   localToolsEnabled:false,imageInputObserved:true,imageRef:observed.ref,imageSha256:observed.sha256});
+ }
+});`;
+  const { home, stableHome, root } = fixture(script);
+  const host = discoverDevHost({ devHome: home, stableHome });
+  cleanupHost(t, root, host);
+  await host.probe();
+  await assert.rejects(host.turn({ prompt: 'source-bound visual task', taskId: 'art-review-observation',
+    images: [{ ref: 'candidate-1', mimeType: 'image/png', bytes: payload, sha256: expectedHash }] }),
+  /DEV_BROWSER_OBSERVATION_UNVERIFIED/);
+});
+
+test('visual DEV turn rejects helper without witnessed attachment support', async t => {
+  const { home, stableHome, root } = fixture(helper());
+  const host = discoverDevHost({ devHome: home, stableHome });
+  cleanupHost(t, root, host);
+  assert.equal((await host.probe()).available, true);
+  const payload = Buffer.from('image');
+  await assert.rejects(host.turn({ prompt: 'visual', taskId: 'needs-image',
+    images: [{ ref: 'candidate', mimeType: 'image/png', bytes: payload,
+      sha256: createHash('sha256').update(payload).digest('hex') }] }), /DEV_IMAGE_INPUT_UNVERIFIED/);
+});
+
+test('upstream browser_observation_v2 binds one trace to Sol model, upload proof and source bytes', async t => {
+  const payload = Buffer.from('upstream-v2-image');
+  const expectedHash = createHash('sha256').update(payload).digest('hex');
+  const script = `
+const readline = require('node:readline');
+const crypto = require('node:crypto');
+const send = value => process.stdout.write(JSON.stringify(value)+'\\n');
+send({type:'ready',features:['browser_observation_v2']});
+readline.createInterface({input:process.stdin}).on('line', line => {
+ const item=JSON.parse(line);
+ if(item.type==='inspect') send({type:'result',id:item.id,value:{authenticated:true,newChat:true,url:'https://chatgpt.com/',solAvailable:true,extraHighAvailable:false,proAvailable:true}});
+ if(item.type==='run') send({type:'event',id:item.id,event:'prepared_selected',reused:false});
+ if(item.type==='prepared_selected_ack') {
+  const image=item.prepared.images[0];
+  if(!image) { send({type:'event',id:item.id,event:'send_activated'}); return; }
+  const bytes=Buffer.from(image.imageUrl.split(',')[1],'base64');
+  const sha=crypto.createHash('sha256').update(bytes).digest('hex');
+  send({type:'event',id:item.id,event:'browser_observation_v2',observation:{version:2,traceId:item.id,source:'chatgpt-web-browser',
+    model:{canonicalId:'chatgpt-web/gpt-6-sol',backendModelId:'gpt-5.6-sol',family:'6',effort:'high',selectionLabel:'High'},
+    attachments:[{ref:image.ref,name:'candidate.png',mimeType:'image/png',sha256:sha,bytes:bytes.length,
+      upload:{creationRequestObserved:true,processingRequestObserved:true,processingRequestKind:'process_upload_stream',processingEvent:'file.processing.completed',processingCompleted:true,visibleAttachmentChip:true}}]}});
+  send({type:'event',id:item.id,event:'send_activated'});
+ }
+  if(item.type==='send_activation_ack') {
+    send({type:'event',id:item.id,event:'submitted'});
+    send({type:'event',id:item.id,event:'generation_progress'});
+    send({type:'event',id:item.id,event:'heartbeat'});
+    send({type:'result',id:item.id,text:'real browser response'});
+  }
+});`;
+  const { home, stableHome, root, spawnSource } = fixture(script, () => {}, { trustedV2: true });
+  const host = discoverDevHost({ devHome: home, stableHome,
+    spawnImpl: (exe, args, options) => spawn(process.execPath, ['-e', spawnSource], options) });
+  cleanupHost(t, root, host);
+  const preflight = await host.probe();
+  assert.equal(preflight.browserObservationV2Available, true);
+  assert.equal(preflight.modelObserved, undefined);
+  const result = await host.turn({ prompt: 'source-bound visual task', taskId: 'art-review-v2',
+    images: [{ ref: 'candidate', mimeType: 'image/png', bytes: payload, sha256: expectedHash }] });
+  assert.equal(result.status, 'HOST_OBSERVED');
+  assert.equal(result.modelObserved, 'gpt-6-sol');
+  assert.equal(result.traceId, 'art-review-v2');
+  assert.equal(result.imageSha256, expectedHash);
+  assert.equal(result.imageBytes, payload.length);
+  assert.equal(result.hostObservation.protocolVersion, 2);
+  assert.equal(result.hostObservation.upload.processingCompleted, true);
+});
+
+test('upstream v2 refuses a missing attachment without sending', async t => {
+  const { home, stableHome, root, spawnSource } = fixture(`
+const readline = require('node:readline'); const send = value => process.stdout.write(JSON.stringify(value)+'\\n');
+send({type:'ready',features:['browser_observation_v2']}); readline.createInterface({input:process.stdin}).on('line', line => {
+ const item=JSON.parse(line); if(item.type==='inspect') send({type:'result',id:item.id,value:{authenticated:true,newChat:true,url:'https://chatgpt.com/',solAvailable:true}});
+ if(item.type==='run') send({type:'event',id:item.id,event:'prepared_selected',reused:false});
+ if(item.type==='prepared_selected_ack') send({type:'event',id:item.id,event:'send_activated'});
+ });`, () => {}, { trustedV2: true });
+  const host = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 300,
+    spawnImpl: (exe, args, options) => spawn(process.execPath, ['-e', spawnSource], options) }); cleanupHost(t, root, host);
+  assert.equal((await host.probe()).available, true);
+  await assert.rejects(host.turn({ prompt: 'source-bound visual task', taskId: 'missing-image' }),
+    /DEV_BROWSER_OBSERVATION_UNVERIFIED/);
 });
