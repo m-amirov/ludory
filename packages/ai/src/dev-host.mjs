@@ -81,14 +81,14 @@ function standardLauncherExecutables() {
         candidates.push(path.join(root, 'Programs', 'Codex Web GPT', 'Codex Web GPT.exe'));
       }
     }
-    if (typeof process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE === 'string' &&
-        process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE.trim()) {
-      candidates.push(process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE.trim());
-    }
   } else if (process.platform === 'darwin') {
     candidates.push('/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT');
   } else {
     candidates.push(path.join(os.homedir(), '.local', 'bin', 'codex-web-gpt'));
+  }
+  if (typeof process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE === 'string' &&
+      process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE.trim()) {
+    candidates.push(process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE.trim());
   }
   return candidates;
 }
