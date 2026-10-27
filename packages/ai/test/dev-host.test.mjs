@@ -88,7 +88,8 @@ test('officially registered launcher helper may live beside the installed Codex 
   const { home, stableHome, root } = fixture(helper(), (descriptor, paths) => {
     const install = path.join(paths.root, 'Codex Web GPT');
     const registeredScript = path.join(install, 'resources', 'runtime', 'app', 'browser-helper.cjs');
-    const registeredExecutable = path.join(install, 'Codex Web GPT.exe');
+    const registeredExecutable = path.join(install,
+      process.platform === 'win32' ? 'Codex Web GPT.exe' : 'codex-web-gpt');
     fs.mkdirSync(path.dirname(registeredScript), { recursive: true });
     fs.copyFileSync(process.execPath, registeredExecutable);
     fs.copyFileSync(paths.script, registeredScript);
