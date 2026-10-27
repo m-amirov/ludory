@@ -62,6 +62,11 @@ run-scoped trusted Codex gate production-art, а не к runtime Ludory. Ludory
 `$imagegen`. Подробный разбор границ и воспроизводимости helper-а находится в
 [evidence audit](../../evidence/pr13-imagegen-capability-helper-supply-2026-10-27.md).
 
+Свежий re-check на HEAD `1ac3a84` сохранён в [capability re-check
+evidence](../../evidence/pr13-imagegen-capability-recheck-2026-10-27.md):
+результат остаётся `BLOCKED_SESSION_CONTEXT_UNVERIFIED`, без вызова ImageGen
+и без фиктивного output.
+
 ImageGen не вызывался и синтетический output/receipt не создавался. Для
 закрытия этого gate нужна новая доверенная Codex-сессия с доступным native
 ImageGen и успешным run-scoped capability challenge; после этого требуется
