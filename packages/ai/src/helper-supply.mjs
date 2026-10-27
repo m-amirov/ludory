@@ -63,6 +63,10 @@ function digestJson(value) {
   return createHash('sha256').update(JSON.stringify(stableJson(value))).digest('hex');
 }
 
+function comparePathBytes(left, right) {
+  return Buffer.from(left, 'utf8').compare(Buffer.from(right, 'utf8'));
+}
+
 function validateManifest(manifest, artifactFile) {
   const artifact = manifest.artifact;
   const protocol = manifest.protocol;
@@ -77,7 +81,8 @@ function validateManifest(manifest, artifactFile) {
       !Array.isArray(protocol.features) || protocol.features.some(feature => typeof feature !== 'string') ||
        (manifest.distribution === 'ludory-vendored-prebuilt' &&
         (!manifest.runtime || manifest.runtime.nodeModulesDir !== 'node_modules' ||
-         !runtimeTree || !Number.isSafeInteger(runtimeTree.files) || runtimeTree.files < 1 ||
+         !runtimeTree || runtimeTree.order !== 'utf8-byte-lexicographic' ||
+         !Number.isSafeInteger(runtimeTree.files) || runtimeTree.files < 1 ||
          !Number.isSafeInteger(runtimeTree.bytes) || runtimeTree.bytes < 1 ||
          typeof runtimeTree.sha256 !== 'string' || !SHA256.test(runtimeTree.sha256) ||
          !Array.isArray(requiredPackages) || requiredPackages.some(packageInfo =>
@@ -121,7 +126,7 @@ function runtimeTreeSummary(nodeModules) {
     }
   };
   visit(nodeModules, '');
-  entries.sort((a, b) => a.path.localeCompare(b.path));
+  entries.sort((a, b) => comparePathBytes(a.path, b.path));
   const digest = createHash('sha256');
   let bytes = 0;
   for (const entry of entries) {

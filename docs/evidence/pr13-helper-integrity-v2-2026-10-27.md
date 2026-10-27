@@ -41,9 +41,10 @@ are not replaced.
 - feature: `browser_observation_v2`;
 - runtime files: `2217`;
 - runtime bytes: `88160302`;
-- runtime tree SHA-256: `ff0928d8053fb0f3e5e82459b1d9f0d3e25a0ac3caadb7e3751ce225fe562a2e`.
+- runtime tree SHA-256: `3da4d490af2996bb7a04625fe8fa3f76b1fbb0dd72e93fc4533b6e05ee157d20`.
 
-The runtime tree contains the six required packages pinned in
+The runtime tree digest uses UTF-8 byte lexicographic path ordering, independent
+of the host locale. It contains the six required packages pinned in
 `manifest.json`: `@mixmark-io/domino@2.2.0`, `playwright-core@1.62.0`,
 `tiktoken@1.0.22`, `turndown@7.2.0`, `turndown-plugin-gfm@1.0.2` and
 `zod@4.6.6`. Upstream MIT terms and dependency notices remain in
@@ -52,7 +53,7 @@ under `source/`.
 
 ## Regression evidence
 
-Focused helper and DEV-host tests: **28/28 PASS**.
+Focused helper and DEV-host tests: **29/29 PASS**.
 
 The focused set covers:
 
@@ -60,8 +61,10 @@ The focused set covers:
 - missing manifest and wrong helper SHA: blocked;
 - runtime executable file changed after installation: blocked;
 - incomplete pre-existing runtime tree: blocked;
+- runtime tree digest remains stable when locale comparison order changes;
 - clean DEV profile receives the complete vendored runtime tree;
 - non-vendored v2 helper: blocked before the ready handshake;
+- manifestless compatibility-v1 profile: blocked before execution;
 - compatibility-v1 text route remains available;
 - compatibility-v1 visual route remains ineligible for Art Acceptance;
 - valid v2 handshake and observed upload protocol remain covered.
@@ -77,7 +80,7 @@ rehashed as:
 - helper SHA-256: `c126dd6b268cb9a9e6923215a1082de70b6b607ad9f31ab75415278dd683b4a7`;
 - runtime files: `2217`;
 - runtime bytes: `88160302`;
-- runtime tree SHA-256: `ff0928d8053fb0f3e5e82459b1d9f0d3e25a0ac3caadb7e3751ce225fe562a2e`.
+- runtime tree SHA-256: `3da4d490af2996bb7a04625fe8fa3f76b1fbb0dd72e93fc4533b6e05ee157d20`.
 
 The subsequent live preflight observed:
 
@@ -93,6 +96,12 @@ The subsequent live preflight observed:
 | preflight | `AVAILABLE` |
 
 No compatibility-v1 fallback was used for visual acceptance.
+
+An old compatibility-v1 DEV profile without `browser-helper.manifest.json` is
+intentionally unsupported and fails with `DEV_HELPER_MANIFEST_MISSING` before
+spawn. The supported transition is `helper install --json` followed by
+`helper install --apply --json` in the same isolated DEV profile; this installs
+the vendored v2 helper and verified runtime tree while leaving Stable untouched.
 
 ## Existing Native ImageGen E2E
 

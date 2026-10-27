@@ -128,13 +128,16 @@ test('officially registered launcher helper may live beside the installed Codex 
   await host.close();
 });
 
-test('helper integrity requires a manifest and exact artifact SHA-256', t => {
+test('manifestless compatibility-v1 profile is blocked before execution and exact artifact SHA-256 is required', t => {
   const missing = fixture(helper());
   fs.rmSync(path.join(missing.home, 'runtime', 'browser-helper.manifest.json'));
   t.after(() => fs.rmSync(missing.root, { recursive: true, force: true }));
-  const missingHost = discoverDevHost({ devHome: missing.home, stableHome: missing.stableHome });
+  let spawned = false;
+  const missingHost = discoverDevHost({ devHome: missing.home, stableHome: missing.stableHome,
+    spawnImpl: () => { spawned = true; throw new Error('manifestless profile must not spawn'); } });
   assert.equal(missingHost.available, false);
   assert.equal(missingHost.reasonCode, 'DEV_HELPER_MANIFEST_MISSING');
+  assert.equal(spawned, false);
 
   const wrong = fixture(helper(), (_descriptor, _paths, manifest) => {
     manifest.artifact.sha256 = '0'.repeat(64);

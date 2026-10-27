@@ -39,13 +39,60 @@ test('vendored manifest pins the patched v2 artifact and source provenance', () 
   assert.deepEqual(manifest.upstream.commits, ['83135a5', 'a8199d9']);
   assert.deepEqual(manifest.protocol.features, ['browser_observation_v2']);
   assert.equal(manifest.build.byteReproducible, false);
+  assert.equal(manifest.runtime.tree.order, 'utf8-byte-lexicographic');
   assert.ok(manifest.runtime.tree.files > 0);
   assert.ok(manifest.runtime.tree.bytes > 0);
-  assert.match(manifest.runtime.tree.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(manifest.runtime.tree.sha256, '3da4d490af2996bb7a04625fe8fa3f76b1fbb0dd72e93fc4533b6e05ee157d20');
   assert.equal(verifyHelperArtifact({
     scriptFile: path.resolve('packages/ai/vendor/codex-chatgpt-web/browser-helper.cjs'),
     manifestFile: path.resolve('packages/ai/vendor/codex-chatgpt-web/manifest.json'),
   }).sha256, manifest.artifact.sha256);
+});
+
+test('runtime tree digest is independent of locale comparison order', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-helper-locale-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const script = path.join(root, 'browser-helper.cjs');
+  const manifestFile = path.join(root, 'browser-helper.manifest.json');
+  const nodeModules = path.join(root, 'node_modules');
+  fs.mkdirSync(nodeModules, { recursive: true });
+  fs.writeFileSync(script, 'module.exports = {};\n');
+  fs.writeFileSync(path.join(nodeModules, 'ä.txt'), 'umlaut');
+  fs.writeFileSync(path.join(nodeModules, 'z.txt'), 'zulu');
+
+  const runtimeEntries = ['ä.txt', 'z.txt'].map(file => {
+    const bytes = fs.readFileSync(path.join(nodeModules, file));
+    return { path: file, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  }).sort((a, b) => Buffer.from(a.path).compare(Buffer.from(b.path)));
+  const runtimeDigest = createHash('sha256');
+  for (const entry of runtimeEntries) runtimeDigest.update(`${entry.path}\0${entry.bytes}\0${entry.sha256}\n`);
+  const helperBytes = fs.readFileSync(script);
+  fs.writeFileSync(manifestFile, JSON.stringify({
+    schemaVersion: 1,
+    distribution: 'test-fixture',
+    artifact: { file: path.basename(script), bytes: helperBytes.length,
+      sha256: createHash('sha256').update(helperBytes).digest('hex') },
+    runtime: { nodeModulesDir: 'node_modules', tree: {
+      files: runtimeEntries.length, bytes: runtimeEntries.reduce((sum, entry) => sum + entry.bytes, 0),
+      sha256: runtimeDigest.digest('hex'),
+    } },
+    protocol: { kind: 'compatibility-v1', features: [] },
+  }));
+
+  const originalLocaleCompare = String.prototype.localeCompare;
+  t.after(() => { String.prototype.localeCompare = originalLocaleCompare; });
+  for (const localeOrder of ['umlaut-first', 'z-first']) {
+    String.prototype.localeCompare = function localeSensitiveOrder(other, ...args) {
+      const left = String(this);
+      const right = String(other);
+      if ((left === 'ä.txt' && right === 'z.txt') || (left === 'z.txt' && right === 'ä.txt')) {
+        const umlautFirst = localeOrder === 'umlaut-first';
+        return left === 'ä.txt' ? (umlautFirst ? -1 : 1) : (umlautFirst ? 1 : -1);
+      }
+      return originalLocaleCompare.call(this, other, ...args);
+    };
+    assert.doesNotThrow(() => verifyHelperArtifact({ scriptFile: script, manifestFile, checkRuntime: true }), localeOrder);
+  }
 });
 
 test('v2 rejects a helper and local manifest changed together', t => {
