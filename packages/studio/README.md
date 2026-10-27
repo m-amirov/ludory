@@ -300,7 +300,10 @@ may evaluate the image. Ludory passes the **actual PNG/JPEG/WebP bytes**, max
 SHA-256 on the final result. The compatibility helper must emit `ready` with
 `protocolVersion: 1`, a verified `capabilities` frame including
 `imageInputVerified: true`, and those attachment observations from its browser
-worker. **The upstream unmodified `codex-chatgpt-web` browser helper currently
+worker. For a visual receipt, the attachment event and result must additionally
+carry the same `hostObservation` protocol v2: browser-selected `gpt-6-sol` with
+`reasoning: high`, plus the attached ref, SHA-256 and byte length. Requested
+model settings and helper declarations are not observations. **The upstream unmodified `codex-chatgpt-web` browser helper currently
 does not supply that complete Ludory attestation protocol.** Its binary-image
 support alone does not satisfy the gate. An incompatible/older helper yields
 `NEEDS_USER_ACTION` or `BLOCKED`: a real Codex + DEV Web smoke is required after

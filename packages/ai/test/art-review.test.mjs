@@ -118,6 +118,8 @@ test('visual review passes only one attested imported image into independent Web
       return { status: 'HOST_OBSERVED', routeObserved: 'web-dev',
         modelObserved: 'gpt-6-sol', imageInputObserved: true,
         imageRef: images[0].ref, imageSha256: sha(png),
+        hostObservation: { protocolVersion: 2, source: 'browser-ui', selectedModel: 'gpt-6-sol',
+          reasoning: 'high', image: { ref: images[0].ref, sha256: sha(png), bytes: images[0].bytes.length } },
         text: JSON.stringify({ schemaVersion: 1, imageSha256: sha(png), imageVisible: true,
           verdict: 'PASS_ART', summary: 'No serious discrepancies.', findings: [] }) };
     },
@@ -125,4 +127,18 @@ test('visual review passes only one attested imported image into independent Web
   assert.equal(result.verdict, 'PASS_ART');
   assert.equal(result.provenance, 'HOST_OBSERVED');
   assert.equal(calls, 1);
+});
+
+test('art review blocks declared host fields without a matching browser observation', async t => {
+  const item = await imported(t);
+  const plan = planArtReview(item.project, options(item), discovered);
+  const result = await executeArtReview(plan, { apply: true, host: {
+    probe: async () => observedWeb,
+    turn: async ({ images }) => ({ status: 'HOST_OBSERVED', routeObserved: 'web-dev',
+      modelObserved: 'gpt-6-sol', imageInputObserved: true, imageRef: images[0].ref,
+      imageSha256: sha(png), text: JSON.stringify({ schemaVersion: 1, imageSha256: sha(png),
+        imageVisible: true, verdict: 'PASS_ART', summary: 'Declared only.', findings: [] }) }),
+  } });
+  assert.equal(result.status, 'BLOCKED');
+  assert.equal(result.reasonCode, 'ART_VISUAL_ATTESTATION_MISSING');
 });

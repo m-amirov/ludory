@@ -61,6 +61,61 @@ function safeFile(file, base) {
   return real;
 }
 
+function safeExecutable(file) {
+  if (typeof file !== 'string' || !path.isAbsolute(file)) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
+  try {
+    const initial = fs.lstatSync(file);
+    if (!initial.isFile() || initial.isSymbolicLink()) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
+    const real = fs.realpathSync.native(file);
+    const resolved = fs.lstatSync(real);
+    if (!resolved.isFile() || resolved.isSymbolicLink()) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
+    return real;
+  } catch { throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED'); }
+}
+
+function standardLauncherExecutables() {
+  const candidates = [];
+  if (process.platform === 'win32') {
+    for (const root of [process.env.LOCALAPPDATA, process.env.ProgramFiles, process.env['ProgramFiles(x86)']]) {
+      if (typeof root === 'string' && root.trim()) {
+        candidates.push(path.join(root, 'Programs', 'Codex Web GPT', 'Codex Web GPT.exe'));
+      }
+    }
+    if (typeof process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE === 'string' &&
+        process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE.trim()) {
+      candidates.push(process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE.trim());
+    }
+  } else if (process.platform === 'darwin') {
+    candidates.push('/Applications/Codex Web GPT.app/Contents/MacOS/Codex Web GPT');
+  } else {
+    candidates.push(path.join(os.homedir(), '.local', 'bin', 'codex-web-gpt'));
+  }
+  return candidates;
+}
+
+function isStandardLauncherExecutable(executable) {
+  if (path.basename(executable).toLowerCase() !==
+      (process.platform === 'win32' ? 'codex web gpt.exe' : 'codex-web-gpt')) return false;
+  let real;
+  try { real = fs.realpathSync.native(executable); } catch { return false; }
+  return standardLauncherExecutables().some(candidate => {
+    try { return sameCanonical(real, fs.realpathSync.native(candidate)); }
+    catch { return false; }
+  });
+}
+
+function registeredHelper({ executableFile, scriptFile, home }) {
+  const executable = safeExecutable(executableFile);
+  const script = safeFile(scriptFile);
+  const profile = canonicalPhysicalDirectory(home);
+  const relative = path.relative(profile, script);
+  if (!relative.startsWith('..') && !path.isAbsolute(relative)) return { executable, script };
+  if (!isStandardLauncherExecutable(executable)) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
+  const expected = path.join(path.dirname(executable), 'resources', 'runtime', 'app', 'browser-helper.cjs');
+  if (!sameCanonical(script, expected)) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
+  return { executable, script };
+}
+
 function readProfileJson(file, base) {
   safeFile(file, base);
   if (fs.statSync(file).size > MAX_PROFILE_BYTES) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
@@ -98,6 +153,17 @@ function validatedImages(images) {
     throw errorWithCode('DEV_IMAGE_INPUT_INVALID');
   }
   return [{ ref: image.ref, mimeType: image.mimeType, bytes, sha256: image.sha256 }];
+}
+
+function observedBrowserAttachment(value, image) {
+  const attachment = ownData(value, 'image');
+  if (ownData(value, 'protocolVersion') !== 2 || ownData(value, 'source') !== 'browser-ui' ||
+      ownData(value, 'selectedModel') !== WEB_DEV_MODEL || ownData(value, 'reasoning') !== 'high' ||
+      !attachment || typeof attachment !== 'object' || Array.isArray(attachment) ||
+      ownData(attachment, 'ref') !== image.ref || ownData(attachment, 'sha256') !== image.sha256 ||
+      ownData(attachment, 'bytes') !== image.bytes.length) return null;
+  return { protocolVersion: 2, source: 'browser-ui', selectedModel: WEB_DEV_MODEL,
+    reasoning: 'high', image: { ref: image.ref, sha256: image.sha256, bytes: image.bytes.length } };
 }
 
 function isolatedHelperEnv(home) {
@@ -231,7 +297,12 @@ class BrowserDevHost {
           pending.images?.length === 1 && pending.imageAcknowledged !== true &&
           ownData(message, 'imageRef') === pending.images[0].ref &&
           ownData(message, 'imageSha256') === pending.images[0].sha256) {
-        pending.imageAcknowledged = true;
+        const observation = observedBrowserAttachment(ownData(message, 'hostObservation'), pending.images[0]);
+        if (!observation) this.rejectPending(id, 'DEV_BROWSER_OBSERVATION_UNVERIFIED');
+        else {
+          pending.imageAcknowledged = true;
+          pending.hostObservation = observation;
+        }
       } else if (event === 'send_activated' && pending.phase === 'AWAIT_ACTIVATED') {
         pending.phase = 'ACTIVATION_ACK_PENDING';
         void this.send({ type: 'send_activation_ack', id }).then(() => {
@@ -253,7 +324,13 @@ class BrowserDevHost {
     if (type === 'capabilities' && pending.kind === 'probe') this.resolvePending(id, message);
     else if (type === 'result' && pending.kind === 'run') {
       if (pending.phase !== 'SUBMITTED') this.rejectPending(id, 'DEV_HELPER_PROTOCOL_INVALID');
-      else this.resolvePending(id, { ...message, submitted: true });
+      else if (pending.images?.length) {
+        const resultObservation = observedBrowserAttachment(ownData(message, 'hostObservation'), pending.images[0]);
+        if (!pending.hostObservation || !resultObservation ||
+            JSON.stringify(resultObservation) !== JSON.stringify(pending.hostObservation)) {
+          this.rejectPending(id, 'DEV_BROWSER_OBSERVATION_UNVERIFIED');
+        } else this.resolvePending(id, { ...message, submitted: true, hostObservation: pending.hostObservation });
+      } else this.resolvePending(id, { ...message, submitted: true });
     }
     else if (type === 'error') this.rejectPending(id, 'DEV_HELPER_REJECTED');
   }
@@ -338,7 +415,9 @@ class BrowserDevHost {
       }
       if (visualInputs.length && (ownData(response, 'imageInputObserved') !== true ||
           ownData(response, 'imageRef') !== visualInputs[0].ref ||
-          ownData(response, 'imageSha256') !== visualInputs[0].sha256)) {
+          ownData(response, 'imageSha256') !== visualInputs[0].sha256 ||
+          JSON.stringify(ownData(response, 'hostObservation')) !== JSON.stringify(
+            observedBrowserAttachment(ownData(response, 'hostObservation'), visualInputs[0])))) {
         throw errorWithCode('DEV_IMAGE_INPUT_UNVERIFIED');
       }
       if (typeof response.text !== 'string' || !response.text.trim() ||
@@ -346,7 +425,8 @@ class BrowserDevHost {
       return { status: 'HOST_OBSERVED', text: response.text,
         modelObserved: observation.modelObserved, routeObserved: 'web-dev',
         ...(visualInputs.length && { imageInputObserved: true,
-          imageRef: visualInputs[0].ref, imageSha256: visualInputs[0].sha256 }) };
+          imageRef: visualInputs[0].ref, imageSha256: visualInputs[0].sha256,
+          hostObservation: observedBrowserAttachment(ownData(response, 'hostObservation'), visualInputs[0]) }) };
     } catch (error) {
       await this.close();
       throw error;
@@ -395,9 +475,9 @@ spawnImpl = spawn, startupTimeoutMs = 15_000, probeTimeoutMs = 3_000, turnTimeou
     const descriptor = readProfileJson(descriptorPath, home);
     if (descriptor.profile !== 'development' || descriptor.kind !== 'codex-web-gpt-launcher' ||
         !descriptor.helper || typeof descriptor.helper !== 'object') return unavailable('DEV_DESCRIPTOR_UNTRUSTED');
-    const executable = safeFile(descriptor.helper.executable);
-    const script = safeFile(descriptor.helper.script, home);
-    return new BrowserDevHost({ home, descriptor: { helper: { executable, script } }, spawnImpl,
+    const helper = registeredHelper({ executableFile: descriptor.helper.executable,
+      scriptFile: descriptor.helper.script, home });
+    return new BrowserDevHost({ home, descriptor: { helper }, spawnImpl,
       startupTimeoutMs, probeTimeoutMs, turnTimeoutMs });
   } catch (error) {
     return unavailable(['DEV_DESCRIPTOR_UNTRUSTED', 'DEV_PROFILE_NOT_ISOLATED'].includes(error.code)

@@ -51,6 +51,8 @@ function host(verdict = 'PASS_ART', findings = [], mutate = () => {}) {
       mutate();
       return { status: 'HOST_OBSERVED', routeObserved: 'web-dev', modelObserved: 'gpt-6-sol',
         imageInputObserved: true, imageRef: images[0].ref, imageSha256: hash(png),
+        hostObservation: { protocolVersion: 2, source: 'browser-ui', selectedModel: 'gpt-6-sol',
+          reasoning: 'high', image: { ref: images[0].ref, sha256: hash(png), bytes: images[0].bytes.length } },
         text: JSON.stringify({ schemaVersion: 1, imageVisible: true, imageSha256: hash(png),
           verdict, summary: 'Independent scene inspection.', findings }) };
     } };

@@ -167,6 +167,13 @@ export function verifyArtReviewPlan(plan) {
 const blockedReport = code => ({ verdict: 'BLOCKED', findings: [],
   summary: 'The independent visual review could not be verified.', reasonCode: code });
 
+function validHostObservation(value, image) {
+  const attached = value?.image;
+  return value?.protocolVersion === 2 && value.source === 'browser-ui' &&
+    value.selectedModel === 'gpt-6-sol' && value.reasoning === 'high' &&
+    attached?.ref === image.ref && attached?.sha256 === image.sha256 && attached?.bytes === image.size;
+}
+
 /** Strict untrusted model output: only P0/P1 can require rework. */
 export function interpretArtReview(text, expected) {
   if (typeof text !== 'string' || Buffer.byteLength(text) > 64 * 1024 ||
@@ -235,12 +242,19 @@ export async function executeArtReview(plan, { apply = false, host = null } = {}
       reasonCode: 'ART_VISUAL_ATTESTATION_MISSING', writes: [],
       nextAction: { kind: 'STOP', executable: false } };
   }
+  if (!validHostObservation(response.hostObservation, plan.image)) {
+    return { engine: 'ludory-ai', operation: 'art-review', project: plan.project,
+      runId: plan.runId, status: 'BLOCKED', verdict: 'BLOCKED',
+      reasonCode: 'ART_VISUAL_ATTESTATION_MISSING', writes: [],
+      nextAction: { kind: 'STOP', executable: false } };
+  }
   if (!verifyArtReviewPlan(plan).ok) throw new Error('ART_SOURCE_STALE');
   const parsed = interpretArtReview(response.text, { imageSha256: plan.image.sha256 });
   const receipt = recordNativeArtReview(plan.project, plan.runId, plan.runHeadSha256, {
     provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', visualInputObserved: true,
     verdict: parsed.verdict, reasonCode: parsed.reasonCode, findings: parsed.findings,
-    summary: parsed.summary, image: plan.image, brief: plan.brief, sources: plan.sources,
+    summary: parsed.summary, hostObservation: response.hostObservation,
+    image: plan.image, brief: plan.brief, sources: plan.sources,
   });
   const exhausted = parsed.verdict === 'REWORK' &&
     readNativeArtReviews(plan.project, plan.runId).filter(item => item.verdict === 'REWORK').length >= 2;
@@ -250,6 +264,7 @@ export async function executeArtReview(plan, { apply = false, host = null } = {}
     reasonCode: parsed.reasonCode, provenance: 'HOST_OBSERVED',
     modelObserved: 'gpt-6-sol', image: plan.image, brief: plan.brief,
     sources: plan.sources, writes: [receipt.receiptPath],
+    hostObservation: response.hostObservation,
     receiptPath: receipt.receiptPath, receiptSha256: receipt.receiptSha256,
     nextAction: { kind: exhausted ? 'OWNER_REVIEW_REQUIRED' : parsed.verdict === 'REWORK' ? 'REWORK_IMAGE'
       : parsed.verdict === 'PASS_ART' ? 'AWAIT_OWNER_ACCEPTANCE' : 'STOP', executable: false } };

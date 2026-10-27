@@ -19,7 +19,7 @@ function fixture(helperSource, mutate = () => {}) {
     profile: 'development', kind: 'codex-web-gpt-launcher',
     helper: { executable: process.execPath, script },
   };
-  mutate(descriptor);
+  mutate(descriptor, { root, home, stableHome, runtime, script });
   fs.writeFileSync(path.join(runtime, 'launcher-browser.json'), JSON.stringify(descriptor));
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
     version: 3, releaseVersion: '6.1.11', mode: 'browser-only',
@@ -81,6 +81,28 @@ test('descriptor cannot redirect helper execution outside the isolated DEV home'
   const unsafe = discoverDevHost({ devHome: home, stableHome });
   assert.equal(unsafe.available, false);
   assert.equal(unsafe.reasonCode, 'DEV_DESCRIPTOR_UNTRUSTED');
+});
+
+test('officially registered launcher helper may live beside the installed Codex Web GPT executable', async t => {
+  const previous = process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+  const { home, stableHome, root } = fixture(helper(), (descriptor, paths) => {
+    const install = path.join(paths.root, 'Codex Web GPT');
+    const registeredScript = path.join(install, 'resources', 'runtime', 'app', 'browser-helper.cjs');
+    const registeredExecutable = path.join(install, 'Codex Web GPT.exe');
+    fs.mkdirSync(path.dirname(registeredScript), { recursive: true });
+    fs.copyFileSync(process.execPath, registeredExecutable);
+    fs.copyFileSync(paths.script, registeredScript);
+    descriptor.helper = { executable: registeredExecutable, script: registeredScript };
+    process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = registeredExecutable;
+  });
+  t.after(() => {
+    if (previous === undefined) delete process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+    else process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = previous;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const host = discoverDevHost({ devHome: home, stableHome });
+  assert.equal(typeof host.probe, 'function');
+  await host.close();
 });
 
 test('DEV symlink alias to Stable or symlinked ancestor is rejected without spawning', t => {
@@ -347,15 +369,18 @@ readline.createInterface({input:process.stdin}).on('line', line => {
  if(item.type==='prepared_selected_ack') {
   const image=item.prepared.images[0];
   if(!image || image.detail!=='high' || !image.imageUrl.startsWith('data:image/png;base64,')) process.exit(7);
-  observed={ref:image.ref,sha256:crypto.createHash('sha256').update(Buffer.from(image.imageUrl.split(',')[1],'base64')).digest('hex')};
-  send({type:'event',id:item.id,event:'image_attached',imageRef:observed.ref,imageSha256:observed.sha256});
+  const bytes=Buffer.from(image.imageUrl.split(',')[1],'base64');
+  observed={ref:image.ref,sha256:crypto.createHash('sha256').update(bytes).digest('hex'),bytes:bytes.length};
+  send({type:'event',id:item.id,event:'image_attached',imageRef:observed.ref,imageSha256:observed.sha256,
+   hostObservation:{protocolVersion:2,source:'browser-ui',selectedModel:'gpt-6-sol',reasoning:'high',image:observed}});
   send({type:'event',id:item.id,event:'send_activated'});
  }
  if(item.type==='send_activation_ack') {
   send({type:'event',id:item.id,event:'submitted'});
   send({type:'result',id:item.id,text:'review payload',transportVerified:true,
    entitlementVerified:true,routeObserved:'web-dev',modelObserved:'gpt-6-sol',
-   localToolsEnabled:false,imageInputObserved:true,imageRef:observed.ref,imageSha256:observed.sha256});
+   localToolsEnabled:false,imageInputObserved:true,imageRef:observed.ref,imageSha256:observed.sha256,
+   hostObservation:{protocolVersion:2,source:'browser-ui',selectedModel:'gpt-6-sol',reasoning:'high',image:observed}});
  }
 });`;
   const { home, stableHome, root } = fixture(script);
@@ -368,6 +393,46 @@ readline.createInterface({input:process.stdin}).on('line', line => {
   assert.equal(result.imageSha256, expectedHash);
   assert.equal(result.imageRef, 'candidate-1');
   assert.equal(result.modelObserved, 'gpt-6-sol');
+  assert.deepEqual(result.hostObservation, { protocolVersion: 2, source: 'browser-ui',
+    selectedModel: 'gpt-6-sol', reasoning: 'high', image: { ref: 'candidate-1',
+      sha256: expectedHash, bytes: payload.length } });
+});
+
+test('visual DEV turn rejects declared model and image fields without browser observation', async t => {
+  const payload = Buffer.from('declared-but-not-browser-observed');
+  const expectedHash = createHash('sha256').update(payload).digest('hex');
+  const script = `
+const readline = require('node:readline');
+const crypto = require('node:crypto');
+const send = value => process.stdout.write(JSON.stringify(value)+'\\n');
+send({type:'ready',protocolVersion:1});
+let observed;
+readline.createInterface({input:process.stdin}).on('line', line => {
+ const item=JSON.parse(line);
+ if(item.type==='capabilities') send({type:'capabilities',id:item.id,
+  transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',
+  modelObserved:'gpt-6-sol',localToolsEnabled:false,imageInputVerified:true});
+ if(item.type==='run') send({type:'event',id:item.id,event:'prepared_selected'});
+ if(item.type==='prepared_selected_ack') {
+  const image=item.prepared.images[0];
+  observed={ref:image.ref,sha256:crypto.createHash('sha256').update(Buffer.from(image.imageUrl.split(',')[1],'base64')).digest('hex')};
+  send({type:'event',id:item.id,event:'image_attached',imageRef:observed.ref,imageSha256:observed.sha256});
+  send({type:'event',id:item.id,event:'send_activated'});
+ }
+ if(item.type==='send_activation_ack') {
+  send({type:'event',id:item.id,event:'submitted'});
+  send({type:'result',id:item.id,text:'declared-only',transportVerified:true,
+   entitlementVerified:true,routeObserved:'web-dev',modelObserved:'gpt-6-sol',
+   localToolsEnabled:false,imageInputObserved:true,imageRef:observed.ref,imageSha256:observed.sha256});
+ }
+});`;
+  const { home, stableHome, root } = fixture(script);
+  const host = discoverDevHost({ devHome: home, stableHome });
+  cleanupHost(t, root, host);
+  await host.probe();
+  await assert.rejects(host.turn({ prompt: 'source-bound visual task', taskId: 'art-review-observation',
+    images: [{ ref: 'candidate-1', mimeType: 'image/png', bytes: payload, sha256: expectedHash }] }),
+  /DEV_BROWSER_OBSERVATION_UNVERIFIED/);
 });
 
 test('visual DEV turn rejects helper without witnessed attachment support', async t => {

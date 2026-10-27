@@ -600,7 +600,12 @@ export function readNativeArtReviews(projectDir, runRef) {
         receipt.prevSha256 !== (previous ?? receipt.runHeadSha256) ||
         receipt.provenance !== 'HOST_OBSERVED' || receipt.modelObserved !== 'gpt-6-sol' ||
         receipt.visualInputObserved !== true ||
-        !['PASS_ART', 'REWORK', 'BLOCKED'].includes(receipt.verdict) ||
+        receipt.hostObservation?.protocolVersion !== 2 || receipt.hostObservation?.source !== 'browser-ui' ||
+        receipt.hostObservation?.selectedModel !== 'gpt-6-sol' || receipt.hostObservation?.reasoning !== 'high' ||
+        receipt.hostObservation?.image?.ref !== receipt.image?.ref ||
+        receipt.hostObservation?.image?.sha256 !== receipt.image?.sha256 ||
+        receipt.hostObservation?.image?.bytes !== receipt.image?.size ||
+         !['PASS_ART', 'REWORK', 'BLOCKED'].includes(receipt.verdict) ||
         !['ART_REPORT_STRUCTURED', 'ART_IMAGE_NOT_VISIBLE', 'ART_REPORT_INVALID'].includes(receipt.reasonCode) ||
         !receipt.image || !/^[a-f0-9]{64}$/.test(receipt.image.sha256 ?? '') ||
         !receipt.brief || !/^[a-f0-9]{64}$/.test(receipt.brief.sha256 ?? '') ||
@@ -621,6 +626,11 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
   const source = inspectNativeProject(projectDir);
   if (!report || report.provenance !== 'HOST_OBSERVED' ||
       report.modelObserved !== 'gpt-6-sol' || report.visualInputObserved !== true ||
+      report.hostObservation?.protocolVersion !== 2 || report.hostObservation?.source !== 'browser-ui' ||
+      report.hostObservation?.selectedModel !== 'gpt-6-sol' || report.hostObservation?.reasoning !== 'high' ||
+      report.hostObservation?.image?.ref !== report.image?.ref ||
+      report.hostObservation?.image?.sha256 !== report.image?.sha256 ||
+      report.hostObservation?.image?.bytes !== report.image?.size ||
       !['PASS_ART', 'REWORK', 'BLOCKED'].includes(report.verdict) ||
       !['ART_REPORT_STRUCTURED', 'ART_IMAGE_NOT_VISIBLE', 'ART_REPORT_INVALID'].includes(report.reasonCode) ||
       typeof report.summary !== 'string' || report.summary.length > 3000 ||
@@ -652,7 +662,7 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
       runId: current.run.runId, runHeadSha256: expectedHeadSha256,
       prevSha256: history.length ? sha256(serial(history.at(-1))) : expectedHeadSha256,
       at: new Date().toISOString(), provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
-      visualInputObserved: true, image: report.image, brief: report.brief,
+      visualInputObserved: true, hostObservation: report.hostObservation, image: report.image, brief: report.brief,
       sources: report.sources, verdict: report.verdict, reasonCode: report.reasonCode,
       summary: report.summary, findings: report.findings };
     checkedRunDir(source.project, current.run.runId);
