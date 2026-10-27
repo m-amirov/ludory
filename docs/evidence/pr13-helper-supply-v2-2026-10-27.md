@@ -3,6 +3,7 @@
 Date: 2026-10-27
 Repository: m-amirov/ludory
 PR: #13 (Draft)
+Implementation head covered by this evidence: a5654430d7ae41ca8793d314ec5fbe2c2b8ad64a
 Local merge checkpoint: 22ba9a1
 Local origin/main: abb1261cc21ffd8cda7138360992af8799ce5eb0
 
@@ -137,7 +138,10 @@ or merged into main.
 | HELPER_INTEGRITY_PASS | PASS | Pre/post SHA checks, runtime checks and tamper regressions |
 | MERGE_CONFLICTS_RESOLVED | PASS | Local merge 22ba9a1; conflict-free merge tree |
 | CODE_REVIEW_PASS | PASS | Local diff review; npm test 308/308; npm run check; core example; git diff --check |
-| PR_MERGE_READY | BLOCKED | New commit/CI publication still pending |
+| PR_MERGE_READY | PASS | PR head a5654430d7ae41ca8793d314ec5fbe2c2b8ad64a; Ubuntu/Windows Node 22/24 CI passed |
 | RELEASE_READY | BLOCKED | Release, rights, platform and publication gates remain separate |
 
-No upstream repository was changed or published. PR #13 remains Draft.
+CI run: https://github.com/m-amirov/ludory/actions/runs/40507787944
+
+No upstream repository was changed or published. PR #13 remains Draft; merge
+still requires explicit owner confirmation.
