@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { randomUUID, createHash } from 'node:crypto';
 import { ownData } from './capabilities.mjs';
+import { HELPER_INTEGRITY_CODES, verifyHelperArtifact } from './helper-supply.mjs';
 import { canonicalPhysicalDirectory } from '@ludory/core';
 
 const MAX_PROFILE_BYTES = 128 * 1024;
@@ -118,11 +119,14 @@ function registeredHelper({ executableFile, scriptFile, home }) {
   const script = safeFile(scriptFile);
   const profile = canonicalPhysicalDirectory(home);
   const relative = path.relative(profile, script);
-  if (!relative.startsWith('..') && !path.isAbsolute(relative)) return { executable, script };
-  if (!isStandardLauncherExecutable(executable)) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
-  const expected = path.join(path.dirname(executable), 'resources', 'runtime', 'app', 'browser-helper.cjs');
-  if (!sameCanonical(script, expected)) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
-  return { executable, script };
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    if (!isStandardLauncherExecutable(executable)) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
+    const expected = path.join(path.dirname(executable), 'resources', 'runtime', 'app', 'browser-helper.cjs');
+    if (!sameCanonical(script, expected)) throw errorWithCode('DEV_DESCRIPTOR_UNTRUSTED');
+  }
+  const manifestFile = path.join(path.dirname(script), 'browser-helper.manifest.json');
+  const integrity = verifyHelperArtifact({ scriptFile: script, manifestFile, checkRuntime: true });
+  return { executable, script, manifestFile: integrity.manifestFile, integrity };
 }
 
 function readProfileJson(file, base) {
@@ -244,6 +248,16 @@ class BrowserDevHost {
   }
 
   async ensureChild() {
+    try {
+      this.descriptor.helper.integrity = verifyHelperArtifact({
+        scriptFile: this.descriptor.helper.script,
+        manifestFile: this.descriptor.helper.manifestFile,
+        checkRuntime: true,
+      });
+    } catch (error) {
+      if (this.child) await this.close();
+      throw error;
+    }
     if (this.child && this.starting) return this.starting;
     const child = this.spawnImpl(this.descriptor.helper.executable,
       [this.descriptor.helper.script], {
@@ -298,11 +312,15 @@ class BrowserDevHost {
           return;
         }
         if (ownData(message, 'type') === 'ready') {
-          if (message.protocolVersion === 1) {
+          const declaredProtocol = this.descriptor.helper.integrity.protocol.kind;
+          const declaredFeatures = new Set(this.descriptor.helper.integrity.protocol.features);
+          if (message.protocolVersion === 1 && declaredProtocol === 'compatibility-v1') {
             this.profile = 'legacy';
             this.helperFeatures = new Set();
             resolveReady();
-          } else if (Array.isArray(message.features) && message.features.every(feature => typeof feature === 'string')) {
+          } else if (declaredProtocol === 'browser-observation-v2' &&
+              Array.isArray(message.features) && message.features.every(feature => typeof feature === 'string') &&
+              [...declaredFeatures].every(feature => message.features.includes(feature))) {
             this.profile = 'upstream';
             this.helperFeatures = new Set(message.features);
             resolveReady();
@@ -501,9 +519,9 @@ class BrowserDevHost {
     if (this.capability) return this.capability;
     let result;
     try { result = await this.request('probe', {}, this.probeTimeoutMs); }
-    catch {
+    catch (error) {
       await this.close();
-      return unavailable('DEV_ROUTE_UNVERIFIED');
+      return unavailable(HELPER_INTEGRITY_CODES.has(error?.code) ? error.code : 'DEV_ROUTE_UNVERIFIED');
     }
     const observed = this.profile === 'upstream' ? this.observedUpstreamPreflight(result?.value) : observedRoute(result);
     if (!observed) {
@@ -606,11 +624,11 @@ spawnImpl = spawn, startupTimeoutMs = 15_000, probeTimeoutMs = 3_000, turnTimeou
     if (descriptor.profile !== 'development' || descriptor.kind !== 'codex-web-gpt-launcher' ||
         !descriptor.helper || typeof descriptor.helper !== 'object') return unavailable('DEV_DESCRIPTOR_UNTRUSTED');
     const helper = registeredHelper({ executableFile: descriptor.helper.executable,
-      scriptFile: descriptor.helper.script, home });
+      scriptFile: config.browserHelperScriptPath || descriptor.helper.script, home });
     return new BrowserDevHost({ home, descriptor: { helper }, descriptorPath: safeDescriptorPath, spawnImpl,
       startupTimeoutMs, probeTimeoutMs, turnTimeoutMs });
   } catch (error) {
-    return unavailable(['DEV_DESCRIPTOR_UNTRUSTED', 'DEV_PROFILE_NOT_ISOLATED'].includes(error.code)
+    return unavailable([...HELPER_INTEGRITY_CODES, 'DEV_DESCRIPTOR_UNTRUSTED', 'DEV_PROFILE_NOT_ISOLATED'].includes(error.code)
       ? error.code : 'DEV_HOST_UNAVAILABLE');
   }
 }

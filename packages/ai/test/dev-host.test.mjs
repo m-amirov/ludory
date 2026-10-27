@@ -13,13 +13,23 @@ function fixture(helperSource, mutate = () => {}) {
   const stableHome = path.join(root, 'stable');
   const runtime = path.join(home, 'runtime');
   fs.mkdirSync(runtime, { recursive: true });
-  const script = path.join(runtime, 'helper.cjs');
+  const script = path.join(runtime, 'browser-helper.cjs');
   fs.writeFileSync(script, helperSource);
   const descriptor = {
     profile: 'development', kind: 'codex-web-gpt-launcher',
     helper: { executable: process.execPath, script },
   };
-  mutate(descriptor, { root, home, stableHome, runtime, script });
+  const helperBytes = fs.readFileSync(script);
+  const manifest = {
+    schemaVersion: 1,
+    distribution: 'test-fixture',
+    artifact: { file: path.basename(script), bytes: helperBytes.length,
+      sha256: createHash('sha256').update(helperBytes).digest('hex') },
+    protocol: { kind: 'compatibility-v1', features: [] },
+  };
+  fs.writeFileSync(path.join(runtime, 'browser-helper.manifest.json'), JSON.stringify(manifest));
+  mutate(descriptor, { root, home, stableHome, runtime, script }, manifest);
+  fs.writeFileSync(path.join(runtime, 'browser-helper.manifest.json'), JSON.stringify(manifest));
   fs.writeFileSync(path.join(runtime, 'launcher-browser.json'), JSON.stringify(descriptor));
   fs.writeFileSync(path.join(home, 'config.json'), JSON.stringify({
     version: 3, releaseVersion: '6.1.11', mode: 'browser-only',
@@ -93,6 +103,8 @@ test('officially registered launcher helper may live beside the installed Codex 
     fs.mkdirSync(path.dirname(registeredScript), { recursive: true });
     fs.copyFileSync(process.execPath, registeredExecutable);
     fs.copyFileSync(paths.script, registeredScript);
+    fs.copyFileSync(path.join(paths.runtime, 'browser-helper.manifest.json'),
+      path.join(path.dirname(registeredScript), 'browser-helper.manifest.json'));
     descriptor.helper = { executable: registeredExecutable, script: registeredScript };
     process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = registeredExecutable;
   });
@@ -104,6 +116,44 @@ test('officially registered launcher helper may live beside the installed Codex 
   const host = discoverDevHost({ devHome: home, stableHome });
   assert.equal(typeof host.probe, 'function');
   await host.close();
+});
+
+test('helper integrity requires a manifest and exact artifact SHA-256', t => {
+  const missing = fixture(helper());
+  fs.rmSync(path.join(missing.home, 'runtime', 'browser-helper.manifest.json'));
+  t.after(() => fs.rmSync(missing.root, { recursive: true, force: true }));
+  const missingHost = discoverDevHost({ devHome: missing.home, stableHome: missing.stableHome });
+  assert.equal(missingHost.available, false);
+  assert.equal(missingHost.reasonCode, 'DEV_HELPER_MANIFEST_MISSING');
+
+  const wrong = fixture(helper(), (_descriptor, _paths, manifest) => {
+    manifest.artifact.sha256 = '0'.repeat(64);
+  });
+  t.after(() => fs.rmSync(wrong.root, { recursive: true, force: true }));
+  const wrongHost = discoverDevHost({ devHome: wrong.home, stableHome: wrong.stableHome });
+  assert.equal(wrongHost.available, false);
+  assert.equal(wrongHost.reasonCode, 'DEV_HELPER_HASH_MISMATCH');
+});
+
+test('helper integrity is rechecked after discovery before every launch', async t => {
+  const { home, stableHome, root } = fixture(helper());
+  const host = discoverDevHost({ devHome: home, stableHome });
+  cleanupHost(t, root, host);
+  fs.appendFileSync(path.join(home, 'runtime', 'browser-helper.cjs'), '\n// replaced after installation\n');
+  const result = await host.probe();
+  assert.equal(result.available, false);
+  assert.equal(result.reasonCode, 'DEV_HELPER_HASH_MISMATCH');
+});
+
+test('manifest protocol must agree with the helper ready handshake', async t => {
+  const { home, stableHome, root } = fixture(helper(), (_descriptor, _paths, manifest) => {
+    manifest.protocol = { kind: 'browser-observation-v2', features: ['browser_observation_v2'] };
+  });
+  const host = discoverDevHost({ devHome: home, stableHome });
+  cleanupHost(t, root, host);
+  const result = await host.probe();
+  assert.equal(result.available, false);
+  assert.equal(result.reasonCode, 'DEV_HELPER_PROTOCOL_UNSUPPORTED');
 });
 
 test('DEV symlink alias to Stable or symlinked ancestor is rejected without spawning', t => {
@@ -477,7 +527,9 @@ readline.createInterface({input:process.stdin}).on('line', line => {
     send({type:'result',id:item.id,text:'real browser response'});
   }
 });`;
-  const { home, stableHome, root } = fixture(script);
+  const { home, stableHome, root } = fixture(script, (_descriptor, _paths, manifest) => {
+    manifest.protocol = { kind: 'browser-observation-v2', features: ['browser_observation_v2'] };
+  });
   const host = discoverDevHost({ devHome: home, stableHome });
   cleanupHost(t, root, host);
   const preflight = await host.probe();
@@ -501,7 +553,9 @@ send({type:'ready',features:['browser_observation_v2']}); readline.createInterfa
  const item=JSON.parse(line); if(item.type==='inspect') send({type:'result',id:item.id,value:{authenticated:true,newChat:true,url:'https://chatgpt.com/',solAvailable:true}});
  if(item.type==='run') send({type:'event',id:item.id,event:'prepared_selected',reused:false});
  if(item.type==='prepared_selected_ack') send({type:'event',id:item.id,event:'send_activated'});
-});`);
+});`, (_descriptor, _paths, manifest) => {
+  manifest.protocol = { kind: 'browser-observation-v2', features: ['browser_observation_v2'] };
+});
   const host = discoverDevHost({ devHome: home, stableHome, turnTimeoutMs: 300 }); cleanupHost(t, root, host);
   assert.equal((await host.probe()).available, true);
   await assert.rejects(host.turn({ prompt: 'source-bound visual task', taskId: 'missing-image' }),

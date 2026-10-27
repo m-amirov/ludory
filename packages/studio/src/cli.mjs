@@ -7,7 +7,8 @@ import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNati
   planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport,
   planNarrativeReview, executeNarrativeReview,
   planImageTask,
-  planImageImport, executeImageImport, planArtReview, executeArtReview } from '@ludory/ai';
+  planImageImport, executeImageImport, planArtReview, executeArtReview,
+  installVendoredDevHelper } from '@ludory/ai';
 
 const usage = `Ludory Studio 0.1.0 — native game-development workflows
 
@@ -37,6 +38,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory workflow cycle --project <new-studio-game> --test <relative.test.js> [--run <run-id|latest>] [--repairs <0|1|2>] [--apply] [--json]
   ludory workflow recover --project <game-directory> [--run <run-id|latest>] [--confirm-no-executor] [--apply] [--json]
   ludory workflow checkpoint --project <game-directory> --stage <STAGE> [--run <run-id|latest>] [--artifact <path;path>] [--outcome <CONTINUE|PASS|FAIL|BLOCKED|ESCALATE>] [--apply] [--json]
+  ludory helper install [--apply] [--json]
   ludory help
 
 No writes by default. init/migrate --apply only create ludory.project.json;
@@ -89,6 +91,7 @@ function argumentsFor(command, argv) {
               : command === 'workflow-cycle' ? [...workflowCommon, '--run', '--test', '--repairs', '--apply']
               : command === 'workflow-recover' ? [...workflowCommon, '--run', '--confirm-no-executor', '--apply']
               : [...workflowCommon, '--run', '--stage', '--artifact', '--outcome', '--apply'])
+    : command === 'helper-install' ? new Set(['--apply', '--json'])
     : command === 'init'
     ? new Set([...common, '--id', '--title', '--lang', '--engine', '--targets', '--version', '--apply'])
     : command === 'create'
@@ -113,7 +116,7 @@ function argumentsFor(command, argv) {
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
     flags.set(key, value);
   }
-  if (!['profiles-list', 'templates-list', 'profiles-show', 'templates-show'].includes(command) && !flags.get('--project')) {
+  if (!['helper-install', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show'].includes(command) && !flags.get('--project')) {
     throw new Error('--project is required');
   }
   if (command.endsWith('-show') && !flags.get('--name')) throw new Error('--name is required for show');
@@ -168,6 +171,16 @@ function displayWorkflow(result, json, out) {
   for (const run of result.runs ?? []) out(`  run: ${run.runId} · ${run.status} · ${run.nextStage ?? 'terminal'}\n`);
   if (result.status === 'READY') for (const item of result.writes ?? []) out(`  planned: ${item}\n`);
   for (const conflict of result.conflicts ?? []) out(`  blocked: ${conflict}\n`);
+}
+
+function displayHelperSupply(result, json, out) {
+  if (json) { out(`${JSON.stringify(result, null, 2)}\n`); return; }
+  out(`${result.status} · ${result.profileHome ?? 'DEV profile'}\n`);
+  if (result.artifact) out(`  helper: ${result.artifact.file} · ${result.artifact.sha256}\n`);
+  if (result.launcher) out(`  launcher: ${result.launcher}\n`);
+  for (const file of result.writes ?? []) out(`  ${result.status === 'APPLIED' ? 'written' : 'planned'}: ${file}\n`);
+  if (result.warning) out(`  warning: ${result.warning}\n`);
+  if (result.reasonCode) out(`  reason: ${result.reasonCode}\n`);
 }
 
 async function runDraftCommand(operation, flags, { out, devHost }) {
@@ -450,6 +463,21 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       displayWorkflow(result, flags.has('--json'), out);
       return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : result.status === 'ESCALATE' ? 3
         : ['FAILED', 'FAILED_CHECKS'].includes(result.status) ? 1 : 0;
+    }
+    if (command === 'helper') {
+      const [operation, ...args] = rest;
+      if (operation !== 'install') throw new Error(`Unknown helper operation: ${operation || '(missing)'}`);
+      const flags = argumentsFor('helper-install', args);
+      try {
+        const result = installVendoredDevHelper({ apply: flags.has('--apply') });
+        displayHelperSupply(result, flags.has('--json'), out);
+        return 0;
+      } catch (error) {
+        const result = { status: 'BLOCKED', reasonCode: error.code ?? 'DEV_HELPER_INSTALL_FAILED',
+          writes: [], conflicts: [error.message] };
+        displayHelperSupply(result, flags.has('--json'), out);
+        return 2;
+      }
     }
     if (command === 'profiles' || command === 'templates') {
       const [operation, ...args] = rest;

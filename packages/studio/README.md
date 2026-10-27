@@ -225,7 +225,20 @@ node packages/studio/bin/ludory.mjs workflow draft-import --project /path/to/new
   --file narrative/my-draft.md --apply --json
 ```
 
-The optional host is a separate user-installed DEV browser-helper with an isolated profile and a protocol that **observes** transport authorization and the actually selected model. Merely launching a helper, reading the configured model, or seeing it submit a prompt does not establish model provenance. The older helper without a capabilities/route observation frame is unsupported and returns `DEV_ROUTE_UNVERIFIED`. Ludory does not read or copy the Stable browser profile, acquire ChatGPT cookies, or expose local tools to Web DEV. It does not bundle a DEV executable.
+The optional host is a separate DEV browser-helper with an isolated profile and a protocol that **observes** transport authorization and the actually selected model. Merely launching a helper, reading the configured model, or seeing it submit a prompt does not establish model provenance. Ludory does not read or copy the Stable browser profile, acquire ChatGPT cookies, or expose local tools to Web DEV. It never replaces the installed Codex Web GPT executable.
+
+### Trusted Web helper v2 supply
+
+Art Acceptance requires `browser_observation_v2`; the older upstream `6.1.14` helper without that feature remains valid only for compatibility-v1 text routes and is blocked for visual review. Ludory ships the approved prebuilt helper as a vendored artifact under `packages/ai/vendor/codex-chatgpt-web/`, with a versioned `manifest.json`, the pinned SHA-256, the two source commits and an auditable source patch. Upstream MIT terms and the generated third-party notices are kept beside the artifact.
+
+Install or refresh it only in the isolated DEV profile selected by `CODEX_WEB_GPT_DEV_HOME` (or the default `~/.codex-chatgpt-web-dev` location):
+
+```sh
+node packages/studio/bin/ludory.mjs helper install --json
+node packages/studio/bin/ludory.mjs helper install --apply --json
+```
+
+The command has no arbitrary destination flag. It verifies the vendored bytes before and after installation, writes only the DEV profile helper, manifest and profile helper override, and preserves the launcher executable and Stable profile. Ludory rechecks the manifest and SHA-256 before every helper spawn; a missing manifest, changed helper, unsupported protocol or missing `browser_observation_v2` fails closed. The pinned artifact is a prebuilt: source rebuilds are currently not byte-reproducible, which is recorded as technical debt rather than claimed as a reproducible build.
 
 `workflow draft` preview never writes files or starts a host. `--apply` journals an immutable `web-dev` request **before** the helper call; an observed response becomes a SHA-256-bound draft under `.ludory/ai/runs/<id>/drafts/` with `HOST_OBSERVED` provenance. Unexpected exit or timeout leaves the request pending, blocks duplicates and checkpoints, and requires `workflow recover --run RUN_ID --confirm-no-executor --apply` only after confirming that the old DEV helper is no longer active. No hidden retry or route downgrade occurs.
 
