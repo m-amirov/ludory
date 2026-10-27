@@ -4,6 +4,7 @@ Date: 2026-10-27
 Repository: m-amirov/ludory
 PR: #13 (Draft)
 Implementation commit: 0826e2e
+Published head: `caed499d2274b8029baf60eecec544c65a25258b`
 
 This evidence contains no credentials, cookies, access tokens, browser
 storage, or private prompt content. User-specific paths are represented with
@@ -122,7 +123,9 @@ Receipt SHA-256:
 - `node examples/core-session.mjs`: **PASS**;
 - `git diff --check`: **PASS**;
 - live v2 preflight: **PASS**;
-- CI for `0826e2e`: pending publication;
+- CI for published head: **PASS** on Ubuntu/Windows Node 22/24;
+- PR-triggered CI run: `40515388117`;
+- push-triggered CI run: `40515376095`;
 - merge: not performed; PR remains Draft.
 
 Release rights, platform, publication and game-specific acceptance remain
