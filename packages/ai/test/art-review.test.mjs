@@ -102,7 +102,19 @@ test('report parser computes P0/P1 rework and ignores P2 cosmetic polish for the
   assert.equal(interpretArtReview(escapedArray, expected).verdict, 'PASS_ART');
   const escapedVerdict = response([]).replace('"verdict":"PASS_ART"', '"verdict":"PASS\\_ART"');
   assert.equal(interpretArtReview(escapedVerdict, expected).verdict, 'PASS_ART');
+  const rework = response([{
+    severity: 'P1', category: 'location', description: 'The required coast is absent.',
+    evidence: 'Only open water is visible.',
+  }]).replace('"verdict":"PASS_ART"', '"verdict":"REWORK"');
+  assert.equal(interpretArtReview(rework, expected).verdict, 'REWORK');
+  const unknownEscape = response([]).replace('"summary":"Visual check of scene."',
+    String.raw`"summary":"Visual check\q of scene."`);
+  assert.equal(interpretArtReview(unknownEscape, expected).verdict, 'BLOCKED');
   assert.equal(interpretArtReview(response([]).replace('a'.repeat(64), 'b'.repeat(64)), expected).verdict, 'BLOCKED');
+  assert.equal(interpretArtReview(response([]).replace('"schemaVersion":1', '"schemaVersion":2'), expected).verdict, 'BLOCKED');
+  const sourceBoundSha = response([]).replace(`"imageSha256":"${expected.imageSha256}"`,
+    `"imageSha256":"${'b'.repeat(64)}"`);
+  assert.equal(interpretArtReview(sourceBoundSha, expected).verdict, 'BLOCKED');
   assert.equal(interpretArtReview('PASS. Looks great!', expected).verdict, 'BLOCKED');
   assert.equal(interpretArtReview(response([]).replace('"verdict":"PASS_ART"', '"verdict":"REWORK"'),
     expected).verdict, 'BLOCKED');

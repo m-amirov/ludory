@@ -55,6 +55,13 @@ production-art --project .` не находит `.codex-os` manifest в изол
 Ludory worktree. Это отдельный trusted-session/capability блокер, а не ошибка
 маршрутизации Web: Web preflight и Web attachment smoke доступны.
 
+Причина вызова `ceos capability-challenge` относится к обязательному
+run-scoped trusted Codex gate production-art, а не к runtime Ludory. Ludory
+сам не запускает CEOS: встроенный ImageGen оставляет source-bound handoff
+`NEEDS_AGENT_ACTION`, а отдельный Codex image-generator должен вызвать
+`$imagegen`. Подробный разбор границ и воспроизводимости helper-а находится в
+[evidence audit](../../evidence/pr13-imagegen-capability-helper-supply-2026-10-27.md).
+
 ImageGen не вызывался и синтетический output/receipt не создавался. Для
 закрытия этого gate нужна новая доверенная Codex-сессия с доступным native
 ImageGen и успешным run-scoped capability challenge; после этого требуется
