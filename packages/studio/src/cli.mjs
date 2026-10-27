@@ -7,7 +7,9 @@ import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNati
   planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport,
   planNarrativeReview, executeNarrativeReview,
   planImageTask,
-  planImageImport, executeImageImport } from '@ludory/ai';
+  planImageImport, executeImageImport,
+  planQualityEnable, applyQualityEnable, planQualityCheck, executeQualityCheck,
+  qualityStatus, planQualityEvidence, snapshotQualitySource } from '@ludory/ai';
 
 const usage = `Ludory Studio 0.1.0 — native game-development workflows
 
@@ -22,6 +24,10 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory templates list [--catalog <directory>] [--json]
   ludory templates show --name <id> [--catalog <directory>] [--json]
   ludory create --project <empty-directory> --id <slug> --title <name> --lang <locale> --profile <id> --template <id> --targets <comma-separated> [--version <semver>] [--catalog <directory>] [--apply] [--json]
+  ludory quality enable --project <new-studio-game> [--apply] [--json]
+  ludory quality check --project <new-studio-game> [--tier <quick|deep>] [--apply] [--json]
+  ludory quality status --project <new-studio-game> [--json]
+  ludory quality evidence --project <new-studio-game> [--run <quality-id|latest>] [--json]
   ludory workflow doctor --project <game-directory> [--json]
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--context-reviewed] [--apply] [--json]
@@ -41,6 +47,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
 No writes by default. init/migrate --apply only create ludory.project.json;
 create --apply only creates new template files, manifest and Studio receipt in an empty directory.
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
+Engineering Quality is opt-in and project-scoped; it runs tools only in the Codex sandbox, records bounded local evidence, and never grants Release PASS.
 workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
 workflow route is read-only: image routing hands the brief to a dedicated Codex image-generator subagent.
 workflow draft preview never calls the DEV host; --apply probes only the isolated DEV helper and saves a review-only draft if the actual selected model is attested.
@@ -70,7 +77,11 @@ do not run it against frozen existing games. CEOS history import is not planned.
 function argumentsFor(command, argv) {
   const common = new Set(['--project', '--json']);
   const workflowCommon = [...common];
-  const allowed = command.startsWith('workflow-')
+  const allowed = command.startsWith('quality-')
+    ? new Set(command === 'quality-enable' ? [...common, '--apply']
+      : command === 'quality-check' ? [...common, '--tier', '--apply']
+        : command === 'quality-evidence' ? [...common, '--run'] : common)
+    : command.startsWith('workflow-')
     ? new Set(command === 'workflow-route' ? [...workflowCommon, '--task']
       : command === 'workflow-draft' ? [...workflowCommon, '--run', '--task', '--brief', '--source', '--context-reviewed', '--apply']
       : command === 'workflow-draft-import' ? [...workflowCommon, '--run', '--task', '--brief', '--file', '--apply']
@@ -133,6 +144,11 @@ function displayWorkflow(result, json, out) {
   out(`${result.status} · ${result.project}\n`);
   if (result.engine) out(`  engine: ${result.engine}\n`);
   if (result.nativeStatus) out(`  native status: ${result.nativeStatus}\n`);
+  if (result.quality) {
+    out(`  engineering quality: ${result.quality.status} · ${result.quality.tier ?? 'quick'}\n`);
+    if (result.quality.reasonCode) out(`  quality reason: ${result.quality.reasonCode}\n`);
+    if (result.quality.qualityRunId) out(`  quality evidence: ${result.quality.qualityRunId}\n`);
+  }
   if (result.executor) out(`  executor: ${result.executor}\n`);
   if (result.taskKind) out(`  task: ${result.taskKind}\n`);
   if (result.preferredRoute) out(`  preferred route: ${result.preferredRoute}\n`);
@@ -338,6 +354,25 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       out(usage);
       return 0;
     }
+    if (command === 'quality') {
+      const [operation, ...args] = rest;
+      if (!['enable', 'check', 'status', 'evidence'].includes(operation)) {
+        throw new Error(`Unknown quality operation: ${operation || '(missing)'}`);
+      }
+      const flags = argumentsFor(`quality-${operation}`, args);
+      const project = flags.get('--project');
+      const result = operation === 'enable'
+        ? (() => { const plan = planQualityEnable(project);
+          return flags.has('--apply') && plan.status === 'READY' ? applyQualityEnable(plan) : plan; })()
+        : operation === 'check'
+          ? executeQualityCheck(planQualityCheck(project, { tier: flags.get('--tier') ?? 'quick' }),
+            { apply: flags.has('--apply'), executor })
+          : operation === 'status' ? qualityStatus(project)
+            : planQualityEvidence(project, { run: flags.get('--run') ?? 'latest' });
+      displayWorkflow(result, flags.has('--json'), out);
+      return result.status === 'BLOCKED' || result.status === 'CONFLICT' || result.status === 'STALE' ? 2
+        : result.status === 'FAIL' ? 1 : 0;
+    }
     if (command === 'workflow') {
       const [operation, ...args] = rest;
       if (!['doctor', 'route', 'draft', 'draft-import', 'narrative-review', 'image', 'image-import', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
@@ -404,8 +439,32 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
         return plan.status === 'BLOCKED' ? 2 : 0;
       }
       const plan = planWorkflow(flags.get('--project'), operation, workflowOptions(flags));
-      const result = executeWorkflow(plan, { apply: flags.has('--apply'), executor });
+      const autoQuality = flags.has('--apply') && plan.status === 'READY' &&
+        (operation === 'cycle' || (operation === 'continue' && flags.get('--executor') === 'codex')) &&
+        planQualityEnable(plan.project).status === 'IN_SYNC';
+      let beforeDigest = null;
+      let beforeError = null;
+      if (autoQuality) {
+        try { beforeDigest = snapshotQualitySource(plan.project).digest; }
+        catch (error) { beforeError = error.message; }
+      }
+      let result = executeWorkflow(plan, { apply: flags.has('--apply'), executor });
+      if (autoQuality && result.status === 'EXECUTED_UNVERIFIED') {
+        let quality = null;
+        try {
+          if (beforeError) quality = { status: 'BLOCKED', tier: 'quick', reasonCode: beforeError };
+          else if (snapshotQualitySource(plan.project).digest !== beforeDigest) {
+            quality = executeQualityCheck(planQualityCheck(plan.project, { tier: 'quick' }),
+              { apply: true, executor });
+          }
+        } catch (error) {
+          quality = { status: 'BLOCKED', tier: 'quick', reasonCode: error.message };
+        }
+        if (quality) result = { ...result, quality };
+      }
       displayWorkflow(result, flags.has('--json'), out);
+      if (result.quality?.status === 'BLOCKED' || result.quality?.status === 'STALE') return 2;
+      if (result.quality?.status === 'FAIL') return 1;
       return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : result.status === 'ESCALATE' ? 3
         : ['FAILED', 'FAILED_CHECKS'].includes(result.status) ? 1 : 0;
     }
@@ -441,9 +500,9 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     display(result, flags.has('--json'), out);
     return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : 0;
   } catch (error) {
-    if (argv[0] === 'workflow' && argv.includes('--json')) {
+    if (['workflow', 'quality'].includes(argv[0]) && argv.includes('--json')) {
       const projectIndex = argv.indexOf('--project');
-      const result = { mode: `workflow-${argv[1] ?? 'unknown'}`, project: projectIndex < 0 ? null : (argv[projectIndex + 1] ?? null),
+      const result = { mode: `${argv[0]}-${argv[1] ?? 'unknown'}`, project: projectIndex < 0 ? null : (argv[projectIndex + 1] ?? null),
         status: 'FAILED', writes: [], conflicts: [error.message] };
       displayWorkflow(result, true, out);
       return 1;

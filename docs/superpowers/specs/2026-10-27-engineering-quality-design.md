@@ -1,6 +1,6 @@
 # Engineering Quality — opt-in project mode (2026-10-27)
 
-Status: **Proposed — awaiting owner approval for implementation**.
+Status: **Owner approved (Variant A); implementation in feature branch, pending PR review and Windows/tool validation**.
 
 ## Intent
 
