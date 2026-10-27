@@ -60,8 +60,9 @@ test('installer writes only the isolated DEV profile and fails closed after repl
   });
   const preview = installVendoredDevHelper({ devHome: fixture.home, stableHome: fixture.stableHome });
   assert.equal(preview.status, 'READY');
+  const canonicalHome = fs.realpathSync.native(fixture.home);
   assert.ok(preview.writes.every(file => {
-    const relative = path.relative(fixture.home, file);
+    const relative = path.relative(canonicalHome, file);
     return relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
   }));
   assert.equal(fs.existsSync(path.join(fixture.stableHome, 'browser-helper.cjs')), false);
