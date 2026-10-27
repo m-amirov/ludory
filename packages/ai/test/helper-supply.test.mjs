@@ -72,11 +72,13 @@ test('installer writes only the isolated DEV profile and fails closed after repl
   assert.equal(applied.installed.sha256, preview.artifact.sha256);
   const installedExecutable = JSON.parse(fs.readFileSync(fixture.descriptorPath, 'utf8')).helper.executable;
   assert.equal(fs.realpathSync.native(installedExecutable), fs.realpathSync.native(fixture.launcher));
-  assert.equal(JSON.parse(fs.readFileSync(path.join(fixture.home, 'config.json'), 'utf8')).browserHelperScriptPath,
-    path.join(fixture.runtime, 'browser-helper.cjs'));
+  const installedConfig = JSON.parse(fs.readFileSync(path.join(fixture.home, 'config.json'), 'utf8'));
+  assert.equal(fs.realpathSync.native(installedConfig.browserHelperScriptPath),
+    fs.realpathSync.native(path.join(fixture.runtime, 'browser-helper.cjs')));
   const installedHost = discoverDevHost({ devHome: fixture.home, stableHome: fixture.stableHome });
   assert.equal(installedHost.available, false);
-  assert.equal(installedHost.descriptor.helper.script, path.join(fixture.runtime, 'browser-helper.cjs'));
+  assert.equal(fs.realpathSync.native(installedHost.descriptor.helper.script),
+    fs.realpathSync.native(path.join(fixture.runtime, 'browser-helper.cjs')));
   await installedHost.close();
 
   fs.appendFileSync(path.join(fixture.runtime, 'browser-helper.cjs'), 'replacement');
