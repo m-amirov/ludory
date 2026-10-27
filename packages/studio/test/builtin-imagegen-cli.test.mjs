@@ -11,7 +11,7 @@ async function cli(argv, injections = {}) {
   let stdout = '', stderr = '';
   const code = await runCli(argv, { ...injections,
     out: text => { stdout += text; }, err: text => { stderr += text; } });
-  return { code, result: stdout.trim().startsWith('{') ? JSON.parse(stdout) : null, stderr };
+  return { code, stdout, result: stdout.trim().startsWith('{') ? JSON.parse(stdout) : null, stderr };
 }
 
 test('CLI image apply hands generation to the Codex built-in skill; import retains review-only bytes', async t => {
@@ -32,6 +32,10 @@ test('CLI image apply hands generation to the Codex built-in skill; import retai
   assert.equal(requested.result.nextAction.kind, 'SPAWN_IMAGE_AGENT');
   assert.equal(requested.result.manualPacket.agent.model, 'inherit-parent');
   assert.equal(requested.result.manualPacket.modelSelection, 'provider-default');
+  const human = await cli(args.filter(arg => arg !== '--json'));
+  assert.equal(human.code, 0);
+  assert.match(human.stdout, /CEOS is not required by Ludory/i);
+  assert.match(human.stdout, /mandatory session policy.*stop/i);
   assert.equal(readNativeRun(project, run).events.length, 0);
   fs.writeFileSync(path.join(project, 'generated.png'), png);
   const imported = await cli(['workflow', 'image-import', '--project', project,

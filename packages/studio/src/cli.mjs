@@ -151,6 +151,7 @@ function displayWorkflow(result, json, out) {
   if (result.manualPacket?.skill === '$imagegen') {
     out('  imagegen: delegate to a separate Codex image-generator subagent inheriting the parent model\n');
     out('  subagent: invoke $imagegen using the source-bound packet; stop if delegation or skill is unavailable\n');
+    out('  session: CEOS is not required by Ludory; if a mandatory session policy conflicts, stop and report it\n');
     out('  prompt: rerun with --json to access manualPacket.prompt and its brief hash\n');
     out('  after generation: save the original and import with --handoff-sha256 from the packet\n');
   }
