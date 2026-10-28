@@ -186,6 +186,17 @@ test('rejects persisted records with wrong versions, fields, dates, hashes or sn
   assertTypeError(() => validatePersistedRecordShape(customArrayPrototype));
 });
 
+test('rejects numeric prerelease identifiers with leading zeros even when build metadata follows', () => {
+  for (const gameVersion of ['1.0.0-01+build', '1.0.0-alpha.01+build.7']) {
+    assertTypeError(() => validatePersistedRecordShape(record({
+      snapshot: { ...snapshot(), gameVersion },
+    })));
+  }
+
+  const valid = record({ snapshot: { ...snapshot(), gameVersion: '1.0.0-alpha.1+build.7' } });
+  assert.equal(validatePersistedRecordShape(valid).snapshot.gameVersion, '1.0.0-alpha.1+build.7');
+});
+
 test('RuntimeError exposes only stable machine codes and preserves cause', () => {
   const expected = [
     'INVALID_RUNTIME_TRANSITION',

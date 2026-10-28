@@ -9,7 +9,7 @@ const commonEventFields = ['schemaVersion', 'type', 'action', 'phase', 'timestam
 
 function isSemver(value) {
   if (typeof value !== 'string' || !semverPattern.test(value)) return false;
-  const prerelease = value.match(/^\d+\.\d+\.\d+-([^+]+)$/)?.[1];
+  const prerelease = value.match(/^\d+\.\d+\.\d+-([^+]+)/)?.[1];
   return !prerelease?.split('.').some(part => /^0\d+$/.test(part));
 }
 
@@ -85,7 +85,7 @@ function isUtcTimestamp(value) {
  * @property {() => RuntimeViewport} getViewport
  */
 
-/** @typedef {{schemaVersion: 1, width: number, height: number, dpr: number, orientation: 'landscape'|'portrait'}} RuntimeViewport */
+/** @typedef {{width: number, height: number, dpr: number, orientation: 'landscape'|'portrait'}} RuntimeViewport */
 
 /**
  * @typedef {object} RuntimeInputEventV1
