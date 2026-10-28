@@ -14,3 +14,7 @@ export { planWorkflow, executeWorkflow } from './workflows.mjs';
 export { prepareCodexExecution, checkCodexAvailable, runCodexExecution, hasStudioCreationReceipt } from './executor.mjs';
 export { planTaskRoute } from './task-routing.mjs';
 export { discoverTaskCapabilities } from './capabilities.mjs';
+export { planQualityEnable, applyQualityEnable, readQualityPolicy,
+  snapshotQualitySource } from './quality-policy.mjs';
+export { qualityStatus, planQualityEvidence } from './quality-store.mjs';
+export { planQualityCheck, executeQualityCheck } from './quality-checks.mjs';

@@ -161,6 +161,22 @@ node packages/studio/bin/ludory.mjs workflow checkpoint --project /path/to/game 
 
 `workflow cycle` is opt-in and preview-only without `--apply`. It executes the current stage in a new Studio-created game, requests a sandboxed `node --test` command, and repeats on missing/failing test telemetry at most twice (`--repairs 0|1|2`). Each attempt is recorded by existing native request/result events. A passing test command is **observed through Codex JSONL**, not independently verified, so success remains `EXECUTED_UNVERIFIED` and an explicit evidence checkpoint is still required. No automatic stage advancement or Release PASS occurs. Real Windows Codex command telemetry is still to be checked; synthetic regression tests do not establish production readiness.
 
+## Engineering Quality (project opt-in)
+
+A new Studio-created game can explicitly opt into an [Uncle Bob-inspired Engineering Quality mode](.agents/skills/ludory-engineering-quality/SKILL.md). It is separate from Release verification. All `quality` commands preview without `--apply`; tests and deterministic Crapper/Dryer/Mutator tools run only through the Codex sandbox, with pinned executables and checksummed local reports.
+
+```sh
+node packages/studio/bin/ludory.mjs quality enable --project /path/to/new-game --apply --json
+# Explicitly provision compatible Crapper/Dryer/Mutator tools and pin their absolute paths,
+# SHA-256, versions and timeouts in .ludory/quality/policy.json before checking.
+node packages/studio/bin/ludory.mjs quality check --project /path/to/new-game --tier quick --apply --json
+node packages/studio/bin/ludory.mjs quality check --project /path/to/new-game --tier deep --apply --json
+node packages/studio/bin/ludory.mjs quality status --project /path/to/new-game --json
+node packages/studio/bin/ludory.mjs quality evidence --project /path/to/new-game --run latest --json
+```
+
+`quick` requires passing behavior tests, fresh LCOV coverage, Crapper (CRAP threshold `10`) and Dryer (similarity `0.80`); `deep` adds bounded Mutator. Tools must already be installed: no implicit dependency installs. Missing prerequisites give a named `BLOCKED` outcome. Evidence under `.ludory/quality/runs/` includes source/policy SHA-256, command metadata, checked report digests and bounded copies of coverage/metric artifacts. On an applied successful source-changing `workflow continue --executor codex` or `workflow cycle`, an enabled game receives one automatic `quick` check beside the original workflow result. The original native status remains `EXECUTED_UNVERIFIED`; neither Quality `PASS` nor successful Codex telemetry authorizes a release. Real Windows tool compatibility has not yet been verified.
+
 ## Frozen legacy repositories
 
 - [Codex Engineering OS](https://github.com/m-amirov/codex-engineering-system) — read-only reference for useful orchestration and evidence behavior.
