@@ -1,6 +1,6 @@
 # Ludory S4-N1 — narrative skill overlap audit (2026-10-28)
 
-**Status: SOURCE AUDIT / CONTRACT PROPOSAL ONLY.** No skill has been created, approved, installed or run on a real game as part of N1. No historical game or source repository was modified.
+**Status: SOURCE AUDIT COMPLETE; S4-N1 CONTRACT OWNER-APPROVED (2026-10-28); IMPLEMENTATION NOT STARTED.** The owner approved the recommended separate, optional continuity-skill contract after the Draft PR was opened. No new skill has been created, installed or run on a real game as part of N1. No historical game or source repository was modified. PR integration remains a separate gate.
 
 ## Pinned scope
 
@@ -40,4 +40,4 @@ These are source/document inspections. This audit did **not** execute the Web DE
 
 ## Recommendation / owner gate
 
-Present the [proposed S4-N1 contract](../superpowers/specs/2026-10-28-narrative-continuity-skill-design.md) for a **separate owner decision**. It is intentionally a source-first, opt-in complement, **not** an implementation approval. If the owner prefers one entrypoint, revise the design to add a bounded continuity reference to the existing skill and keep the same separate evidence gates. Only after approval should TDD pressure trials and implementation begin in a new PR.
+The owner **approved the recommended option 3** in the [S4-N1 contract](../superpowers/specs/2026-10-28-narrative-continuity-skill-design.md): one optional, source-first `ludory-narrative-continuity` alongside the existing narrative review, without a duplicate dialogue editor. This **does not** itself merge the Draft contract PR, install the skill or authorize game changes. After CI/review and a separate owner integration decision, TDD pressure trials and implementation may begin in a new PR.
