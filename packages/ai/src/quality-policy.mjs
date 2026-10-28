@@ -75,7 +75,8 @@ export function snapshotQualitySource(projectDir) {
   const files = [];
   let size = 0;
   function visit(root, prefix = '') {
-    for (const entry of fs.readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const entry of fs.readdirSync(root, { withFileTypes: true }).sort((a, b) =>
+      Buffer.compare(Buffer.from(a.name), Buffer.from(b.name)))) {
       if (SKIP.has(entry.name)) continue;
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
       const full = path.join(root, entry.name);
@@ -92,7 +93,7 @@ export function snapshotQualitySource(projectDir) {
   }
   visit.totalBytes = 0;
   visit(source.project);
-  files.sort((a, b) => a.path.localeCompare(b.path));
+  files.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)));
   return { project: source.project, rootIdentity: source.rootIdentity,
     manifestSha256: source.manifestSha256, files,
     digest: qualityDigest(JSON.stringify(files)) };
@@ -103,6 +104,18 @@ function eligible(project) {
   if (!hasStudioCreationReceipt(source.project)) throw new Error('QUALITY_NEW_STUDIO_GAME_REQUIRED');
   const receiptFile = path.join(source.project, 'ludory.studio.json');
   const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
+  const files = receipt.files;
+  if (typeof receipt.profile?.version !== 'string' || !receipt.profile.version ||
+      typeof receipt.template?.version !== 'string' || !receipt.template.version ||
+      typeof receipt.catalog?.origin !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(receipt.catalog?.profileSha256 ?? '') ||
+      !/^[a-f0-9]{64}$/.test(receipt.catalog?.templateSha256 ?? '') ||
+      !files || Array.isArray(files) || Object.keys(files).length < 2 ||
+      Object.entries(files).some(([name, digest]) =>
+        !/^(?!\/)(?!.*(?:^|\/)\.\.?\/)[A-Za-z0-9_.\/-]+$/.test(name) ||
+        !/^[a-f0-9]{64}$/.test(digest))) {
+    throw new Error('QUALITY_CREATION_RECEIPT_UNTRUSTED');
+  }
   if (receipt.files['ludory.project.json'] !== source.manifestSha256) {
     throw new Error('QUALITY_CREATION_RECEIPT_MISMATCH');
   }

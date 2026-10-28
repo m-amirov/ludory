@@ -10,6 +10,7 @@ const ATTEMPT_ID = /^\d{13}-[a-f0-9]{12}$/;
 const MAX_REPORT_BYTES = 256 * 1024;
 const MAX_RUNS = 1000;
 const STATUSES = new Set(['PASS', 'FAIL', 'BLOCKED']);
+const TIER_CHECKS = { quick: ['tests', 'crapper', 'dryer'], deep: ['tests', 'crapper', 'dryer', 'mutator'] };
 const ARTIFACT_PATH = /^(?:coverage\/lcov\.info|\.metrics\/(?:crap\.edn|dry\.edn|mutate\/[A-Za-z0-9_.-]+\.edn))$/;
 
 function checkedArtifact(project, entry) {
@@ -108,8 +109,21 @@ export function persistQualityReceipt(projectDir, { tier, status, reasonCode = n
       (attemptId !== null && !ATTEMPT_ID.test(attemptId))) {
     throw new Error('QUALITY_RECEIPT_INVALID');
   }
-  if (status === 'PASS' && checks.some(c => c.status !== 'PASS' || c.observed !== true || c.exitCode !== 0)) {
-    throw new Error('QUALITY_PASS_UNATTESTED');
+  if (status === 'PASS') {
+    const expected = TIER_CHECKS[tier];
+    if (!attemptId || !expectedSourceDigest || !expectedPolicyDigest || !report.requestSha256 ||
+        report.schemaVersion !== 1 || report.tier !== tier || report.sourceDigest !== source.digest ||
+        !Array.isArray(report.checks) || JSON.stringify(report.checks) !== JSON.stringify(checks) ||
+        !Array.isArray(report.artifacts) || !Array.isArray(expected) ||
+        checks.length !== expected.length || checks.some((c, index) =>
+          c.name !== expected[index] || c.status !== 'PASS' || c.observed !== true || c.exitCode !== 0 ||
+          !Array.isArray(c.command) || !c.command.length ||
+          !/^[a-f0-9]{64}$/.test(c.outputSha256 ?? '') ||
+          !Array.isArray(c.artifacts) || !c.artifacts.length ||
+          (index > 0 && (!/^[a-f0-9]{64}$/.test(c.toolSha256 ?? '') || !c.version))) ||
+        JSON.stringify(checks.flatMap(c => c.artifacts)) !== JSON.stringify(report.artifacts)) {
+      throw new Error('QUALITY_PASS_UNATTESTED');
+    }
   }
   const reportBytes = Buffer.from(`${JSON.stringify(report)}\n`);
   if (reportBytes.length > MAX_REPORT_BYTES) throw new Error('QUALITY_REPORT_TOO_LARGE');
@@ -197,7 +211,8 @@ export function qualityStatus(projectDir) {
 
 export function planQualityEvidence(projectDir, { run = 'latest' } = {}) {
   const current = qualityStatus(projectDir);
-  if (current.status === 'NOT_RUN' || current.reasonCode === 'QUALITY_EVIDENCE_INTEGRITY' ||
+  if (current.status === 'NOT_RUN' || current.reasonCode === 'QUALITY_EXECUTION_INTERRUPTED' ||
+      current.reasonCode === 'QUALITY_EVIDENCE_INTEGRITY' ||
       current.reasonCode === 'QUALITY_EVIDENCE_INTERRUPTED') return current;
   try {
     const { entries } = inspectEvidence(current.project);

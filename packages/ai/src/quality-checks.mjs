@@ -62,9 +62,12 @@ function checkedReport(project, relative, requestSha256, expectedTier, expectedS
         (check.status === 'PASS' && (!check.observed || check.exitCode !== 0))) {
       throw new Error('QUALITY_REPORT_UNTRUSTED');
     }
+    const isNodeScript = name !== 'tests' && path.extname(tools[name].path).toLowerCase() === '.mjs';
     if (name !== 'tests' && check.observed &&
         (check.toolSha256 !== tools[name].sha256 || check.version !== tools[name].version ||
-          !Array.isArray(check.command) || check.command[0] !== tools[name].path ||
+          !Array.isArray(check.command) ||
+          (isNodeScript ? check.command[0] !== process.execPath || check.command[1] !== tools[name].path
+            : check.command[0] !== tools[name].path) ||
           !SHA.test(check.outputSha256))) throw new Error('QUALITY_REPORT_UNTRUSTED');
     if (check.status === 'PASS' && (!Array.isArray(check.artifacts) || !check.artifacts.length)) {
       throw new Error('QUALITY_REPORT_METRICS_MISSING');

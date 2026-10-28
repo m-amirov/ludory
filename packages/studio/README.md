@@ -185,10 +185,10 @@ Read-only operations reject `--apply`. All other workflow mutations require it, 
 For a newly Studio-created game (not a frozen game), `quality enable --project GAME --apply` writes `.ludory/quality/policy.json` once. Repeated enable reads existing policy without overwriting it. `quality check --tier quick|deep`, `quality status`, and `quality evidence --run latest` are preview/read-only by default. `check --apply` runs inside the existing Codex workspace sandbox; Studio does not execute generated tests or tool scripts in its unrestricted process.
 
 1. Provision Crapper, Dryer and (for `deep`) Mutator manually, outside this mode. Pin each executable's absolute `path`, `sha256`, `version` and `timeoutMs` in the project policy. Mutator's adjacent Crapper dependency must also be satisfied. Launchers that install on first run must be pre-initialized; no implicit download or installation is allowed.
-2. Add behavior tests that produce fresh `coverage/lcov.info`. `quick` runs these, Crapper `--use-existing-coverage --threshold 9.999999` (exclusive CRAP < 10) and Dryer `--threshold 0.8`; `deep` adds Mutator `--use-existing-coverage --max-workers 2`. A missing test, LCOV, pinned tool or expected `.metrics/*.edn` report is `BLOCKED`, never `PASS`.
+2. Add behavior tests that **generate** `coverage/lcov.info` during this execution; bare `node --test` does not create LCOV itself. `quick` runs these, Crapper `--use-existing-coverage --threshold 9.999999` (exclusive CRAP < 10) and Dryer `--threshold 0.8`; `deep` adds Mutator `--use-existing-coverage --max-workers 2`. A missing test, LCOV, pinned tool or expected `.metrics/*.edn` report is `BLOCKED`, never `PASS`. LCOV must contain actual source-file/line records and be refreshed during the attempt. The EDN snapshots are parsed for CRAP scores, duplicate candidates and killed/survived/uncovered mutants; a zero tool exit without valid metrics cannot pass. Pinned `.mjs` tools are run with Node across Windows/Unix; other executables must support the native host's `shell:false` launch.
 3. Inspect `quality status` and `quality evidence`. Reports and bounded coverage/metric snapshots are copied into a SHA-256-linked receipt chain under `.ludory/quality/runs/`. Evidence readers reject altered receipts or reports; source/policy drift makes the latest receipt `STALE`. Historical receipts are not cryptographically authenticated against an actor with full write access.
 
-For an enabled game, `workflow cycle --apply` and `workflow continue --executor codex --apply` trigger exactly one `quick` check **after successful execution that actually changed source files**. `quality` appears beside the workflow result; `FAIL`/`BLOCKED` return a nonzero exit code but do not rewrite the native workflow result. No auto-check on preview, unchanged code, disabled mode or failed executor. This is development evidence only: native result remains `EXECUTED_UNVERIFIED`, not an independent Release PASS. Real Windows Codex/test/metric adapter compatibility and full Release gates are still open.
+For an enabled game, `workflow cycle --apply` and `workflow continue --executor codex --apply` trigger exactly one `quick` check **after successful execution that actually changed source files**. `quality` appears beside the workflow result; `FAIL`/`BLOCKED` return a nonzero exit code but do not rewrite the native workflow result. A broken/unsafe existing quality policy blocks the automatic gate rather than disabling it silently. No auto-check on preview, unchanged code, disabled mode or failed executor. This is development evidence only: native result remains `EXECUTED_UNVERIFIED`, not an independent Release PASS. A Studio creation receipt is local metadata, not a cryptographic proof of creation on another machine. Real Windows Codex/test/metric adapter compatibility and full Release gates are still open.
 
 The [repository-local Engineering Quality Codex skill](../../.agents/skills/ludory-engineering-quality/SKILL.md) captures the test-first, root-cause and handoff discipline without changing global hooks or profiles. Details and boundaries are in the [design](../../docs/superpowers/specs/2026-10-27-engineering-quality-design.md).
 
@@ -237,7 +237,22 @@ node packages/studio/bin/ludory.mjs workflow draft-import --project /path/to/new
   --file narrative/my-draft.md --apply --json
 ```
 
-The optional host is a separate user-installed DEV browser-helper with an isolated profile and a protocol that **observes** transport authorization and the actually selected model. Merely launching a helper, reading the configured model, or seeing it submit a prompt does not establish model provenance. The older helper without a capabilities/route observation frame is unsupported and returns `DEV_ROUTE_UNVERIFIED`. Ludory does not read or copy the Stable browser profile, acquire ChatGPT cookies, or expose local tools to Web DEV. It does not bundle a DEV executable.
+The optional host is a separate DEV browser-helper with an isolated profile and a protocol that **observes** transport authorization and the actually selected model. Merely launching a helper, reading the configured model, or seeing it submit a prompt does not establish model provenance. Ludory does not read or copy the Stable browser profile, acquire ChatGPT cookies, or expose local tools to Web DEV. It never replaces the installed Codex Web GPT executable.
+
+### Trusted Web helper v2 supply
+
+Art Acceptance requires `browser_observation_v2`; the older upstream `6.1.14` helper without that feature remains valid only for compatibility-v1 text routes and is blocked for visual review. Ludory ships the approved prebuilt helper as a vendored artifact under `packages/ai/vendor/codex-chatgpt-web/`, with a versioned `manifest.json`, the pinned SHA-256, the two source commits and an auditable source patch. Upstream MIT terms and the generated third-party notices are kept beside the artifact.
+
+Install or refresh it only in the isolated DEV profile selected by `CODEX_WEB_GPT_DEV_HOME` (or the default `~/.codex-chatgpt-web-dev` location):
+
+```sh
+node packages/studio/bin/ludory.mjs helper install --json
+node packages/studio/bin/ludory.mjs helper install --apply --json
+```
+
+The command has no arbitrary destination flag. It verifies the vendored helper and the complete runtime dependency tree before installation, copies that pinned tree into the isolated DEV profile, verifies it again by file count, byte count and UTF-8-byte-lexicographic SHA-256, and writes only the DEV profile helper, manifest, runtime tree and profile helper override. It preserves the launcher executable and Stable profile. Ludory rechecks the distribution manifest, helper SHA-256 and runtime tree before every helper spawn; a missing manifest, changed helper, changed runtime file, unsupported protocol or missing `browser_observation_v2` fails closed. The older upstream `6.1.14` helper remains valid for compatibility-v1 text routes only and cannot satisfy Art Acceptance. The pinned artifact is a prebuilt: source rebuilds are currently not byte-reproducible, which is recorded as technical debt rather than claimed as a reproducible build.
+
+An existing compatibility-v1 DEV profile without `browser-helper.manifest.json` is intentionally unsupported: discovery returns `DEV_HELPER_MANIFEST_MISSING` before spawning any helper. Do not hand-write a manifest or use the profile for Art Acceptance. The supported transition is to preserve the old profile, run the preview command above, then run `helper install --apply --json` against the same isolated DEV profile; this installs the vendored v2 helper and its verified runtime tree, writes the missing manifest, and keeps text routes available through the v2 protocol without modifying Stable. A manifestless profile cannot be silently upgraded or used as a v1 fallback.
 
 `workflow draft` preview never writes files or starts a host. `--apply` journals an immutable `web-dev` request **before** the helper call; an observed response becomes a SHA-256-bound draft under `.ludory/ai/runs/<id>/drafts/` with `HOST_OBSERVED` provenance. Unexpected exit or timeout leaves the request pending, blocks duplicates and checkpoints, and requires `workflow recover --run RUN_ID --confirm-no-executor --apply` only after confirming that the old DEV helper is no longer active. No hidden retry or route downgrade occurs.
 
@@ -298,6 +313,67 @@ node packages/studio/bin/ludory.mjs workflow image-import --project /path/to/new
 
 `$imagegen` is a **built-in Codex tool**, not a programmatic API provided to Node.js. The CLI cannot spawn agents or call it directly: the primary Codex agent receives `manualPacket`, spawns a separate image-generator subagent with the inherited model, and supplies the prompt and selected references. That subagent must invoke the skill, save the original and report its location. The primary agent explicitly imports it. Missing subagent or tool access blocks generation; there is no direct-primary-agent or HTTP fallback. No authentication secret, separate provider endpoint or key is required by Ludory. This integration is an **agent handoff**, not unattended generation by the CLI.
 
+The native Ludory `production-art` pipeline does **not** invoke or require the legacy CEOS `production-art` skill, `ceos capability-challenge`, `ceos context`, or a `.codex-os` manifest. The `manualPacket.executionContract` makes this explicit. A CEOS session/worktree binding failure is not evidence that the Codex-native ImageGen tool is unavailable. Conversely, Ludory cannot override independently mandatory rules of an active Codex session: if such a rule requires a separate challenge or forbids tool use, stop and report the external policy conflict, without bypassing it or claiming a generation. Use a correctly configured native Ludory Codex session for the next attempt. The imported original remains `USER_DECLARED`, even when the calling agent witnessed the tool invocation; the CLI cannot cryptographically attest to that session-only call.
+
 The built-in tool has no visible model/quality selection parameter. `qualityPreference: highest-available` is an instruction to pursue the best available result using a precise brief, **not an SDK setting or a verified model ID**; the actual model is left unobserved. Model availability, generation limits and reference support depend on the active Codex session. Selected external visual references are not currently part of the image handoff hash and therefore cannot be claimed as cryptographically bound by Ludory. A text packet alone cannot assert that an image has been generated. Recheck story fidelity, composition and technical quality after seeing the output.
 
 Imported originals are stored exclusively under `.ludory/ai/runs/<id>/images/`. Import requires `handoffSha256` from the original `workflow image` packet and rejects a changed brief, project source binding, run head or stage before staging. The native image receipt records this token as declared attribution. Signatures, PNG integrity, JPEG/WebP structure and **full JPEG/WebP pixel decode with sharp**, dimensions, byte limits and SHA-256 receipts are verified before staging. Imports reject symlinks, hardlinks, parent aliases and content/extension mismatches; orphan files from interruptions remain untrusted. Provenance is `USER_DECLARED`: the CLI cannot independently attest that the tool ran. Neither operation publishes runtime assets, updates rights manifests or grants art/release PASS. Tests do not establish real Codex tool invocation or real Windows-host completion.
+
+## Independent Web art review (experimental)
+
+After `workflow image-import --apply` in a new Studio game, ask the primary Codex
+agent to review four selected text references and approve their sufficiency.
+These are project-relative UTF-8 files, not inferred from an image caption;
+an absent character or prop should be explicitly explained in its reference.
+
+```sh
+# Read-only preview: no helper launch and no writes. Copy the `image` value
+# from image-import's `output.outputPath`, NOT the source candidate filename.
+node packages/studio/bin/ludory.mjs workflow art-review --project /path/to/new-studio-game \
+  --run RUN_ID --image .ludory/ai/runs/RUN_ID/images/IMPORTED_ORIGINAL.png \
+  --source 'scene:narrative/scene.md;characters:narrative/characters.md;location:art/location.md;style:art/style.md' \
+  --context-reviewed --json
+
+# The primary Codex agent must run this in its real authenticated DEV environment.
+node packages/studio/bin/ludory.mjs workflow art-review --project /path/to/new-studio-game \
+  --run RUN_ID --image .ludory/ai/runs/RUN_ID/images/IMPORTED_ORIGINAL.png \
+  --source 'scene:narrative/scene.md;characters:narrative/characters.md;location:art/location.md;style:art/style.md' \
+  --context-reviewed --apply --json
+```
+
+Only a capability-verified isolated `chatgpt-web/gpt-6-sol` helper (`reasoning: high`)
+may evaluate the image. Ludory passes the **actual PNG/JPEG/WebP bytes**, max
+10 MiB, in the helper's `prepared.images` envelope and requires a witnessed
+`image_attached` event plus `imageInputObserved`, image reference and matching
+SHA-256 on the final result. The compatibility helper must emit `ready` with
+`protocolVersion: 1`, a verified `capabilities` frame including
+`imageInputVerified: true`, and those attachment observations from its browser
+worker. For a visual receipt, the attachment event and result must additionally
+carry the same `hostObservation` protocol v2: browser-selected `gpt-6-sol` with
+`reasoning: high`, plus the attached ref, SHA-256 and byte length. Requested
+model settings and helper declarations are not observations. **The upstream unmodified `codex-chatgpt-web` browser helper currently
+does not supply that complete Ludory attestation protocol.** Its binary-image
+support alone does not satisfy the gate. An incompatible/older helper yields
+`NEEDS_USER_ACTION` or `BLOCKED`: a real Codex + DEV Web smoke is required after
+installing a protocol-compatible helper. Do not report a successful real visual
+test based only on the CI fake helper.
+
+The independent model must return strict JSON with `schemaVersion: 1`,
+`imageSha256`, `imageVisible`, `verdict`, `summary` and evidence-bearing findings.
+P0/P1 covers wrong people, story facts, locations, important props, bad cropping
+and significant composition errors and requires `REWORK`. P2-only cosmetic
+notes are recorded but do not force revision. A hidden image, malformed output,
+stale source, absent visual evidence or unknown model is `BLOCKED` (no acceptance).
+Two serious `REWORK` receipts in the **same run** cause `ESCALATE` with no third
+automatic attempt; the agent must stop and ask the owner how to proceed. The
+current run schema permits only one `IMAGE_IMPORTED` original: a corrected
+candidate requires a new native run, not a silent replacement of stored bytes.
+The two-attempt guard is per run, not a cross-run/global scene budget.
+
+With `--apply`, confirmed host observations are recorded in exclusive numbered
+JSON and commit-hash files under `.ludory/ai/runs/<RUN_ID>/reviews/`. Existing
+original image bytes and game runtime files are never rewritten; a changed
+receipt/hash or symlinked review namespace fails closed. The receipt means only
+`HOST_OBSERVED` Web artistic feedback. **`PASS_ART` does not confer human art
+approval, asset rights, provenance of ImageGen, integration, platform release or
+production deployment.** No review automatically moves the native workflow stage.

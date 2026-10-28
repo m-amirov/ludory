@@ -19,16 +19,19 @@ function enabled(t) {
   return project;
 }
 
-function provisionTools(t, project, { duplicate = false, emitMetrics = true } = {}) {
+function provisionTools(t, project, { duplicate = false, emitMetrics = true,
+  crapScore = 1.1, dryerScore = null, survivors = 0, uncovered = 0 } = {}) {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-quality-tools-'));
   t.after(() => fs.rmSync(bin, { recursive: true, force: true }));
   const toolConfig = {};
   for (const name of ['crapper', 'dryer', 'mutator']) {
-    const file = path.join(bin, name);
+    const file = path.join(bin, `${name}.mjs`);
     const output = name === 'crapper' ? '.metrics/crap.edn'
       : name === 'dryer' ? '.metrics/dry.edn' : '.metrics/mutate/game.edn';
-    const snapshot = name === 'crapper' ? '{:entries [{:name "main" :crap 1.1}]}'
-      : name === 'dryer' ? '{:candidates []}' : '{:forms [{:killed 1 :survived 0}]}';
+    const snapshot = name === 'crapper' ? `{:entries [{:name "main" :crap ${crapScore}}]}`
+      : name === 'dryer' ? dryerScore === null && !duplicate ? '{:candidates []}'
+        : `{:candidates [{:score ${dryerScore ?? 0.95}}]}`
+        : `{:version 1 :source "src/main.js" :namespace "quality-game" :outcomes {"src/main.js:1" :killed} :forms [{:killed 1 :survived ${survivors} :uncovered ${uncovered}}]}`;
     const body = `#!/usr/bin/env node\nimport fs from 'node:fs';\nimport path from 'node:path';\n${emitMetrics ?
       `fs.mkdirSync(path.dirname(${JSON.stringify(output)}), { recursive: true });\n` +
       `fs.writeFileSync(${JSON.stringify(output)}, ${JSON.stringify(snapshot)});\n` : ''}
@@ -49,7 +52,7 @@ function provisionTools(t, project, { duplicate = false, emitMetrics = true } = 
     import fs from 'node:fs';
     test('real game test produces coverage', () => {
       fs.mkdirSync('coverage', { recursive: true });
-      fs.writeFileSync('coverage/lcov.info', 'TN:\\nSF:src/main.js\\nDA:1,1\\nend_of_record\\n');
+      fs.writeFileSync('coverage/lcov.info', 'TN:\\nSF:src/main.js\\nDA:1,1\\nBRDA:1,0,0,-\\nend_of_record\\n');
     });
   `);
   return toolConfig;
@@ -98,7 +101,7 @@ test('unconfigured tools produce an actionable read-only blocker without executi
 
 test('sandbox command actually produces a bounded, source-bound quick receipt', t => {
   const project = enabled(t);
-  provisionTools(t, project);
+  const toolConfig = provisionTools(t, project);
   const plan = planQualityCheck(project, { tier: 'quick' });
   assert.equal(plan.status, 'READY', plan.conflicts?.join(','));
   assert.equal(executeQualityCheck(plan, { apply: false }).status, 'READY');
@@ -109,13 +112,81 @@ test('sandbox command actually produces a bounded, source-bound quick receipt', 
   const receipt = planQualityEvidence(project).receipt;
   assert.deepEqual(receipt.checks.map(c => c.name), ['tests', 'crapper', 'dryer']);
   assert.ok(receipt.checks.every(c => c.observed && c.exitCode === 0));
-  assert.deepEqual(receipt.checks.find(c => c.name === 'crapper').command.slice(1, 4),
+  const crapperCommand = receipt.checks.find(c => c.name === 'crapper').command;
+  assert.equal(crapperCommand[0], process.execPath);
+  assert.equal(crapperCommand[1], toolConfig.crapper.path);
+  assert.deepEqual(crapperCommand.slice(2, 5),
     ['--use-existing-coverage', '--threshold', '9.999999']);
   assert.match(receipt.sourceDigest, /^[a-f0-9]{64}$/);
   assert.match(receipt.reportSha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(receipt.artifacts.map(a => a.path),
     ['coverage/lcov.info', '.metrics/crap.edn', '.metrics/dry.edn']);
   assert.ok(receipt.artifacts.every(a => a.sha256.length === 64));
+});
+
+test('zero-exit metric tools cannot attest to CRAP above the exclusive threshold', t => {
+  const project = enabled(t);
+  provisionTools(t, project, { crapScore: 999 });
+  const outcome = executeQualityCheck(planQualityCheck(project), { apply: true, executor: executingSandbox() });
+  assert.equal(outcome.status, 'FAIL');
+  assert.equal(qualityStatus(project).status, 'FAIL');
+});
+
+test('zero-exit Dryer cannot pass when structural duplicate score exceeds threshold', t => {
+  const project = enabled(t);
+  provisionTools(t, project, { dryerScore: 0.95 });
+  const outcome = executeQualityCheck(planQualityCheck(project), { apply: true, executor: executingSandbox() });
+  assert.equal(outcome.status, 'FAIL');
+});
+
+test('zero-exit Mutator cannot pass surviving or uncovered mutations', t => {
+  const project = enabled(t);
+  provisionTools(t, project, { survivors: 1, uncovered: 1 });
+  const outcome = executeQualityCheck(planQualityCheck(project, { tier: 'deep' }),
+    { apply: true, executor: executingSandbox() });
+  assert.equal(outcome.status, 'FAIL');
+});
+
+test('future-dated LCOV left over from an earlier run cannot establish fresh coverage', t => {
+  const project = enabled(t);
+  provisionTools(t, project);
+  fs.writeFileSync(path.join(project, 'src', 'quality.test.mjs'),
+    "import test from 'node:test'; test('behavior', () => {});\n");
+  fs.mkdirSync(path.join(project, 'coverage'), { recursive: true });
+  const oldLcov = path.join(project, 'coverage', 'lcov.info');
+  fs.writeFileSync(oldLcov, 'TN:\nSF:src/main.js\nDA:1,1\nend_of_record\n');
+  const future = new Date(Date.now() + 60_000);
+  fs.utimesSync(oldLcov, future, future);
+  const outcome = executeQualityCheck(planQualityCheck(project), { apply: true, executor: executingSandbox() });
+  assert.equal(outcome.status, 'BLOCKED');
+});
+
+test('old future-dated machine report cannot substitute for a tool that emits no metrics', t => {
+  const project = enabled(t);
+  provisionTools(t, project, { emitMetrics: false });
+  const metricDir = path.join(project, '.metrics');
+  fs.mkdirSync(metricDir, { recursive: true });
+  const oldReport = path.join(metricDir, 'crap.edn');
+  fs.writeFileSync(oldReport, '{:entries [{:name "main" :crap 1.1}]}');
+  const future = new Date(Date.now() + 60_000);
+  fs.utimesSync(oldReport, future, future);
+  const outcome = executeQualityCheck(planQualityCheck(project), { apply: true, executor: executingSandbox() });
+  assert.equal(outcome.status, 'BLOCKED');
+  assert.equal(planQualityEvidence(project).receipt.checks.find(c => c.name === 'crapper').status, 'BLOCKED');
+});
+
+test('malformed LCOV is not accepted as source-bound coverage', t => {
+  const project = enabled(t);
+  provisionTools(t, project);
+  fs.writeFileSync(path.join(project, 'src', 'quality.test.mjs'), `
+    import test from 'node:test'; import fs from 'node:fs';
+    test('writes bogus coverage', () => {
+      fs.mkdirSync('coverage', { recursive: true });
+      fs.writeFileSync('coverage/lcov.info', 'not an LCOV report');
+    });
+  `);
+  const outcome = executeQualityCheck(planQualityCheck(project), { apply: true, executor: executingSandbox() });
+  assert.equal(outcome.status, 'BLOCKED');
 });
 
 test('a pinned tool with zero exit but no machine report is BLOCKED, not PASS', t => {
@@ -289,4 +360,20 @@ test('an auto quality blocker is surfaced as a nonzero CLI exit without rewritin
   assert.equal(response.result.status, 'EXECUTED_UNVERIFIED');
   assert.equal(response.result.quality.status, 'BLOCKED');
   assert.match(response.result.quality.reasonCode, /QUALITY_TOOL_MISSING/);
+});
+
+test('corrupt enabled policy cannot silently disable automatic quality after a source change', t => {
+  const project = enabled(t);
+  fs.writeFileSync(path.join(project, '.ludory', 'quality', 'policy.json'), '{broken-json');
+  const runId = startedWorkflow(project);
+  const executor = { check: () => ({ ok: true }), run: () => {
+    fs.appendFileSync(path.join(project, 'src', 'main.js'), '// changed despite invalid policy\n');
+    return { ok: true, code: 'EXECUTED_UNVERIFIED', exitCode: 0,
+      transcriptSha256: 'd'.repeat(64), eventCount: 2, completed: true };
+  } };
+  const response = workflowCli(project, runId, 'continue',
+    ['--executor', 'codex', '--apply'], executor);
+  assert.equal(response.code, 2);
+  assert.equal(response.result.status, 'EXECUTED_UNVERIFIED');
+  assert.equal(response.result.quality.status, 'BLOCKED');
 });

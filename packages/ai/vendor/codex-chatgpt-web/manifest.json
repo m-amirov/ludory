@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "distribution": "ludory-vendored-prebuilt",
+  "artifact": {
+    "file": "browser-helper.cjs",
+    "bytes": 216615,
+    "sha256": "c126dd6b268cb9a9e6923215a1082de70b6b607ad9f31ab75415278dd683b4a7",
+    "label": "codex-chatgpt-web-6.1.14-patched-browser-observation-v2"
+  },
+  "upstream": {
+    "repository": "https://github.com/miuuyy/codex-chatgpt-web",
+    "version": "6.1.14",
+    "commits": ["83135a5", "a8199d9"],
+    "sourcePatch": "source/codex-chatgpt-web-browser-observation-v2.patch"
+  },
+  "build": {
+    "kind": "prebuilt",
+    "builder": "Bun",
+    "builderVersion": "1.4.0",
+    "byteReproducible": false,
+    "note": "Pinned artifact is accepted by SHA-256; rebuilding from the pinned source is not byte-reproducible yet."
+  },
+  "runtime": {
+    "launcher": "Codex Web GPT DEV launcher",
+    "helperProcess": "Electron-as-Node supplied by the trusted launcher",
+    "nodeModulesDir": "node_modules",
+    "externalRuntimePackages": "Vendored runtime tree is copied into the isolated DEV profile; no stable Codex Web GPT files are replaced.",
+    "tree": {
+      "order": "utf8-byte-lexicographic",
+      "files": 2217,
+      "bytes": 88160302,
+      "sha256": "3da4d490af2996bb7a04625fe8fa3f76b1fbb0dd72e93fc4533b6e05ee157d20"
+    },
+    "requiredPackages": [
+      { "name": "@mixmark-io/domino", "version": "2.2.0" },
+      { "name": "playwright-core", "version": "1.62.0" },
+      { "name": "tiktoken", "version": "1.0.22" },
+      { "name": "turndown", "version": "7.2.0" },
+      { "name": "turndown-plugin-gfm", "version": "1.0.2" },
+      { "name": "zod", "version": "4.6.6" }
+    ]
+  },
+  "protocol": {
+    "kind": "browser-observation-v2",
+    "features": ["browser_observation_v2"],
+    "visualModel": "chatgpt-web/gpt-6-sol",
+    "visualReasoning": "high",
+    "compatibilityV1VisualFallback": false
+  },
+  "licenses": {
+    "upstream": "LICENSE",
+    "thirdPartyNotices": "THIRD_PARTY_NOTICES.txt",
+    "sourceLicenseFiles": "LICENSES/"
+  }
+}

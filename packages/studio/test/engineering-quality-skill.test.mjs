@@ -7,7 +7,9 @@ const skillPath = fileURLToPath(new URL('../../../.agents/skills/ludory-engineer
 
 test('repository-local Engineering Quality skill is discoverable and documents bounded evidence rules', () => {
   const text = fs.readFileSync(skillPath, 'utf8');
-  assert.match(text, /^---\nname: ludory-engineering-quality\n/m);
+  assert.match(text, /^---\r?\nname: ludory-engineering-quality\r?\n/m);
+  assert.match(text.replace(/\r?\n/g, '\r\n'), /^---\r?\nname: ludory-engineering-quality\r?\n/m,
+    'CRLF checkout should be accepted on Windows');
   assert.match(text, /^description: Use when /m);
   for (const command of ['quality enable', 'quality check', 'quality status', 'quality evidence']) {
     assert.ok(text.includes(command), `missing ${command}`);

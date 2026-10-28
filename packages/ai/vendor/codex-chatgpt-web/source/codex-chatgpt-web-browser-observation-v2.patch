@@ -1,0 +1,1893 @@
+From 83135a50bcff389551a0cb001d71666a4e0504ac Mon Sep 17 00:00:00 2001
+From: m-amirov <jombo59rus@gmail.com>
+Date: Tue, 27 Oct 2026 10:48:40 +0300
+Subject: [PATCH 1/2] feat(chatgpt-web): add browser observation v2
+
+---
+ ...7-browser-observation-v2-implementation.md |  89 ++
+ ...026-10-27-browser-observation-v2-design.md | 857 ++++++++++++++++++
+ launcher/electron/main.cjs                    |   3 +
+ src/adapters/chatgpt-web/attachment-upload.ts |  17 +-
+ .../chatgpt-web/browser-helper-main.ts        |  15 +-
+ .../chatgpt-web/browser-observation.ts        | 124 +++
+ src/adapters/chatgpt-web/browser-worker.ts    |  80 +-
+ .../chatgpt-web/launcher-helper-client.ts     | 103 ++-
+ tests/browser-observation-client.test.ts      | 131 +++
+ tests/browser-observation.test.ts             |  72 ++
+ 10 files changed, 1472 insertions(+), 19 deletions(-)
+ create mode 100644 docs/superpowers/plans/2026-10-27-browser-observation-v2-implementation.md
+ create mode 100644 docs/superpowers/specs/2026-10-27-browser-observation-v2-design.md
+ create mode 100644 src/adapters/chatgpt-web/browser-observation.ts
+ create mode 100644 tests/browser-observation-client.test.ts
+ create mode 100644 tests/browser-observation.test.ts
+
+diff --git a/docs/superpowers/plans/2026-10-27-browser-observation-v2-implementation.md b/docs/superpowers/plans/2026-10-27-browser-observation-v2-implementation.md
+new file mode 100644
+index 0000000..3d13301
+--- /dev/null
++++ b/docs/superpowers/plans/2026-10-27-browser-observation-v2-implementation.md
+@@ -0,0 +1,89 @@
++# Browser-observation v2 Implementation Plan
++
++> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan.
++
++**Goal:** Add an additive, fail-closed `browser_observation_v2` protocol to the isolated `codex-chatgpt-web` helper and integrate it with Ludory's upstream dev-host bridge without changing compatibility-v1 or the stable launcher.
++
++**Architecture:** The helper negotiates v2 through the existing `ready.features` frame, derives a single trace-bound observation inside the browser worker after model selection, upload-stream completion, and visible-chip checks, and emits it before the send barrier. The launcher client validates the event and holds `send_activation_ack` until the observation callback completes. Ludory keeps preflight capability separate from same-turn post-turn observation and only accepts the upstream profile for Art Acceptance.
++
++**Tech Stack:** Node.js 22+ ESM, TypeScript, Bun tests/build, Playwright browser worker, Ludory JavaScript tests.
++
++**Spec:** `docs/superpowers/specs/2026-10-27-browser-observation-v2-design.md`
++
++## Global Constraints
++
++- Work only in this isolated upstream worktree plus the Ludory PR worktree; do not modify the installed stable launcher or stable profile.
++- Preserve compatibility-v1 wire frames and behavior. A v1 helper is unavailable for Ludory Art Acceptance, never a fallback.
++- Build and inspect the helper from the isolated DEV profile only; retain the existing descriptor trust registration.
++- Derive model, image bytes, SHA-256, byte count, upload completion, and visible attachment evidence inside the trusted browser helper. Never accept caller declarations as observations.
++- Keep the Ludory user edit `packages/studio/bin/ludory.mjs` untouched and stage files explicitly.
++- Do not claim Web/ImageGen/Release PASS without fresh evidence from the corresponding gate. Do not merge PR #13.
++
++## Task 1: Freeze the implementation surface and add the plan
++
++**Files:** `docs/superpowers/specs/2026-10-27-browser-observation-v2-design.md`, this plan.
++
++- Re-read the approved design and record the exact upstream/Ludory frame sequence, state transitions, limits, and error codes in the implementation notes.
++- Verify the source tree and tests named by the design exist before editing.
++- Run a static consistency check over the design and plan; do not alter unrelated docs.
++
++## Task 2: Define the shared v2 protocol types and validation tests first
++
++**Files:** `src/adapters/chatgpt-web/browser-observation.ts`, `tests/browser-observation.test.ts`.
++
++- Write failing tests for the feature identifier, strict observation schema, canonical model mapping, trace binding, attachment identity, SHA-256/size fields, upload/chip completion flags, and rejection of unknown or contradictory fields.
++- Implement the smallest shared parser/constants module. Support the generic upstream family/effort matrix, while leaving Ludory's `gpt-6-sol` + `high` policy to the consumer.
++- Run the focused Bun test and confirm the new tests are red before implementation, then green after the minimal implementation.
++
++## Task 3: Attest upload bytes and browser completion inside the worker
++
++**Files:** `src/adapters/chatgpt-web/attachment-upload.ts`, `src/adapters/chatgpt-web/browser-worker.ts`, relevant attachment/harness tests.
++
++- Add failing regression cases for the upstream image limits, filename collision before upload, missing processing completion, missing visible chip, and mismatch between the uploaded buffer and reported digest/size.
++- Clone each upload buffer once, compute SHA-256/size from that clone, and pass the same bytes to `setInputFiles`; expose only request/processing/chip completion metadata needed by v2.
++- Keep compatibility-v1 attachment behavior unchanged; apply the stricter filename collision guard and v2 evidence path only when requested.
++- After browser-confirmed model selection and completed attachment checks, build one observation for the turn's `traceId`; emit it before the send activation barrier.
++- Run the focused attachment/worker tests and the existing harness regression suite.
++
++## Task 4: Negotiate and enforce v2 in the helper protocol
++
++**Files:** `src/adapters/chatgpt-web/browser-helper-main.ts`, `src/adapters/chatgpt-web/launcher-helper-client.ts`, `tests/launcher-helper-client.test.ts`.
++
++- Add failing tests for old helpers without the feature, valid v2 event delivery, foreign/late/duplicate events, wrong trace IDs, wrong model/effort, missing attachment, SHA/size mismatch, and callback rejection/timeout.
++- Advertise `browser_observation_v2` only in the v2-capable helper ready frame and reject a required-v2 run locally before dispatch when the feature is absent.
++- Parse and validate the helper event against the prepared image bytes and current turn. Keep bounded tombstones/state so events after completion cannot be accepted or silently re-used.
++- Make `send_activated` wait for the observation callback with the approved timeout; send `send_activation_ack` only after callback success, otherwise abort and never send.
++- Run the focused launcher tests plus all existing compatibility-v1 tests.
++
++## Task 5: Integrate the upstream profile into Ludory without weakening trust
++
++**Files:** `packages/ai/src/dev-host.mjs`, `packages/ai/src/art-review.mjs`, `packages/ai/test/dev-host.test.mjs`, `packages/ai/test/art-review.test.mjs`, `packages/studio/test/art-review-cli.test.mjs`.
++
++- Add failing Ludory tests for ready-frame/profile negotiation, inspect preflight, required high Sol turn, same-trace v2 observation, source-bound receipt, old-helper blocking, wrong model, missing image, changed source, P0/P1 rework, P2-only pass, and two reworks escalating.
++- Keep safe descriptor/executable/profile validation unchanged. Add an explicit upstream profile for `ready.features`; keep the legacy profile only for existing compatibility-v1 calls.
++- Split capability preflight from post-turn observation and remove the `imageInputVerified` preflight cycle. Art Acceptance requires v2 and the same-turn observation; no compatibility-v1 fallback.
++- Normalize only validated browser observations plus the real response text into Ludory's `HOST_OBSERVED` response, with trace/model/ref/hash/size/upload binding preserved into the receipt.
++- Enforce Ludory Art Acceptance `reasoning: high`; reject Astra/Pro/instant routes and any untrusted declaration.
++- Run all affected Ludory packages and inspect receipt bytes/source binding.
++
++## Task 6: Build isolated DEV helper and execute integration smoke
++
++**Files:** isolated DEV profile artifacts and evidence files outside tracked source as appropriate; no stable launcher edits.
++
++- Install/build the upstream helper from the isolated worktree and register it through the штатный safe descriptor path.
++- Run the real browser attachment smoke with a real image and `chatgpt-web/gpt-6-sol` at `high`; capture the observed model, trace ID, attachment ref/name, SHA-256, byte size, upload processing completion, visible chip, real response, and Ludory receipt path/hash.
++- Run the negative cases against the real bridge where safely possible; preserve BLOCKED diagnostics for unavailable account/session/model/browser evidence.
++- Run a separate native Codex ImageGen capability challenge and one minimal generation smoke without making CEOS manifests a Ludory dependency. If the current session cannot provide trusted capability, record the exact blocked boundary and do not fabricate output.
++
++## Task 7: Full verification, review, and handoff
++
++**Files:** test/build artifacts and evidence reports only.
++
++- Run upstream tests/build, Ludory `npm test`, `npm run check`, `node examples/core-session.mjs`, and `git diff --check` in every affected worktree.
++- Run or inspect current Windows Node 22/24 and Ubuntu CI for the published commit; link only actual workflow runs.
++- Perform an adversarial review for trust-boundary regressions, compatibility-v1 drift, late events, and receipt source binding.
++- Commit only explicit implementation/test/docs files, preserve the user-edited `packages/studio/bin/ludory.mjs`, and leave PR #13 Draft. Report remaining blockers and do not merge.
++
++## Regression Matrix
++
++The implementation is not complete until the tests cover: valid attestation; old helper without v2; missing attachment; wrong model; Sol-only effort policy in Ludory; SHA mismatch; size mismatch; incomplete upload stream; missing visible chip; filename collision; foreign/duplicate/stale/late `traceId`; callback rejection; callback timeout; preflight/post-turn separation; changed image/source; P0/P1 → `REWORK`; P2-only → `PASS_ART`; two `REWORK` → `ESCALATE`; and compatibility-v1 unchanged.
+diff --git a/docs/superpowers/specs/2026-10-27-browser-observation-v2-design.md b/docs/superpowers/specs/2026-10-27-browser-observation-v2-design.md
+new file mode 100644
+index 0000000..a0f59fd
+--- /dev/null
++++ b/docs/superpowers/specs/2026-10-27-browser-observation-v2-design.md
+@@ -0,0 +1,857 @@
++# Browser-observed attachment protocol v2
++
++Status: Variant A approved by the Ludory integration owner; this document is
++the revised schema-review artifact. Implementation is intentionally not
++included.
++
++## 1. Purpose and boundary
++
++The current helper already performs the security-relevant browser work:
++
++1. it selects the requested ChatGPT model family in the DOM;
++2. it passes file payloads to Playwright `setInputFiles`;
++3. it observes the upload processing stream, including
++   `file.processing.completed`;
++4. it waits for the corresponding visible attachment chip before sending.
++
++The missing boundary is export. The helper currently exports progress and
++response text, but not the model-selection or attachment facts that it just
++verified. Ludory therefore cannot distinguish browser evidence from a caller's
++declaration.
++
++This design adds one opt-in, versioned helper event:
++`browser_observation_v2`. The event is emitted only by the trusted browser
++helper after the existing browser checks have completed. It is evidence of the
++browser-side input/model boundary, not an artistic verdict.
++
++The independent Web response remains a separate acceptance input. A
++`browser_observation_v2` event alone can never produce `PASS_ART` or a release
++verdict.
++
++### In scope
++
++- feature negotiation through the existing `ready` frame;
++- a single trace-bound observation event for a browser turn;
++- helper-side SHA-256 and byte-count calculation from image buffers passed to
++  the upload mechanism;
++- browser-confirmed model-family selection and attachment completion;
++- client-side strict validation, ordering, duplicate detection, and
++  source-consistency checks;
++- compatibility with existing compatibility-v1 callers and helpers.
++
++### Out of scope
++
++- Web-to-Web v2 delegation or subagent protocol changes;
++- independent visual review, P0/P1/P2 classification, receipt policy, or
++  `PASS_ART` calculation;
++- changing the installed launcher, stable profile, trust registration, or
++  descriptor validation;
++- CEOS manifests or capability challenges as a Ludory runtime dependency;
++- publishing this change to the upstream repository.
++
++## 2. Design choice
++
++Three alternatives were considered:
++
++| Option | Description | Decision |
++| --- | --- | --- |
++| A | Add an opt-in `browser_observation_v2` feature and one structured event to the existing helper protocol. | **Selected** |
++| B | Reconstruct evidence in the daemon from progress frames, prompt declarations, or upload logs. | Rejected: not browser-observed and cannot prove the visible chip or selected DOM model. |
++| C | Introduce a second side channel between the launcher and Ludory. | Rejected: expands the trust boundary and duplicates the existing helper transport. |
++
++Option A keeps the existing line protocol, makes support explicit, and lets
++old callers continue unchanged. The new event is suppressed unless the
++caller explicitly requires v2, so a compatibility-v1 consumer never receives
++an unknown event merely because it is talking to a newer helper.
++
++## 3. Negotiation and compatibility
++
++The helper advertises support in its existing ready frame:
++
++```json
++{
++  "type": "ready",
++  "features": [
++    "progress",
++    "tool-boundary-ack",
++    "completion-fence",
++    "multipart-stage-ack",
++    "skill-attachments",
++    "browser_observation_v2"
++  ]
++}
++```
++
++The feature name is the version identifier. It is not inferred from the
++helper version, package version, executable path, or a declaration from the
++caller.
++
++`BrowserTurn` gains an optional `requireBrowserObservationV2` flag and an
++optional `onBrowserObservationV2` callback. The launcher client behaves as
++follows:
++
++1. it starts the helper and waits for `ready`;
++2. when `requireBrowserObservationV2` is true, it requires the exact
++   `browser_observation_v2` feature before writing the `run` frame;
++3. if the feature is absent, it rejects locally with
++   `browser_observation_v2_unavailable` and does not dispatch the turn;
++4. if the flag is false or omitted, it preserves the compatibility-v1 path and
++   does not request or expect the new event.
++
++The run frame carries the requirement explicitly:
++
++```json
++{
++  "type": "run",
++  "id": "turn_0123456789abcdef0123456789abcdef",
++  "turn": {
++    "traceId": "turn_0123456789abcdef0123456789abcdef",
++    "modelId": "gpt-5.6-sol",
++    "modelFamily": "6",
++    "reasoning": "high",
++    "requireBrowserObservationV2": true
++  }
++}
++```
++
++The incoming `modelId` is the existing internal transport identity. It is not
++accepted as evidence. The helper must derive the observed canonical model
++from the browser-confirmed family and selected mode described below.
++
++An old helper does not advertise the feature and cannot claim v2 support. An
++old caller never sets the requirement and remains compatible with the old
++event set. A new caller talking to an old helper is `BLOCKED`/unavailable for
++Ludory art acceptance; it must not fall back to v1.
++
++## 4. Ludory dev-host integration
++
++`BrowserDevHost` is a separate consumer of the helper line protocol. Its
++current implementation is not wire-compatible with upstream 6.1.14 by
++declaration alone: the legacy path expects a `ready` frame with
++`protocolVersion: 1`, a `capabilities` probe, `image_attached` plus a
++caller-supplied `hostObservation`, and a result that repeats that observation.
++Upstream 6.1.14 instead exposes `ready.features`, `inspect`, `prepared_selected`,
++`browser_observation_v2`, `send_activated`, `submitted`, and a text-only
++`result`. The integration must therefore use an explicit consumer-side bridge
++with two negotiated wire profiles.
++
++### Profile selection
++
++The bridge keeps compatibility-v1 unchanged for existing callers:
++
++```text
++ready.protocolVersion === 1       -> legacy profile
++ready.features is an array        -> upstream profile
++otherwise                         -> DEV_HELPER_PROTOCOL_UNSUPPORTED
++```
++
++The bridge never selects a profile from an executable name, package version,
++or a user-provided declaration. For an art-review turn, only the upstream
++profile is eligible and the exact `browser_observation_v2` feature is required.
++A legacy helper, even if it returns a field called `hostObservation`, is
++`DEV_BROWSER_OBSERVATION_V2_UNAVAILABLE` for art acceptance.
++
++### Upstream profile sequence
++
++The exact Ludory-to-upstream sequence is:
++
++```text
++discoverDevHost()
++  -> safe descriptor/profile/helper registration
++  -> spawn descriptor.helper.executable with descriptor.helper.script
++  -> upstream ready(features)
++  -> inspect(detectCapabilities=true)
++  -> run(requireBrowserObservationV2=true)
++  -> prepared_selected
++  -> prepared_selected_ack(images as data URLs)
++  -> browser_observation_v2
++  -> validate observation and invoke observation callback
++  -> send_activated
++  -> await unfinished observation callback (bounded)
++  -> send_activation_ack
++  -> submitted
++  -> result(text)
++  -> normalize validated observation + text for Ludory
++```
++
++The upstream `inspect` request is the capability preflight. It is not model or
++attachment evidence. The selected model and input evidence come only from the
++v2 event in the same run.
++
++The upstream maintenance response has a precise, limited shape. For
++`inspect(detectCapabilities=true)`, the helper writes:
++
++```json
++{
++  "type": "result",
++  "id": "<inspectId>",
++  "value": {
++    "authenticated": true,
++    "newChat": true,
++    "url": "<current ChatGPT URL>",
++    "solAvailable": true,
++    "extraHighAvailable": false,
++    "proAvailable": false
++  }
++}
++```
++
++`authenticated`, `newChat`, and `url` are always present. The three account
++capability booleans are present when capability detection is requested and are
++absent when `detectCapabilities=false`. `inspect.result.value` contains no
++selected model, effort, attachment, upload request, hash, chip, trace-bound
++observation, or `localToolsEnabled` field. The bridge owns
++`localToolsEnabled:false` in the v2 run configuration; it is not inspect
++evidence.
++
++Ludory keeps two disjoint records. The **preflight capability** is derived
++only from `ready.features` and the validated `inspect.result.value`; it may
++prove that the web route, account Sol capability, and v2 feature are
++available. It must not contain or require `imageInputVerified`,
++`imageInputObserved`, or `HOST_OBSERVED`. The **post-turn observation** is
++created only from the same-turn `browser_observation_v2` event after helper
++and client validation, callback success, `submitted`, and a valid result.
++
++The bridge exposes the split to the existing Ludory host with distinct
++fields:
++
++```json
++{
++  "preflight": {
++    "available": true,
++    "routeAvailable": "web-dev",
++    "modelRouteAvailable": "chatgpt-web/gpt-6-sol",
++    "browserObservationV2Available": true,
++    "reasoningRequired": "high",
++    "inspect": {
++      "authenticated": true,
++      "newChat": true,
++      "url": "<current ChatGPT URL>",
++      "solAvailable": true,
++      "extraHighAvailable": false,
++      "proAvailable": false
++    }
++  },
++  "postTurn": {
++    "status": "HOST_OBSERVED",
++    "routeObserved": "web-dev",
++    "modelObserved": "gpt-6-sol",
++    "reasoningObserved": "high",
++    "imageInputObserved": true,
++    "observation": "<validated browser_observation_v2>"
++  }
++}
++```
++
++`preflight` has no `modelObserved`, `imageInputVerified`,
++`imageInputObserved`, or `HOST_OBSERVED` field. `postTurn` exists only after
++the required event and result have been validated; it is the only source from
++which the compatibility response and receipt may obtain observed model or
++attachment facts.
++
++Accordingly, `planArtReview` gates attemptability on preflight availability,
++the v2 feature, the fixed Ludory route, and the art effort policy; it never
++reads `imageInputVerified` from a probe. `executeArtReview` uses the probe
++only as a preflight check and gates `HOST_OBSERVED`, the visual verdict, and
++the receipt on the same-turn post-turn observation. A missing post-turn
++observation is `BLOCKED`, not a failed preflight and not a reason to retry via
++v1. `imageInputVerified` is a post-turn result field, if retained for the
++existing Ludory response shape; it is never a preflight prerequisite.
++
++The upstream `run` frame must contain the configuration fields required by
++`browser-helper-main.ts`; the bridge must retain the validated descriptor path
++so it can send the same isolated path, not reconstruct or substitute one:
++
++```json
++{
++  "type": "run",
++  "id": "<traceId>",
++  "config": {
++    "appName": "ludory-web-art-review",
++    "browserHostDescriptorPath": "<validated-dev-descriptor>",
++    "turnTimeoutMs": 1800000,
++    "autoApproveToolCalls": false
++  },
++  "turn": {
++    "traceId": "<traceId>",
++    "modelId": "gpt-5.6-sol",
++    "modelFamily": "6",
++    "reasoning": "high",
++    "capabilities": {
++      "localToolsEnabled": false,
++      "solAvailable": true,
++      "extraHighAvailable": false,
++      "proAvailable": false
++    },
++    "requireBrowserObservationV2": true
++  }
++}
++```
++
++The capability values in this frame are copied from the validated upstream
++`inspect` result and are used to configure selection; they are not promoted to
++the final receipt. A v2-required art turn must use the fixed Sol route and
++`reasoning:"high"`, regardless of whether the account also exposes Pro. This
++is a Ludory Art Acceptance policy; it does not change the upstream model
++matrix. Generic upstream v2 turns retain the existing supported Sol efforts.
++
++The bridge sends the upstream `prepared_selected_ack` only with the prepared
++prompt and image data URLs derived from the source bytes already validated by
++Ludory. It does not send `hostObservation`, `imageSha256`, or any other
++attestation field as a request-side declaration.
++
++When the v2 event is valid, the bridge may project it into Ludory's existing
++response shape for compatibility, but the projection is created locally from
++the validated event and never read from `result`:
++
++```json
++{
++  "status": "HOST_OBSERVED",
++  "routeObserved": "web-dev",
++  "modelObserved": "gpt-6-sol",
++  "imageInputObserved": true,
++  "imageRef": "<observation.attachments[0].ref>",
++  "imageSha256": "<observation.attachments[0].sha256>",
++  "hostObservation": {
++    "protocolVersion": 2,
++    "source": "browser-ui",
++    "traceId": "<observation.traceId>",
++    "selectedModel": "gpt-6-sol",
++    "reasoning": "<observation.model.effort>",
++    "image": {
++      "ref": "<attachment.ref>",
++      "sha256": "<attachment.sha256>",
++      "bytes": "<attachment.bytes>"
++    },
++    "upload": {
++      "creationRequestObserved": true,
++      "processingRequestObserved": true,
++      "processingRequestKind": "<validated observation.upload.processingRequestKind>",
++      "processingEvent": "file.processing.completed",
++      "processingCompleted": true,
++      "visibleAttachmentChip": true
++    }
++  },
++  "text": "<upstream result.text>"
++}
++```
++
++`HOST_OBSERVED` is allowed only after the event has passed all checks below,
++the observation callback has completed successfully, `submitted` has arrived,
++and the result text is valid. A legacy result or an upstream text result
++without a validated event remains `BLOCKED`; no result field can manufacture
++the missing observation.
++
++### Activation acknowledgement barrier
++
++The v2 bridge uses one fixed finite callback deadline,
++`BROWSER_OBSERVATION_CALLBACK_TIMEOUT_MS = 10_000`. The deadline starts when
++`send_activated` arrives while the observation callback promise is still
++unsettled. If the callback has already resolved, no wait is needed. The
++upstream acknowledgement is the gate that releases the browser's Send
++boundary, so no Send may occur while this wait is in progress.
++
++For an upstream v2-required pending turn, `send_activation_ack` is sent only
++from the following state transition:
++
++```text
++AWAIT_ACTIVATED
++  -- valid browser_observation_v2 --> OBSERVATION_VALIDATING
++  -- callback starts --> OBSERVATION_CALLBACK_PENDING
++  -- callback resolves before send_activated --> OBSERVATION_VALIDATED
++  -- send_activated while OBSERVATION_VALIDATED --> ACTIVATION_ACK_PENDING
++  -- send_activated while OBSERVATION_CALLBACK_PENDING --> OBSERVATION_CALLBACK_WAIT
++  -- callback resolves before the deadline --> ACTIVATION_ACK_PENDING
++  -- write succeeds --> AWAIT_SUBMITTED
++  -- callback rejects or deadline expires --> FAILED_NO_SEND
++```
++
++The bridge must not write `send_activation_ack` while the event is absent,
++malformed, mismatched, duplicated, stale, or while the observation callback is
++rejected. If `send_activated` arrives while the callback is pending, the
++bridge awaits that exact callback up to the fixed deadline. A successful
++resolution is the only transition that permits `send_activation_ack`. A
++rejection or timeout aborts and closes the turn without ACK and therefore
++without Send. If `send_activated` arrives before any valid observation, the
++bridge aborts immediately with the same no-ACK/no-Send rule. This is an
++explicit invariant, not a timing expectation.
++
++Implementation invariant: the only code path allowed to write
++`{ type: "send_activation_ack", id }` for an upstream v2 turn is guarded by
++`pending.observationState === "OBSERVATION_VALIDATED"` and a successfully
++settled `pending.observationCallback` promise. The `send_activated` handler
++may await that promise through the bounded deadline; its rejection and
++timeout paths may only abort. No fallback branch, timeout handler, or legacy
++`image_attached` branch may write that frame for a v2 turn.
++
++For compatibility-v1 turns, the existing acknowledgement behavior remains
++unchanged. That path cannot be used to grant Ludory art acceptance.
++
++## 5. Versioned wire schema
++
++The new frame is an existing `event` envelope with a versioned observation
++payload:
++
++```json
++{
++  "type": "event",
++  "id": "turn_0123456789abcdef0123456789abcdef",
++  "event": "browser_observation_v2",
++  "observation": {
++    "version": 2,
++    "traceId": "turn_0123456789abcdef0123456789abcdef",
++    "source": "chatgpt-web-browser",
++    "model": {
++      "canonicalId": "chatgpt-web/gpt-6-sol",
++      "backendModelId": "gpt-5.6-sol",
++      "family": "6",
++      "effort": "high",
++      "selectionLabel": "High"
++    },
++    "attachments": [
++      {
++        "ref": "hero-expression",
++        "name": "hero-expression.png",
++        "mimeType": "image/png",
++        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
++        "bytes": 12345,
++        "upload": {
++          "creationRequestObserved": true,
++          "processingRequestObserved": true,
++          "processingRequestKind": "process_upload_stream",
++          "processingEvent": "file.processing.completed",
++          "processingCompleted": true,
++          "visibleAttachmentChip": true
++        }
++      }
++    ]
++  }
++}
++```
++
++### Field contract
++
++| Field | Contract |
++| --- | --- |
++| `type` | Literal `"event"`. |
++| `id` | The active helper turn id; it must equal `turn.traceId`. |
++| `event` | Literal `"browser_observation_v2"`. |
++| `observation.version` | Literal number `2`. |
++| `observation.traceId` | Exact active `traceId`; no cross-turn reuse. |
++| `observation.source` | Literal `"chatgpt-web-browser"`; identifies the trusted producer, not a caller claim. |
++| `model.canonicalId` | Canonical route derived from the browser-confirmed family and effort. Ludory art acceptance requires exact `"chatgpt-web/gpt-6-sol"`. |
++| `model.backendModelId` | Exact current internal route `"gpt-5.6-sol"`; included to make the canonical-to-transport mapping explicit. |
++| `model.family` | Literal `"6"`, obtained only after browser model-family assertion. |
++| `model.effort` | Normalized selected effort: `low`, `medium`, `high`, `xhigh`, or `max`; the generic upstream Sol matrix remains unchanged, while Ludory Art Acceptance requires exactly `high`. |
++| `model.selectionLabel` | Non-empty label read from the selected browser control after selection confirmation. |
++| `attachments` | One or more image attachments; no skill/text files are attested by this event. |
++| `attachment.ref` | Exact prepared-image reference; unique within the observation. |
++| `attachment.name` | Exact file name passed to the upload mechanism; unique across the complete upload file list, including image and skill files. |
++| `attachment.mimeType` | Lower-case `image/*` MIME type from the prepared image payload. |
++| `attachment.sha256` | Lower-case 64-hex SHA-256 of the exact image buffer passed to `setInputFiles`. |
++| `attachment.bytes` | Positive safe integer equal to the exact image buffer byte length. |
++| `upload.creationRequestObserved` | Literal `true`; the helper matched the file's owned `POST /backend-api/files` request. |
++| `upload.processingRequestObserved` | Literal `true`; the helper matched the same file's owned processing request. |
++| `upload.processingRequestKind` | `process_upload_stream` or `claim_and_finish`, matching the current upstream observer's supported endpoint. |
++| `upload.processingEvent` | Literal `"file.processing.completed"`, observed in the owned upload-processing stream. |
++| `upload.processingCompleted` | Literal `true`; no earlier or inferred upload state is accepted. |
++| `upload.visibleAttachmentChip` | Literal `true`; set only after the corresponding named chip/group is visible in the composer. |
++
++The schema intentionally does not export a server `file_id`. It is not needed
++for Ludory source binding, may be unstable across retries, and would add a
++server identifier to a local evidence contract. The stable source identity is
++`ref` plus the helper-computed hash and byte count.
++
++Before the upload observer or `setInputFiles` is touched, the helper builds
++the complete upstream file list returned by `chatGptPromptFilePayloads`:
++all image files followed by all skill files. Every upload name must be
++non-empty and unique in that complete list. An exact image/image,
++skill/skill, or image/skill name collision is rejected before any upload
++request can be created; there is no partial upload and no v2 observation.
++The check covers the actual generated image names (`<ref>.<extension>`) and
++the validated skill-file names, not only the names later exported in
++`observation.attachments`.
++
++The observation does not introduce a second attachment limit. It inherits the
++upstream limits enforced by `chatGptPromptFilePayloads`:
++
++- at most 10 total attachments per message, counting image files and skill
++  text files together;
++- each image is non-empty and at most 20,000,000 bytes;
++- all image and skill-file buffers together are at most 50,000,000 bytes;
++- the v2 `attachments` array contains only image files, so its maximum is
++  `10 - skillFiles.length` for the prepared prompt.
++
++The v2 bridge adopts these upstream limits; it must not introduce a hidden
++10 MiB ceiling. The current Ludory `MAX_INPUT_IMAGE_BYTES` value is a legacy
++consumer guard and must not be presented as the upstream protocol limit. If a
++separate Ludory product policy retains a stricter preflight, that rejection is
++explicitly local and blocked, never evidence that the upload occurred.
++
++## 6. What the helper is allowed to attest
++
++The event is produced inside `ChatGptBrowserWorker` only after all of the
++following facts are true for the same turn:
++
++### Model
++
++`selectModelAndEffort` has selected the requested family and has completed the
++existing browser assertions, including the model-family announcement,
++effort slider state, selected control label, and final post-menu confirmation.
++For the accepted route the helper constructs the canonical route from the
++confirmed family and effort, not from the incoming backend id alone:
++
++```text
++family 6 + low              -> chatgpt-web/gpt-6-sol-instant
++family 6 + medium/high/xhigh -> chatgpt-web/gpt-6-sol
++family 6 + max              -> chatgpt-web/gpt-6-pro (Astra/Pro)
++```
++
++For Ludory Web Art Acceptance, the exact canonical id must be
++`chatgpt-web/gpt-6-sol` and the dispatched and observed effort must be exactly
++`high`. The generic upstream v2 matrix still admits `medium`, `high`, and
++`xhigh`; `medium` and `xhigh` are rejected only by the Ludory art-specific
++policy as `browser_observation_v2_art_effort_mismatch`. `low` is GPT-6 Sol
++Instant, and `max` is the GPT-6 Pro/Astra route; neither may be attested as
++GPT-6 Sol. A family-5.6 or Luna selection also fails the Ludory gate.
++
++### Image bytes
++
++The worker builds image payloads from the prepared prompt and, immediately
++before `input.setInputFiles(files)`, computes SHA-256 and byte length from each
++image `Buffer` in the exact object passed to Playwright. The implementation
++must not hash a path, data URL string, declaration, or server response.
++
++The helper records the image `ref`, file name, MIME type, hash, byte count, and
++the exact source `Buffer` in an in-memory per-turn record. The record also
++contains the matched creation request id, processing request id, observed file
++id when present, and the chip locator key. These request ids are helper-local
++correlation data; they are not accepted from the caller and are not used as a
++portable receipt identity. The record is discarded with the turn and is never
++reused for another `traceId`.
++
++### Upload and visible attachment
++
++The existing upload observer is started before `setInputFiles`. The worker
++must clone each source buffer once, compute the hash and byte count from that
++clone, and pass that same clone in the `setInputFiles` payload. For every
++attested image, the helper must correlate all of the following to the same
++per-turn record, exact file name/ref, and upload request ids:
++
++- the owned creation request for that file;
++- the owned upload-processing request for that file;
++- the processing stream's file id when the server supplies one;
++- the complete stream termination with
++  `file.processing.completed`;
++- no processing error, failure, cancellation, or incomplete stream;
++- the named attachment group/chip for that exact file visible in the same
++  composer;
++- the Send control enabled after attachment readiness.
++
++The event is emitted after these checks and before the send-activation
++boundary. A file id, a successful creation request, a visible loading card, or
++an enabled Send button by itself is insufficient. A processing completion for
++another file, another request, or another trace is not evidence for this
++attachment.
++
++## 7. Turn state and event ordering
++
++The v2-required path has this state machine:
++
++```text
++READY
++  -> NEGOTIATED
++  -> RUN_ACCEPTED
++  -> PROMPT_SELECTED
++  -> MODEL_CONFIRMED
++  -> ATTACHMENT_OBSERVING
++  -> ATTACHMENT_CONFIRMED
++  -> OBSERVATION_VALIDATING
++  -> OBSERVATION_CALLBACK_PENDING
++  -> OBSERVATION_VALIDATED
++  -> SEND_ACTIVATED
++  -> ACTIVATION_ACK_PENDING
++  -> SUBMITTED
++  -> RESPONSE
++  -> COMPLETE
++```
++
++Failure from any state is terminal for that turn. A required observation is not
++optional and cannot be added after the answer has started.
++
++`send_activated` is a barrier, not a permission to bypass an unfinished
++callback. If it arrives in `OBSERVATION_CALLBACK_PENDING`, the turn enters
++`OBSERVATION_CALLBACK_WAIT` and waits at most
++`BROWSER_OBSERVATION_CALLBACK_TIMEOUT_MS`; successful resolution proceeds to
++`ACTIVATION_ACK_PENDING`, while rejection or timeout enters `FAILED_NO_SEND`.
++The latter is terminal and records a tombstone before abort/cleanup, so a
++callback that resolves later cannot release Send or produce evidence.
++
++The client enforces these rules:
++
++- `browser_observation_v2` must have a pending turn with the same `id`;
++- `observation.traceId` must equal both `id` and `turn.traceId`;
++- it must be the first and only v2 observation for that turn;
++- it must arrive after prompt selection and before `send_activated`,
++  `submitted`, or `result`;
++- it must contain exactly the prepared image set after strict identity
++  comparison; extra, missing, duplicate, or reordered identities are rejected;
++- its model and attachment facts must pass all value and consistency checks;
++- `result` for a v2-required turn without a valid observation is rejected as
++  `browser_observation_v2_missing`;
++- `send_activated` is accepted only after observation validation and successful
++  completion of the consumer callback; if that callback is unresolved, the
++  client waits up to `BROWSER_OBSERVATION_CALLBACK_TIMEOUT_MS`, then aborts on
++  rejection or timeout and writes no `send_activation_ack`;
++- a late, foreign, duplicate, or contradictory v2 frame is a protocol error
++  and fails closed. It must not be ignored as ordinary progress.
++
++The helper also keeps a per-run observation state. It cannot emit the event
++twice, emit it for a turn without a required image, or emit it after the
++submission callback. This protects the producer side even when the consumer
++is not the reference client.
++
++### Late and post-completion frames
++
++The consumer keeps bounded terminal tombstones for completed and failed
++`traceId`s for at least the configured turn timeout. If a
++`browser_observation_v2` frame arrives after `result`, `error`, abort, timeout,
++or helper-side cleanup, the bridge classifies it as
++`browser_observation_v2_stale`, rejects the turn if still possible, closes the
++helper connection, and discards the frame. It never attaches late evidence to
++a new turn or to an existing receipt.
++
++An observation with an id that is neither active nor present in the bounded
++tombstones is a foreign trace and fails as
++`browser_observation_v2_trace_mismatch`. Ordinary legacy frames retain their
++compatibility-v1 handling, but a v2 observation is never silently ignored.
++After the helper is closed, all queued late frames and late callback
++resolutions are discarded; the corresponding Ludory operation remains
++`BLOCKED`.
++
++## 8. Client-facing API
++
++The existing `LauncherBrowserHelperClient.run()` continues to resolve to the
++response text. The additive `BrowserTurn` fields are:
++
++```ts
++requireBrowserObservationV2?: boolean;
++onBrowserObservationV2?: (
++  observation: BrowserObservationV2,
++) => void | Promise<void>;
++```
++
++For a required turn, the client:
++
++1. performs feature negotiation before dispatch;
++2. parses and validates the event rather than constructing one;
++3. compares the observed image identity, SHA-256, and byte count with the
++   prepared image bytes as an independent consistency check;
++4. invokes `onBrowserObservationV2` with the validated helper evidence;
++5. if `send_activated` arrives while that callback is unsettled, waits for its
++   result for at most `BROWSER_OBSERVATION_CALLBACK_TIMEOUT_MS`;
++6. aborts the browser turn without ACK/Send if the callback rejects or times
++   out;
++7. rejects the final result if the callback was never delivered a valid event.
++
++The client-side comparison is not a replacement for helper evidence. It only
++detects a mismatch between the helper's attestation and the prepared bytes
++known by the daemon. The browser-observed flags remain meaningful only because
++the event came from a helper that passed the negotiated feature boundary and
++performed the DOM/network checks internally.
++
++Ludory's adapter must request v2 for art acceptance and persist the validated
++observation alongside the independent Web response. It must enforce its own
++policy:
++
++- no observation or no real Web response: `BLOCKED`;
++- P0/P1: `REWORK`;
++- P2-only with a real independent visual verdict: `PASS_ART`;
++- two `REWORK` results in one run: `ESCALATE`.
++
++No code in this helper may turn the observation into a visual verdict.
++
++## 9. Failure codes and handling
++
++The helper uses the existing error envelope. v2-specific errors use stable
++codes; local protocol validation errors use the same code names without
++pretending that the browser produced evidence.
++
++| Code | Boundary | Required action |
++| --- | --- | --- |
++| `browser_observation_v2_unavailable` | `ready` did not advertise v2. | Reject before dispatch; Ludory remains `BLOCKED`. |
++| `browser_observation_v2_required` | Required flag was requested but the helper cannot satisfy it. | Fail the turn; never fall back to v1. |
++| `browser_observation_v2_attachment_missing` | No prepared image exists for a required art turn. | Fail before send. |
++| `browser_observation_v2_attachment_incomplete` | Processing completion, visible chip, or Send readiness was not confirmed. | Fail before send; no observation. |
++| `browser_observation_v2_model_mismatch` | Browser-confirmed canonical route is not `chatgpt-web/gpt-6-sol`, or the effort is not `medium`, `high`, or `xhigh`. | Fail before send; no observation. |
++| `browser_observation_v2_art_effort_mismatch` | A Ludory Art Acceptance turn observes a Sol effort other than `high`. | Abort before ACK/Send; no art receipt. The generic upstream Sol matrix is unchanged. |
++| `browser_observation_v2_hash_mismatch` | Helper evidence differs from prepared image bytes. | Abort and reject; no receipt. |
++| `browser_observation_v2_upload_mismatch` | File name/ref, creation request, processing request, file id, or visible chip does not match the source-buffer record. | Abort and reject; no observation. |
++| `browser_observation_v2_file_name_collision` | Two names in the complete image-plus-skill upload list are equal. | Reject before `setInputFiles`; no upload request, observation, or receipt. |
++| `browser_observation_v2_trace_mismatch` | `id`, `traceId`, or prepared-turn identity differs. | Protocol failure; terminate the helper connection if needed. |
++| `browser_observation_v2_duplicate` | More than one observation for one trace. | Protocol failure; no evidence is accepted. |
++| `browser_observation_v2_stale` | Observation arrives after submission/result or after the pending turn is gone. | Protocol failure; no evidence is accepted. |
++| `browser_observation_v2_callback_failed` | The consumer observation callback rejected. | Abort without `send_activation_ack`; no Send or receipt. |
++| `browser_observation_v2_callback_timeout` | `send_activated` arrived while the observation callback remained unsettled past the fixed deadline. | Abort without `send_activation_ack`; no Send or receipt. |
++| `browser_observation_v2_invalid` | Schema, bounds, MIME, hash, or field invariant is invalid. | Protocol failure; fail closed. |
++| `browser_observation_v2_missing` | Required turn reached result without a valid observation. | Reject the result; Ludory remains `BLOCKED`. |
++
++The current helper's generic `error` frame remains valid for compatibility.
++The new implementation should use the structured existing envelope when a
++v2-specific error originates in the worker and preserve the existing status,
++error type, and retryability semantics.
++
++## 10. Producer integration points
++
++The smallest implementation surface is:
++
++1. `src/adapters/chatgpt-web/browser-worker.ts`
++   - add the optional `BrowserTurn` requirement/callback;
++   - return attachment observation metadata from the existing attachment
++     stage without weakening its current checks;
++   - compute hashes from the `Buffer` objects passed to `setInputFiles`;
++   - construct and emit the observation only after model and attachment
++     confirmation, before send activation.
++2. `src/adapters/chatgpt-web/attachment-upload.ts`
++   - retain the current stream/error behavior;
++   - expose only the minimal completion metadata needed to bind each expected
++     file name to `file.processing.completed`.
++3. `src/adapters/chatgpt-web/browser-helper-main.ts`
++   - advertise the feature;
++   - validate `requireBrowserObservationV2`;
++   - forward the worker callback as the versioned event with the same `id`.
++4. `src/adapters/chatgpt-web/launcher-helper-client.ts`
++   - parse the new event;
++   - negotiate the feature before dispatch;
++   - validate correlation, ordering, duplicate/stale behavior, and hashes;
++   - invoke the additive callback while preserving the text return type.
++
++No launcher binary, installed runtime, stable profile, or descriptor trust
++check is modified by this protocol extension.
++
++## 11. Regression coverage
++
++The upstream test suite must cover the following matrix:
++
++| Test | Expected result |
++| --- | --- |
++| Ready frame advertises v2 and a valid required turn | Observation reaches the callback with the exact trace id, model, hashes, sizes, and upload flags. |
++| Compatibility-v1 helper with no v2 feature | A v2-required client rejects before dispatch; an ordinary v1 turn still works. |
++| Required turn with no image | `browser_observation_v2_attachment_missing`; no Send/submit boundary. |
++| GPT-6 Sol `medium`, `high`, and `xhigh` | Canonical `chatgpt-web/gpt-6-sol` is admissible; the actual selected effort is retained. |
++| Ludory Art Acceptance with `medium` or `xhigh` | Generic upstream v2 remains compatible with the unchanged model matrix, but the Ludory art policy rejects the turn as `browser_observation_v2_art_effort_mismatch`; only `reasoning:"high"` is dispatched for this path. |
++| GPT-6 `low` / Sol Instant | No GPT-6 Sol attestation; `browser_observation_v2_model_mismatch`. |
++| GPT-6 `max` / Astra-Pro | No GPT-6 Sol attestation; `browser_observation_v2_model_mismatch`. |
++| GPT-5.6 family or Luna | No observation for Ludory art acceptance; `browser_observation_v2_model_mismatch`. |
++| Upload processing stream without completion | No observation; `browser_observation_v2_attachment_incomplete`. |
++| Visible chip before processing completion | No observation; processing completion is still required. |
++| Creation request belongs to another file/trace | No observation; `browser_observation_v2_upload_mismatch`. |
++| Processing request/file id belongs to another file | No observation; `browser_observation_v2_upload_mismatch`. |
++| Source buffer mutated between hash and `setInputFiles` | Hash is computed from the cloned buffer passed to upload; any mismatch fails closed. |
++| Wrong file name/ref chip becomes visible | No observation; `browser_observation_v2_upload_mismatch`. |
++| Duplicate image names, duplicate skill names, or image/skill filename collision in the complete upload list | Rejected before `setInputFiles` with `browser_observation_v2_file_name_collision`; no upload request or observation. |
++| More than 10 total upstream attachments, image over 20,000,000 bytes, or total over 50,000,000 bytes | Upstream admission fails; no v2 event or receipt. |
++| Ludory's conservative 10 MiB outer image gate | `DEV_IMAGE_INPUT_INVALID`/blocked before dispatch; no claim that the upstream event occurred. |
++| Hash mismatch | Client rejects the event and aborts; no result is accepted. |
++| Byte-count mismatch | Client rejects the event and aborts. |
++| Foreign `id` or mismatched `observation.traceId` | Protocol failure; no callback. |
++| Duplicate observation for one turn | Protocol failure; first event is not promoted to a completed receipt. |
++| `send_activated` before observation validation | No `send_activation_ack`; turn is aborted. |
++| Observation callback pending at `send_activated`, then resolves before the 10-second deadline | ACK is sent only after resolution; the helper may proceed to `submitted`. |
++| Observation callback rejects at `send_activated` | No `send_activation_ack`, no Send, and `browser_observation_v2_callback_failed`. |
++| Observation callback remains pending past the 10-second deadline | No `send_activation_ack`, no Send, and `browser_observation_v2_callback_timeout`. |
++| Stale observation after `submitted`, `result`, abort, or timeout | Tombstone catches it; helper connection closes and no evidence is accepted. |
++| Unknown post-completion observation id | Foreign trace failure; no evidence is accepted. |
++| Extra/missing/duplicate attachment refs | Protocol failure; no evidence accepted. |
++| Upstream `ready` has no v2 feature | Ludory returns `DEV_BROWSER_OBSERVATION_V2_UNAVAILABLE`; no v1 fallback. |
++| Upstream `inspect` reports route availability but no turn observation | Capability remains preflight-only; final status is `BLOCKED`. |
++| Text response without a v2 event | Required turn rejects as missing; v1 turn remains compatible. |
++| v2 event without the explicit requirement | Helper does not emit it; v1 event stream remains unchanged. |
++| Independent Web response is absent or not visual | Ludory remains `BLOCKED`; observation alone cannot become `PASS_ART`. |
++| Real visual verdict with only P2 findings | `PASS_ART` is eligible, subject to source-bound receipt checks. |
++| Any P0/P1 finding | `REWORK`; no `PASS_ART`. |
++| Second `REWORK` in one run | `ESCALATE`; no third automatic acceptance attempt. |
++| Source artifact changes before callback/result or receipt | Source revalidation fails; no receipt is written. |
++
++Use the existing helper-process fixture in
++`tests/launcher-helper-client.test.ts` for wire negotiation and correlation,
++the attachment fixtures in `tests/attachment-upload.test.ts` for completion
++semantics, and browser-worker contract fixtures for model/chip ordering. No
++test may mark a synthetic event as `HOST_OBSERVED`; test fixtures must remain
++clearly separate from real smoke evidence.
++
++## 12. Isolated DEV build and smoke plan
++
++The implementation will be built only in the upstream checkout:
++
++```text
++bun install --frozen-lockfile
++bun run scripts/build-browser-helper.ts .launcher-runtime/browser-helper.cjs
++```
++
++The supported DEV harness then uses the working-tree helper through the
++isolated DEV launcher/profile:
++
++```text
++bun run dev:launcher
++bun run src/cli.ts dev status
++bun run dev:chat <name> --model chatgpt-web/gpt-6-sol <message>
++```
++
++The exact smoke command may be a bounded helper/client fixture if the named
++DEV chat command does not expose the new callback. It must still use the real
++browser surface and the isolated profile. The smoke evidence must record:
++
++- the helper build path and source commit;
++- `ready.features` containing `browser_observation_v2`;
++- the requested and observed canonical model;
++- the actual test-image path, byte count, and independently calculated SHA-256;
++- the helper observation's byte count and SHA-256;
++- `file.processing.completed` and visible attachment-chip confirmation;
++- the real Web answer and its independent visual verdict;
++- the resulting source-bound Ludory receipt path.
++
++If any of these is unavailable, the run remains `BLOCKED` at that exact
++boundary. A unit-test event, a prompt declaration, a launcher setting, or a
++stale capability marker is not a substitute for the missing observation.
++
++### Separate ImageGen smoke
++
++ImageGen is tested independently through the native Codex `image_gen` tool. It
++is not a helper protocol requirement, and Ludory must not import, read, or
++require a CEOS manifest to execute its own workflows. The smoke has four
++separate outcomes:
++
++1. `IMAGEGEN_UNAVAILABLE`: the native ImageGen capability is not exposed in
++   the current Codex session;
++2. `IMAGEGEN_ROUTING_ERROR`: the capability is exposed and challenged, but the
++   actual native call fails at routing or generation;
++3. `IMAGEGEN_CAPABILITY_CHALLENGE_BLOCKED`: the run-scoped capability
++   challenge itself is unavailable or rejects the legacy/old capability
++   handshake;
++4. `BLOCKED_SESSION_CONTEXT_UNVERIFIED`: the current Codex context is not
++   trusted, so generation must not be attempted.
++
++Only after a fresh current-turn, run-scoped capability challenge succeeds may
++the native ImageGen call be made. The smoke records the actual tool result or
++the exact failure boundary; it never uses a CEOS manifest, environment flag,
++stale marker, synthetic PNG, or declaration to turn a blocked result into
++ImageGen PASS.
++
++## 13. Security and release gates
++
++- The helper remains the sole producer of browser-observed claims.
++- The caller cannot set `browserObserved`, processing completion, chip
++  visibility, hash, or byte count through the run message.
++- The stable launcher registration and `DEV_DESCRIPTOR_UNTRUSTED` boundary are
++  untouched.
++- A v2 absence is a hard boundary for Ludory art acceptance, not a reason to
++  downgrade to v1.
++- Web visual evaluation and browser input attestation are separate evidence
++  classes.
++- The Ludory PR remains Draft and is not merged until the real Web E2E, the
++  separate ImageGen smoke, and the required current CI checks have fresh
++  evidence.
++
++This document is ready for schema review. Implementation should begin only
++after the exact event names and field contracts above are approved.
+diff --git a/launcher/electron/main.cjs b/launcher/electron/main.cjs
+index 55fdceb..85bc1e1 100644
+--- a/launcher/electron/main.cjs
++++ b/launcher/electron/main.cjs
+@@ -54,8 +54,11 @@ const LAUNCHER_PROFILE = resolveLauncherProfile({ appData: app.getPath("appData"
+ const IS_DEV_PROFILE = LAUNCHER_PROFILE.kind === DEVELOPMENT_PROFILE;
+ const CORE_HOME = LAUNCHER_PROFILE.coreHome;
+ const BROWSER_DESCRIPTOR_PATH = path.join(CORE_HOME, "runtime", "launcher-browser.json");
++const DEV_PROFILE_BROWSER_HELPER_PATH = path.join(CORE_HOME, "runtime", "browser-helper.cjs");
+ const BROWSER_HELPER_PATH = app.isPackaged
+   ? path.join(process.resourcesPath, "runtime", "app", "browser-helper.cjs")
++  : IS_DEV_PROFILE && fs.existsSync(DEV_PROFILE_BROWSER_HELPER_PATH)
++    ? DEV_PROFILE_BROWSER_HELPER_PATH
+   : path.join(SOURCE_ROOT, ".launcher-runtime", "browser-helper.cjs");
+ const GITHUB_URL = "https://github.com/miuuyy/codex-chatgpt-web";
+ const X_URL = "https://x.com/miu21590";
+diff --git a/src/adapters/chatgpt-web/attachment-upload.ts b/src/adapters/chatgpt-web/attachment-upload.ts
+index 2ceb5f9..ca9315b 100644
+--- a/src/adapters/chatgpt-web/attachment-upload.ts
++++ b/src/adapters/chatgpt-web/attachment-upload.ts
+@@ -13,7 +13,9 @@ export async function observeChatGptAttachmentUploads(page: Page, names: string[
+   const expected = new Set(names);
+   const completed = new Set<string>();
+   const creations = new Set<string>();
+-  const streams = new Map<string, { name: string; fileId?: string; decoder: StringDecoder; pending: string; buffered?: string[]; activation?: Promise<void> }>();
++  const creationNames = new Set<string>();
++  const streams = new Map<string, { name: string; fileId?: string; kind: "process_upload_stream" | "claim_and_finish"; decoder: StringDecoder; pending: string; buffered?: string[]; activation?: Promise<void> }>();
++  const processing = new Map<string, { requestId: string; kind: "process_upload_stream" | "claim_and_finish"; completed: boolean }>();
+   let failure: Error | undefined;
+   let disposed = false;
+   let resolve!: () => void;
+@@ -51,6 +53,7 @@ export async function observeChatGptAttachmentUploads(page: Page, names: string[
+       if (/\.(error|failed|cancelled|unknown)$/.test(name)) return fail(`processing event ${name}`);
+       if (name === "file.processing.completed") {
+         completed.add(stream.name);
++        processing.set(stream.name, { requestId: id, kind: stream.kind, completed: true });
+         if ([...expected].every(name => completed.has(name))) resolve();
+         return;
+       }
+@@ -67,8 +70,9 @@ export async function observeChatGptAttachmentUploads(page: Page, names: string[
+     let body;
+     try { body = JSON.parse(event.request.postData ?? ""); } catch { return; }
+     if (!expected.has(body?.file_name)) return;
+-    if (creation) { creations.add(event.requestId); return; }
+-    streams.set(event.requestId, { name: body.file_name, fileId: body.file_id, decoder: new StringDecoder("utf8"), pending: "", buffered: [] });
++    if (creation) { creations.add(event.requestId); creationNames.add(body.file_name); return; }
++    const kind = url.pathname.endsWith("/claim_and_finish") ? "claim_and_finish" : "process_upload_stream";
++    streams.set(event.requestId, { name: body.file_name, fileId: body.file_id, kind, decoder: new StringDecoder("utf8"), pending: "", buffered: [] });
+   };
+   const onResponse = (event: any) => {
+     if (creations.has(event.requestId)) {
+@@ -135,6 +139,13 @@ export async function observeChatGptAttachmentUploads(page: Page, names: string[
+   try { await session.send("Network.enable"); } catch (error) { await dispose(); throw error; }
+   return {
+     throwIfFailed: () => { if (failure) throw failure; },
++    getEvidence: () => names.map(name => {
++      const evidence = processing.get(name);
++      return { name, creationRequestObserved: creationNames.has(name),
++        processingRequestObserved: Boolean(evidence), processingRequestKind: evidence?.kind,
++        processingEvent: evidence?.completed ? "file.processing.completed" : undefined,
++        processingCompleted: evidence?.completed === true };
++    }),
+     wait: (signal?: AbortSignal) => new Promise<void>((yes, no) => {
+       const abort = () => no(signal?.reason ?? new DOMException("Upload observation aborted", "AbortError"));
+       if (signal?.aborted) { abort(); return; }
+diff --git a/src/adapters/chatgpt-web/browser-helper-main.ts b/src/adapters/chatgpt-web/browser-helper-main.ts
+index 5e952aa..3984025 100644
+--- a/src/adapters/chatgpt-web/browser-helper-main.ts
++++ b/src/adapters/chatgpt-web/browser-helper-main.ts
+@@ -10,6 +10,7 @@ import { createBrowserHelperPromptSelection } from "./browser-helper-prompt-sele
+ import { isChatGptWebMultipartPartCount, type CompiledChatGptWebPrompt } from "./prompt";
+ import { ChatGptMirroredTurnProgress } from "./turn-progress";
+ import type { ChatGptExternalTurnProgressSnapshot } from "./turn-progress";
++import type { BrowserObservationV2 } from "./browser-observation";
+ 
+ interface RunMessage {
+   type: "run";
+@@ -26,6 +27,7 @@ interface RunMessage {
+     modelId: string;
+     reasoning?: string;
+     modelFamily?: "5.6" | "6";
++    requireBrowserObservationV2?: boolean;
+     capabilities: ChatGptWebCapabilities;
+     nativeConnector?: boolean;
+     resumeAvailable?: boolean;
+@@ -185,6 +187,9 @@ async function run(message: RunMessage): Promise<void> {
+   if (message.turn.externalProgress !== undefined && typeof message.turn.externalProgress !== "boolean") {
+     throw new Error("Browser helper external progress flag is invalid");
+   }
++  if (message.turn.requireBrowserObservationV2 !== undefined && typeof message.turn.requireBrowserObservationV2 !== "boolean") {
++    throw new Error("Browser helper browser observation requirement is invalid");
++  }
+   const provider: CodexProviderConfig = {
+     adapter: "chatgpt-web",
+     baseUrl: "https://chatgpt.com",
+@@ -219,6 +224,7 @@ async function run(message: RunMessage): Promise<void> {
+     modelId: message.turn.modelId,
+     reasoning: message.turn.reasoning,
+     ...(message.turn.modelFamily ? { modelFamily: message.turn.modelFamily } : {}),
++    ...(message.turn.requireBrowserObservationV2 ? { requireBrowserObservationV2: true } : {}),
+     capabilities: message.turn.capabilities,
+     ...(message.turn.nativeConnector ? { nativeConnector: true } : {}),
+     prepare: prepareSelected,
+@@ -261,6 +267,13 @@ async function run(message: RunMessage): Promise<void> {
+     } : {}),
+     onHeartbeat: () => writeProtocol({ type: "event", id: message.id, event: "heartbeat" }),
+     onGenerationProgress: () => writeProtocol({ type: "event", id: message.id, event: "generation_progress" }),
++    ...(message.turn.requireBrowserObservationV2 ? {
++      onBrowserObservationV2: (observation: BrowserObservationV2) => {
++        if (!writeProtocol({ type: "event", id: message.id, event: "browser_observation_v2", observation })) {
++          throw new Error("Browser helper could not persist browser observation evidence");
++        }
++      },
++    } : {}),
+     onPreparedSelected: reused => {
+       if (!writeProtocol({ type: "event", id: message.id, event: "prepared_selected", reused })) {
+         throw new Error("Browser helper could not request prompt selection");
+@@ -534,4 +547,4 @@ process.once("SIGTERM", () => {
+ });
+ 
+ // Advertise the optional frames this helper understands so the daemon can negotiate them explicitly.
+-writeProtocol({ type: "ready", features: ["progress", "tool-boundary-ack", "completion-fence", "multipart-stage-ack", "skill-attachments"] });
++writeProtocol({ type: "ready", features: ["progress", "tool-boundary-ack", "completion-fence", "multipart-stage-ack", "skill-attachments", "browser_observation_v2"] });
+diff --git a/src/adapters/chatgpt-web/browser-observation.ts b/src/adapters/chatgpt-web/browser-observation.ts
+new file mode 100644
+index 0000000..7edef42
+--- /dev/null
++++ b/src/adapters/chatgpt-web/browser-observation.ts
+@@ -0,0 +1,124 @@
++export const BROWSER_OBSERVATION_V2_FEATURE = "browser_observation_v2" as const;
++export const BROWSER_OBSERVATION_CALLBACK_TIMEOUT_MS = 10_000;
++
++export type BrowserModelFamily = "5.6" | "6";
++export type BrowserModelEffort = "low" | "medium" | "high" | "xhigh" | "max";
++
++export interface BrowserObservationV2Upload {
++  creationRequestObserved: true;
++  processingRequestObserved: true;
++  processingRequestKind: "process_upload_stream" | "claim_and_finish";
++  processingEvent: "file.processing.completed";
++  processingCompleted: true;
++  visibleAttachmentChip: true;
++}
++
++export interface BrowserObservationV2Attachment {
++  ref: string;
++  name: string;
++  mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
++  sha256: string;
++  bytes: number;
++  upload: BrowserObservationV2Upload;
++}
++
++export interface BrowserObservationV2 {
++  version: 2;
++  traceId: string;
++  source: "chatgpt-web-browser";
++  model: {
++    canonicalId: string;
++    backendModelId: string;
++    family: BrowserModelFamily;
++    effort: BrowserModelEffort;
++    selectionLabel: string;
++  };
++  attachments: BrowserObservationV2Attachment[];
++}
++
++export class BrowserObservationV2Error extends Error {
++  readonly code = "BROWSER_OBSERVATION_V2_INVALID";
++}
++
++const fail = (message: string): never => { throw new BrowserObservationV2Error(message); };
++const isRecord = (value: unknown): value is Record<string, unknown> =>
++  Boolean(value) && typeof value === "object" && !Array.isArray(value);
++const exactKeys = (value: Record<string, unknown>, keys: readonly string[]): void => {
++  const allowed = new Set(keys);
++  if (Object.keys(value).some(key => !allowed.has(key))) fail("unknown observation field");
++};
++const stringValue = (value: unknown, field: string, pattern?: RegExp): string => {
++  if (typeof value !== "string" || value.length === 0 || (pattern && !pattern.test(value))) {
++    fail(`invalid observation ${field}`);
++  }
++  return value as string;
++};
++
++export function canonicalBrowserModel(family: BrowserModelFamily, effort: BrowserModelEffort): string {
++  if (effort === "low") return `chatgpt-web/gpt-${family}-sol-instant`;
++  if (effort === "max") return `chatgpt-web/gpt-${family}-pro`;
++  return `chatgpt-web/gpt-${family}-sol`;
++}
++
++export function parseBrowserObservationV2(
++  value: unknown,
++  options: { traceId?: string; requireCanonicalModel?: string } = {},
++): BrowserObservationV2 {
++  if (!isRecord(value)) fail("observation is not an object");
++  const record = value as Record<string, unknown>;
++  exactKeys(record, ["version", "traceId", "source", "model", "attachments"]);
++  if (record.version !== 2 || record.source !== "chatgpt-web-browser") fail("observation envelope invalid");
++  const traceId = stringValue(record.traceId, "traceId", /^[A-Za-z0-9][A-Za-z0-9._-]{5,127}$/);
++  if (options.traceId !== undefined && traceId !== options.traceId) fail("observation trace mismatch");
++  if (!isRecord(record.model)) fail("observation model invalid");
++  const model = record.model as Record<string, unknown>;
++  exactKeys(model, ["canonicalId", "backendModelId", "family", "effort", "selectionLabel"]);
++  const family = model.family as BrowserModelFamily;
++  const effort = model.effort as BrowserModelEffort;
++  if (family !== "5.6" && family !== "6") fail("observation family invalid");
++  if (!(effort === "low" || effort === "medium" || effort === "high" || effort === "xhigh" || effort === "max")) {
++    fail("observation effort invalid");
++  }
++  const canonicalId = stringValue(model.canonicalId, "model.canonicalId");
++  if (canonicalId !== canonicalBrowserModel(family, effort)) fail("observation canonical model mismatch");
++  if (options.requireCanonicalModel !== undefined && canonicalId !== options.requireCanonicalModel) {
++    fail("observation model policy mismatch");
++  }
++  const backendModelId = stringValue(model.backendModelId, "model.backendModelId");
++  const selectionLabel = stringValue(model.selectionLabel, "model.selectionLabel");
++  if (!Array.isArray(record.attachments) || record.attachments.length < 1 || record.attachments.length > 10) {
++    fail("observation attachments invalid");
++  }
++  const refs = new Set<string>();
++  const names = new Set<string>();
++  const attachments = (record.attachments as unknown[]).map((valueAttachment: unknown) => {
++    if (!isRecord(valueAttachment)) fail("observation attachment invalid");
++    const attachment = valueAttachment as Record<string, unknown>;
++    exactKeys(attachment, ["ref", "name", "mimeType", "sha256", "bytes", "upload"]);
++    const ref = stringValue(attachment.ref, "attachment.ref", /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/);
++    const name = stringValue(attachment.name, "attachment.name", /^[^\\/\0]{1,240}$/);
++    if (refs.has(ref) || names.has(name)) fail("observation attachment identity collision");
++    refs.add(ref); names.add(name);
++    if (!(attachment.mimeType === "image/png" || attachment.mimeType === "image/jpeg" ||
++        attachment.mimeType === "image/gif" || attachment.mimeType === "image/webp")) {
++      fail("observation attachment mime invalid");
++    }
++    const sha256 = stringValue(attachment.sha256, "attachment.sha256", /^[a-f0-9]{64}$/);
++    if (!Number.isSafeInteger(attachment.bytes) || (attachment.bytes as number) < 1) {
++      fail("observation attachment size invalid");
++    }
++    if (!isRecord(attachment.upload)) fail("observation upload invalid");
++    const upload = attachment.upload as Record<string, unknown>;
++    exactKeys(upload, ["creationRequestObserved", "processingRequestObserved", "processingRequestKind", "processingEvent", "processingCompleted", "visibleAttachmentChip"]);
++    if (upload.creationRequestObserved !== true || upload.processingRequestObserved !== true ||
++        upload.processingCompleted !== true || upload.visibleAttachmentChip !== true ||
++        upload.processingEvent !== "file.processing.completed" ||
++        !(upload.processingRequestKind === "process_upload_stream" || upload.processingRequestKind === "claim_and_finish")) {
++      fail("observation upload proof incomplete");
++    }
++    return { ref, name, mimeType: attachment.mimeType as BrowserObservationV2Attachment["mimeType"],
++      sha256, bytes: attachment.bytes as number, upload: upload as unknown as BrowserObservationV2Upload };
++  });
++  return { version: 2, traceId, source: "chatgpt-web-browser",
++    model: { canonicalId, backendModelId, family, effort, selectionLabel }, attachments };
++}
+diff --git a/src/adapters/chatgpt-web/browser-worker.ts b/src/adapters/chatgpt-web/browser-worker.ts
+index c3de91a..2564f1f 100644
+--- a/src/adapters/chatgpt-web/browser-worker.ts
++++ b/src/adapters/chatgpt-web/browser-worker.ts
+@@ -1,4 +1,4 @@
+-import { randomUUID } from "node:crypto";
++import { createHash, randomUUID } from "node:crypto";
+ import { existsSync } from "node:fs";
+ import { join, resolve } from "node:path";
+ import { observeChatGptAttachmentUploads } from "./attachment-upload";
+@@ -36,6 +36,7 @@ import {
+   type ChatGptWebCapabilities,
+   type ChatGptWebModelMode,
+ } from "./model";
++import { canonicalBrowserModel, type BrowserObservationV2, type BrowserModelEffort } from "./browser-observation";
+ import {
+   compiledChatGptWebMaxMessageChars,
+   estimateChatGptWebImageTokens,
+@@ -1011,6 +1012,7 @@ export interface BrowserTurn {
+   modelId: string;
+   reasoning?: string;
+   modelFamily?: "5.6" | "6";
++  requireBrowserObservationV2?: boolean;
+   capabilities: ChatGptWebCapabilities;
+   prepare: () => Promise<CompiledChatGptWebPrompt & { release: () => void }>;
+   prepareResume?: () => Promise<CompiledChatGptWebPrompt & { release: () => void }>;
+@@ -1028,6 +1030,8 @@ export interface BrowserTurn {
+   onSendActivated?: () => void | Promise<void>;
+   /** Semantic submission evidence proved that ChatGPT accepted the prompt. */
+   onSubmitted?: () => void | Promise<void>;
++  /** Browser-owned model and upload evidence, emitted before Send activation. */
++  onBrowserObservationV2?: (observation: BrowserObservationV2) => void | Promise<void>;
+   /** One inert Bigger Context stage completed its exact acknowledgement boundary. */
+   onMultipartStageAcknowledged?: (stageIndex: number) => void | Promise<void>;
+   /** Visible ChatGPT reasoning-summary step titles only; never hidden chain-of-thought. */
+@@ -1936,6 +1940,7 @@ function assertChatGptPromptAttachments(prompt: CompiledChatGptWebPrompt): void
+ 
+ export function chatGptPromptFilePayloads(
+   prompt: CompiledChatGptWebPrompt,
++  options: { requireUniqueNames?: boolean } = {},
+ ): Array<{ name: string; mimeType: string; buffer: Buffer }> {
+   assertChatGptPromptAttachments(prompt);
+   const files = [...chatGptImageFilePayloads(prompt.images), ...(prompt.skillFiles ?? []).map(file => ({
+@@ -1944,6 +1949,13 @@ export function chatGptPromptFilePayloads(
+   if (files.reduce((sum, file) => sum + file.buffer.length, 0) > 50_000_000) {
+     throw new Error("ChatGPT web attachments exceed the 50 MB per-turn limit");
+   }
++  if (options.requireUniqueNames) {
++    const names = new Set<string>();
++    for (const file of files) {
++      if (!file.name || names.has(file.name)) throw new Error("ChatGPT web attachments contain duplicate file names");
++      names.add(file.name);
++    }
++  }
+   return files;
+ }
+ 
+@@ -3910,18 +3922,28 @@ export class ChatGptBrowserWorker {
+     return { effort: mode.displayLabel, response: CHATGPT_SMOKE_EXPECTED };
+   }
+ 
+-  private async attachFiles(page: Page, prompt: CompiledChatGptWebPrompt, abortSignal?: AbortSignal): Promise<void> {
+-    const files = chatGptPromptFilePayloads(prompt);
+-    if (files.length === 0) return;
++  private async attachFiles(page: Page, prompt: CompiledChatGptWebPrompt, abortSignal?: AbortSignal,
++    requireUniqueNames = false): Promise<Array<BrowserObservationV2["attachments"][number]>> {
++    const files = chatGptPromptFilePayloads(prompt, { requireUniqueNames });
++    if (files.length === 0) return [];
++    const uploadFiles = requireUniqueNames
++      ? files.map(file => ({ ...file, buffer: Buffer.from(file.buffer) }))
++      : files;
++    const imageNames = new Map(prompt.images.map(image => {
++      const parsed = parseDataUrl(image.imageUrl);
++      const extension = parsed?.mediaType.toLowerCase() === "image/jpeg" ? "jpg"
++        : parsed?.mediaType.toLowerCase().replace("image/", "") ?? "bin";
++      return [`${image.ref}.${extension}`, image] as const;
++    }));
+     const composer = await this.activeComposer(page);
+     const composerForm = composer.locator("xpath=ancestor::form[1]");
+     const input = composerForm.locator('input[data-testid="upload-photos-input"], input[type="file"][multiple]:not([accept])');
+     await input.waitFor({ state: "attached", timeout: 20_000 });
+-    const uploads = await observeChatGptAttachmentUploads(page, files.map(file => file.name));
++    const uploads = await observeChatGptAttachmentUploads(page, uploadFiles.map(file => file.name));
+     try {
+-      await withBrowserTurnAbort(input.setInputFiles(files), abortSignal);
++      await withBrowserTurnAbort(input.setInputFiles(uploadFiles), abortSignal);
+       try {
+-        await withBrowserTurnAbort(Promise.all([uploads.wait(abortSignal), ...files.map(file => (
++        await withBrowserTurnAbort(Promise.all([uploads.wait(abortSignal), ...uploadFiles.map(file => (
+           composerForm.getByRole("group", { name: file.name, exact: true })
+             .or(composerForm.locator(`.composer-attachment-surface:is(button, [role="button"])[aria-label=${JSON.stringify(file.name)}]`))
+             .waitFor({ state: "visible", timeout: 60_000 })
+@@ -3942,7 +3964,25 @@ export class ChatGptBrowserWorker {
+       const deadline = Date.now() + 60_000;
+       while (Date.now() < deadline) {
+         abortSignal?.throwIfAborted();
+-        if (await send.isEnabled().catch(() => false)) return;
++        if (await send.isEnabled().catch(() => false)) {
++          if (!requireUniqueNames) return [];
++          const evidence = uploads.getEvidence();
++          return [...imageNames.entries()].map(([name, image]) => {
++            const observed = evidence.find(item => item.name === name);
++            if (!observed?.creationRequestObserved || !observed.processingRequestObserved ||
++                observed.processingRequestKind === undefined || observed.processingEvent !== "file.processing.completed" ||
++                !observed.processingCompleted) throw new Error("ChatGPT upload observation is incomplete");
++            const parsed = parseDataUrl(image.imageUrl);
++            if (!parsed) throw new Error(`ChatGPT web input image ${image.ref} is invalid`);
++            const buffer = uploadFiles.find(file => file.name === name)?.buffer;
++            if (!buffer) throw new Error("ChatGPT upload source buffer is missing");
++            return { ref: image.ref, name, mimeType: parsed.mediaType.toLowerCase() as BrowserObservationV2["attachments"][number]["mimeType"],
++              sha256: createHash("sha256").update(buffer).digest("hex"), bytes: buffer.length,
++              upload: { creationRequestObserved: true, processingRequestObserved: true,
++                processingRequestKind: observed.processingRequestKind, processingEvent: "file.processing.completed" as const,
++                processingCompleted: true as const, visibleAttachmentChip: true as const } };
++          });
++        }
+         await new Promise(resolveSleep => setTimeout(resolveSleep, 100));
+       }
+       throw new Error("ChatGPT accepted the prompt attachments but did not make the message ready to send");
+@@ -5305,10 +5345,30 @@ export class ChatGptBrowserWorker {
+         }
+       }
+       await diagnostics.capture(page, "prompt-attachment-complete");
+-      await this.runStage(turn.traceId, "file_attachment", browserStageTimeouts.fileAttachment, (stageSignal) => (
+-        this.attachFiles(page, prepared, turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal)
++      const browserAttachments = await this.runStage(turn.traceId, "file_attachment", browserStageTimeouts.fileAttachment, (stageSignal) => (
++        this.attachFiles(page, prepared, turn.abortSignal ? AbortSignal.any([stageSignal, turn.abortSignal]) : stageSignal,
++          turn.requireBrowserObservationV2 === true)
+       ));
+       await diagnostics.capture(page, "file-attachment-complete");
++      if (turn.requireBrowserObservationV2) {
++        if (!mode.modelFamily || !mode.selection || browserAttachments.length === 0) {
++          throw new Error("browser_observation_v2 requires confirmed model family, selection label, and image attachment");
++        }
++        const observation: BrowserObservationV2 = {
++          version: 2,
++          traceId: turn.traceId,
++          source: "chatgpt-web-browser",
++          model: {
++            canonicalId: canonicalBrowserModel(mode.modelFamily, mode.effort as BrowserModelEffort),
++            backendModelId: mode.modelId,
++            family: mode.modelFamily,
++            effort: mode.effort as BrowserModelEffort,
++            selectionLabel: mode.selection.label,
++          },
++          attachments: browserAttachments,
++        };
++        await turn.onBrowserObservationV2?.(observation);
++      }
+       const completionTracker = new ChatGptCompletionTracker();
+       const recordFinalUsage = await usageSubmission();
+       const finalSubmissionEvidence = await this.runStage(
+diff --git a/src/adapters/chatgpt-web/launcher-helper-client.ts b/src/adapters/chatgpt-web/launcher-helper-client.ts
+index 1292284..24d0f00 100644
+--- a/src/adapters/chatgpt-web/launcher-helper-client.ts
++++ b/src/adapters/chatgpt-web/launcher-helper-client.ts
+@@ -1,11 +1,15 @@
+ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+ import { existsSync } from "node:fs";
++import { createHash } from "node:crypto";
+ import { basename, dirname, join } from "node:path";
+ import { createInterface } from "node:readline";
+ import { notifyLauncherTurn, readLauncherBrowserHostDescriptor } from "../../launcher-browser-host";
+ import { ChatGptCompactionHandoffAccepted, ChatGptWebAdapterError } from "./adapter-error";
+ import type { CompiledChatGptWebPrompt } from "./prompt";
+ import type { BrowserTurn, ResolvedBrowserConfig } from "./browser-worker";
++import { BROWSER_OBSERVATION_CALLBACK_TIMEOUT_MS, BROWSER_OBSERVATION_V2_FEATURE,
++  parseBrowserObservationV2, type BrowserObservationV2 } from "./browser-observation";
++import { parseDataUrl } from "../image";
+ import {
+   parseChatGptLunaCheckpoint,
+   type ChatGptLunaCheckpoint,
+@@ -21,6 +25,10 @@ interface PendingTurn {
+   localFailure?: Error;
+   progressForwarding?: AbortController;
+   acknowledgedMultipartStage?: number;
++  observation?: BrowserObservationV2;
++  observationState?: "AWAITING" | "CALLBACK_PENDING" | "VALIDATED" | "FAILED";
++  observationCallback?: Promise<void>;
++  submitted?: boolean;
+ }
+ 
+ type HelperMessage =
+@@ -31,6 +39,7 @@ type HelperMessage =
+   | { type: "event"; id: string; event: "completion_fence_begin"; requestId: number }
+   | { type: "event"; id: string; event: "completion_fence_commit"; requestId: number; revision: number }
+   | { type: "event"; id: string; event: "prepared_selected"; reused: boolean }
++  | { type: "event"; id: string; event: "browser_observation_v2"; observation: BrowserObservationV2 }
+   | { type: "event"; id: string; event: "luna_checkpoint"; checkpoint: ChatGptLunaCheckpoint; answerHash: string }
+   | { type: "result"; id: string; text: string }
+   | {
+@@ -106,6 +115,9 @@ function parseHelperMessage(line: string): HelperMessage {
+         answerHash: message.answerHash,
+       };
+     }
++    if (event === "browser_observation_v2") {
++      return { type: "event", id: message.id, event, observation: parseBrowserObservationV2(message.observation, { traceId: message.id }) };
++    }
+     const text = message.text;
+     const continuation = message.continuation;
+     if (event === "prepared_selected") {
+@@ -179,6 +191,42 @@ function parseHelperMessage(line: string): HelperMessage {
+   throw new Error("Launcher browser helper emitted an unknown message type");
+ }
+ 
++function expectedImageName(ref: string, mimeType: string): string {
++  const extension = mimeType === "image/jpeg" ? "jpg" : mimeType.replace("image/", "");
++  return `${ref}.${extension}`;
++}
++
++function validatePreparedObservation(observation: BrowserObservationV2, pending: PendingTurn): void {
++  const preparedImages = pending.prepared?.images ?? [];
++  if (preparedImages.length === 0 || observation.attachments.length !== preparedImages.length) {
++    throw new Error("browser_observation_v2 attachment set does not match the prepared prompt");
++  }
++  for (const image of preparedImages) {
++    const parsed = parseDataUrl(image.imageUrl);
++    if (!parsed) throw new Error(`prepared image ${image.ref} is not a data URL`);
++    const bytes = Buffer.from(parsed.base64, "base64");
++    const attachment = observation.attachments.find(item => item.ref === image.ref);
++    if (!attachment || attachment.name !== expectedImageName(image.ref, parsed.mediaType.toLowerCase()) ||
++        attachment.mimeType !== parsed.mediaType.toLowerCase() || attachment.bytes !== bytes.length ||
++        attachment.sha256 !== createHash("sha256").update(bytes).digest("hex") ||
++        attachment.upload.creationRequestObserved !== true || attachment.upload.processingRequestObserved !== true ||
++        attachment.upload.processingCompleted !== true || attachment.upload.visibleAttachmentChip !== true) {
++      throw new Error("browser_observation_v2 attachment is not bound to the prepared bytes");
++    }
++  }
++  if (observation.model.backendModelId !== pending.turn.modelId ||
++      (pending.turn.reasoning !== undefined && observation.model.effort !== pending.turn.reasoning)) {
++    throw new Error("browser_observation_v2 model does not match the requested turn");
++  }
++}
++
++function withObservationTimeout(promise: Promise<void>, timeoutMs: number): Promise<void> {
++  return new Promise((resolve, reject) => {
++    const timer = setTimeout(() => reject(new Error("browser_observation_v2 callback timeout")), timeoutMs);
++    promise.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
++  });
++}
++
+ export class LauncherBrowserHelperClient {
+   private child?: ChildProcessWithoutNullStreams;
+   private ready?: Promise<void>;
+@@ -227,12 +275,16 @@ export class LauncherBrowserHelperClient {
+         "Launcher browser helper does not support the MCP completion fence; update or restart the launcher",
+       );
+     }
++    if (turn.requireBrowserObservationV2 && !this.helperFeatures.has(BROWSER_OBSERVATION_V2_FEATURE)) {
++      throw new Error("browser_observation_v2_unavailable");
++    }
+     return await new Promise<string>((resolveResult, rejectResult) => {
+         if (this.pending.has(turn.traceId)) {
+           rejectResult(new Error(`Duplicate launcher browser turn: ${turn.traceId}`));
+           return;
+         }
+-        const pending: PendingTurn = { turn, resolve: resolveResult, reject: rejectResult };
++        const pending: PendingTurn = { turn, resolve: resolveResult, reject: rejectResult,
++          observationState: turn.requireBrowserObservationV2 ? "AWAITING" : undefined };
+         this.pending.set(turn.traceId, pending);
+         if (turn.abortSignal) {
+           const abortListener = () => {
+@@ -283,6 +335,7 @@ export class LauncherBrowserHelperClient {
+             modelId: turn.modelId,
+             reasoning: turn.reasoning,
+             ...(turn.modelFamily ? { modelFamily: turn.modelFamily } : {}),
++            ...(turn.requireBrowserObservationV2 ? { requireBrowserObservationV2: true } : {}),
+             capabilities: turn.capabilities,
+             ...(turn.nativeConnector ? { nativeConnector: true } : {}),
+             ...(turn.prepareResume ? { resumeAvailable: true } : {}),
+@@ -412,9 +465,36 @@ export class LauncherBrowserHelperClient {
+       return;
+     }
+     const pending = this.pending.get(message.id);
+-    if (!pending) return;
++    if (!pending) {
++      if (message.type === "event" && message.event === "browser_observation_v2") {
++        this.handleExit(child, new Error("browser_observation_v2 event arrived after its turn completed"));
++      }
++      return;
++    }
+     if (message.type === "event") {
+-      if (message.event === "heartbeat") pending.turn.onHeartbeat?.();
++      if (message.event === "browser_observation_v2") {
++        if (!pending.turn.requireBrowserObservationV2 || pending.observationState !== "AWAITING") {
++          this.abortWithLocalFailure(message.id, new Error("browser_observation_v2 event was duplicate, stale, or unsolicited"), pending);
++          return;
++        }
++        try {
++          validatePreparedObservation(message.observation, pending);
++        } catch (error) {
++          this.abortWithLocalFailure(message.id, error instanceof Error ? error : new Error(String(error)), pending);
++          return;
++        }
++        pending.observation = message.observation;
++        pending.observationState = "CALLBACK_PENDING";
++        pending.observationCallback = Promise.resolve().then(() => pending.turn.onBrowserObservationV2?.(message.observation)).then(() => {
++          if (this.pending.get(message.id) === pending && pending.observationState === "CALLBACK_PENDING") {
++            pending.observationState = "VALIDATED";
++          }
++        });
++        void pending.observationCallback.catch(error => this.abortWithLocalFailure(
++          message.id, error instanceof Error ? error : new Error(String(error)), pending,
++        ));
++      }
++      else if (message.event === "heartbeat") pending.turn.onHeartbeat?.();
+       else if (message.event === "generation_progress") pending.turn.onGenerationProgress?.();
+       else if (message.event === "tool_batch_observed") {
+         const progress = pending.turn.externalProgress;
+@@ -481,8 +561,16 @@ export class LauncherBrowserHelperClient {
+         ));
+       }
+       else if (message.event === "send_activated") {
+-        void Promise.resolve().then(() => pending.turn.onSendActivated?.()).then(() => {
++        const activation = pending.turn.requireBrowserObservationV2
++          ? (pending.observationCallback
++            ? withObservationTimeout(pending.observationCallback, BROWSER_OBSERVATION_CALLBACK_TIMEOUT_MS)
++            : Promise.reject(new Error("browser_observation_v2 observation is missing")))
++          : Promise.resolve();
++        void activation.then(() => Promise.resolve().then(() => pending.turn.onSendActivated?.())).then(() => {
+           if (this.pending.get(message.id) !== pending) return;
++          if (pending.turn.requireBrowserObservationV2 && pending.observationState !== "VALIDATED") {
++            throw new Error("browser_observation_v2 observation was not validated before activation ACK");
++          }
+           return this.send({ type: "send_activation_ack", id: message.id });
+         }).catch(error => this.abortWithLocalFailure(
+           message.id,
+@@ -490,7 +578,7 @@ export class LauncherBrowserHelperClient {
+           pending,
+         ));
+       }
+-      else if (message.event === "submitted") pending.turn.onSubmitted?.();
++      else if (message.event === "submitted") { pending.submitted = true; pending.turn.onSubmitted?.(); }
+       else if (message.event === "multipart_stage_acknowledged") {
+         const multipart = pending.prepared?.multipart;
+         if (!multipart
+@@ -562,6 +650,11 @@ export class LauncherBrowserHelperClient {
+       return;
+     }
+     if (message.type === "result") {
++      if (pending.turn.requireBrowserObservationV2 &&
++          (pending.observationState !== "VALIDATED" || pending.submitted !== true)) {
++        this.finishWithError(message.id, new Error("browser_observation_v2 result arrived without completed observation"));
++        return;
++      }
+       this.finish(message.id);
+       if (pending.localFailure) pending.reject(pending.localFailure);
+       else pending.resolve(message.text);
+diff --git a/tests/browser-observation-client.test.ts b/tests/browser-observation-client.test.ts
+new file mode 100644
+index 0000000..5d65055
+--- /dev/null
++++ b/tests/browser-observation-client.test.ts
+@@ -0,0 +1,131 @@
++import { afterEach, expect, test } from "bun:test";
++import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { createHash } from "node:crypto";
++import { LauncherBrowserHelperClient } from "../src/adapters/chatgpt-web/launcher-helper-client";
++import type { ResolvedBrowserConfig } from "../src/adapters/chatgpt-web/browser-worker";
++import { LAUNCHER_BROWSER_HOST_KIND, LAUNCHER_BROWSER_IDLE_URL } from "../src/launcher-browser-host";
++
++const roots: string[] = [];
++afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
++
++function configFor(root: string, helper: string): ResolvedBrowserConfig {
++  const descriptorPath = join(root, "launcher.json");
++  writeFileSync(descriptorPath, JSON.stringify({ version: 3, kind: LAUNCHER_BROWSER_HOST_KIND,
++    profile: "production", pid: process.pid, endpoint: "http://127.0.0.1:39001",
++    control: { endpoint: "http://127.0.0.1:39002", token: "launcher-control-token-0123456789abcdefghijklmnop" },
++    helper: { executable: process.execPath, script: helper }, partition: "persist:codex-web-gpt-chatgpt",
++    idleUrl: LAUNCHER_BROWSER_IDLE_URL, surfaceId: "launcher_surface_id_0123456789AB",
++    surfaceTargets: { launcher_surface_id_0123456789AB: "native-owned-target" }, createdAt: new Date().toISOString() }));
++  return { appName: "Ludory v2 test", browserHost: "launcher", browserHostDescriptorPath: descriptorPath,
++    browserHelperScriptPath: helper, storageStatePath: join(root, "unused"), chromeExecutablePath: join(root, "unused"),
++    turnTimeoutMs: 60_000, headed: true, autoApproveToolCalls: false };
++}
++
++function validTurn(traceId: string, callback: (observation: unknown) => void | Promise<void>) {
++  const bytes = Buffer.from("v2-image");
++  const sha256 = createHash("sha256").update(bytes).digest("hex");
++  let callbackDone = false;
++  return { bytes, sha256, callbackDone: () => callbackDone,
++    turn: {
++      traceId, modelId: "gpt-5.6-sol", modelFamily: "6" as const, reasoning: "high",
++      capabilities: { localToolsEnabled: false, solAvailable: true, extraHighAvailable: false, proAvailable: false },
++      requireBrowserObservationV2: true,
++      prepare: async () => ({ text: "review", images: [{ ref: "candidate", imageUrl: `data:image/png;base64,${bytes.toString("base64")}`, detail: "high" as const }], release() {} }),
++      onBrowserObservationV2: async observation => { await callback(observation); callbackDone = true; },
++      onSendActivated: () => { expect(callbackDone).toBe(true); }, onTextDelta() {},
++    } satisfies Parameters<LauncherBrowserHelperClient["run"]>[0] };
++}
++
++test("old helper without v2 is rejected before dispatch", async () => {
++  const root = mkdtempSync(join(tmpdir(), "codex-v2-old-helper-")); roots.push(root);
++  const helper = join(root, "old-helper.ts");
++  writeFileSync(helper, `process.stdout.write(JSON.stringify({type:"ready",features:["progress"]})+"\\n");`);
++  const client = new LauncherBrowserHelperClient(configFor(root, helper));
++  try {
++    const { turn } = validTurn("abcdef123456", () => {});
++    await expect(client.run(turn)).rejects.toThrow("browser_observation_v2_unavailable");
++  } finally { await client.close(); }
++});
++
++test("v2 callback completes before activation acknowledgement and result", async () => {
++  const root = mkdtempSync(join(tmpdir(), "codex-v2-client-")); roots.push(root);
++  const helper = join(root, "helper.ts");
++  const main = new URL("../src/adapters/chatgpt-web/browser-helper-main.ts", import.meta.url).href;
++  const worker = new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url).href;
++  writeFileSync(helper, `
++    import { ChatGptBrowserWorker } from ${JSON.stringify(worker)};
++    ChatGptBrowserWorker.prototype.run = async function(turn) {
++      await turn.onPreparedSelected(false);
++      const prepared = await turn.prepare();
++      const image = prepared.images[0];
++      const parsed = image.imageUrl.split(',')[1];
++      const bytes = Buffer.from(parsed, 'base64');
++      await turn.onBrowserObservationV2({version:2, traceId:turn.traceId, source:'chatgpt-web-browser',
++        model:{canonicalId:'chatgpt-web/gpt-6-sol',backendModelId:'gpt-5.6-sol',family:'6',effort:'high',selectionLabel:'High'},
++        attachments:[{ref:image.ref,name:'candidate.png',mimeType:'image/png',sha256:${JSON.stringify(createHash("sha256").update(Buffer.from("v2-image")).digest("hex"))},bytes:bytes.length,
++          upload:{creationRequestObserved:true,processingRequestObserved:true,processingRequestKind:'process_upload_stream',processingEvent:'file.processing.completed',processingCompleted:true,visibleAttachmentChip:true}}]});
++      await turn.onSendActivated(); turn.onSubmitted(); return 'independent response';
++    };
++    await import(${JSON.stringify(main)});
++  `);
++  const client = new LauncherBrowserHelperClient(configFor(root, helper));
++  try {
++    const run = validTurn("abcdef123456", async () => { await new Promise(resolve => setTimeout(resolve, 25)); });
++    await expect(client.run(run.turn)).resolves.toBe("independent response");
++  } finally { await client.close(); }
++});
++
++test("v2 rejects a source SHA mismatch before Send acknowledgement", async () => {
++  const root = mkdtempSync(join(tmpdir(), "codex-v2-client-sha-")); roots.push(root);
++  const helper = join(root, "helper.ts");
++  const main = new URL("../src/adapters/chatgpt-web/browser-helper-main.ts", import.meta.url).href;
++  const worker = new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url).href;
++  writeFileSync(helper, `
++    import { ChatGptBrowserWorker } from ${JSON.stringify(worker)};
++    ChatGptBrowserWorker.prototype.run = async function(turn) {
++      await turn.onPreparedSelected(false);
++      const prepared = await turn.prepare();
++      const image = prepared.images[0];
++      await turn.onBrowserObservationV2({version:2, traceId:turn.traceId, source:'chatgpt-web-browser',
++        model:{canonicalId:'chatgpt-web/gpt-6-sol',backendModelId:'gpt-5.6-sol',family:'6',effort:'high',selectionLabel:'High'},
++        attachments:[{ref:image.ref,name:'candidate.png',mimeType:'image/png',sha256:'${"0".repeat(64)}',bytes:8,
++          upload:{creationRequestObserved:true,processingRequestObserved:true,processingRequestKind:'process_upload_stream',processingEvent:'file.processing.completed',processingCompleted:true,visibleAttachmentChip:true}}]});
++      await turn.onSendActivated(); return 'must not be accepted';
++    };
++    await import(${JSON.stringify(main)});
++  `);
++  const client = new LauncherBrowserHelperClient(configFor(root, helper));
++  try {
++    const { turn } = validTurn("abcdef123457", () => {});
++    await expect(client.run(turn)).rejects.toThrow("browser_observation_v2 attachment is not bound to the prepared bytes");
++  } finally { await client.close(); }
++});
++
++test("rejected observation callback aborts before Send acknowledgement", async () => {
++  const root = mkdtempSync(join(tmpdir(), "codex-v2-client-callback-")); roots.push(root);
++  const helper = join(root, "helper.ts");
++  const main = new URL("../src/adapters/chatgpt-web/browser-helper-main.ts", import.meta.url).href;
++  const worker = new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url).href;
++  writeFileSync(helper, `
++    import { ChatGptBrowserWorker } from ${JSON.stringify(worker)};
++    ChatGptBrowserWorker.prototype.run = async function(turn) {
++      await turn.onPreparedSelected(false);
++      const prepared = await turn.prepare();
++      const image = prepared.images[0];
++      const bytes = Buffer.from(image.imageUrl.split(',')[1], 'base64');
++      await turn.onBrowserObservationV2({version:2, traceId:turn.traceId, source:'chatgpt-web-browser',
++        model:{canonicalId:'chatgpt-web/gpt-6-sol',backendModelId:'gpt-5.6-sol',family:'6',effort:'high',selectionLabel:'High'},
++        attachments:[{ref:image.ref,name:'candidate.png',mimeType:'image/png',sha256:${JSON.stringify(createHash("sha256").update(Buffer.from("v2-image")).digest("hex"))},bytes:bytes.length,
++          upload:{creationRequestObserved:true,processingRequestObserved:true,processingRequestKind:'process_upload_stream',processingEvent:'file.processing.completed',processingCompleted:true,visibleAttachmentChip:true}}]});
++      await turn.onSendActivated(); return 'must not be accepted';
++    };
++    await import(${JSON.stringify(main)});
++  `);
++  const client = new LauncherBrowserHelperClient(configFor(root, helper));
++  try {
++    const { turn } = validTurn("abcdef123458", async () => { throw new Error("callback rejected"); });
++    await expect(client.run(turn)).rejects.toThrow("callback rejected");
++  } finally { await client.close(); }
++});
+diff --git a/tests/browser-observation.test.ts b/tests/browser-observation.test.ts
+new file mode 100644
+index 0000000..16f560d
+--- /dev/null
++++ b/tests/browser-observation.test.ts
+@@ -0,0 +1,72 @@
++import { describe, expect, test } from "bun:test";
++import {
++  BROWSER_OBSERVATION_V2_FEATURE,
++  canonicalBrowserModel,
++  parseBrowserObservationV2,
++} from "../src/adapters/chatgpt-web/browser-observation";
++
++const sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
++
++function validObservation() {
++  return {
++    version: 2,
++    traceId: "turn_0123456789abcdef0123456789abcdef",
++    source: "chatgpt-web-browser",
++    model: {
++      canonicalId: "chatgpt-web/gpt-6-sol",
++      backendModelId: "gpt-5.6-sol",
++      family: "6",
++      effort: "high",
++      selectionLabel: "High",
++    },
++    attachments: [{
++      ref: "hero-expression",
++      name: "hero-expression.png",
++      mimeType: "image/png",
++      sha256,
++      bytes: 12345,
++      upload: {
++        creationRequestObserved: true,
++        processingRequestObserved: true,
++        processingRequestKind: "process_upload_stream",
++        processingEvent: "file.processing.completed",
++        processingCompleted: true,
++        visibleAttachmentChip: true,
++      },
++    }],
++  };
++}
++
++describe("browser_observation_v2 contract", () => {
++  test("advertises a versioned feature and derives Sol routes from browser selection", () => {
++    expect(BROWSER_OBSERVATION_V2_FEATURE).toBe("browser_observation_v2");
++    expect(canonicalBrowserModel("6", "high")).toBe("chatgpt-web/gpt-6-sol");
++    expect(canonicalBrowserModel("6", "low")).toBe("chatgpt-web/gpt-6-sol-instant");
++    expect(canonicalBrowserModel("6", "max")).toBe("chatgpt-web/gpt-6-pro");
++  });
++
++  test("accepts the complete browser-owned observation shape", () => {
++    expect(parseBrowserObservationV2(validObservation())).toEqual(validObservation() as any);
++  });
++
++  test("rejects missing upload proof, mismatched trace, and unknown model fields", () => {
++    const missingProof = structuredClone(validObservation()) as any;
++    delete missingProof.attachments[0].upload.visibleAttachmentChip;
++    expect(() => parseBrowserObservationV2(missingProof)).toThrow();
++
++    const wrongTrace = structuredClone(validObservation()) as any;
++    wrongTrace.traceId = "turn_other";
++    expect(() => parseBrowserObservationV2(wrongTrace, { traceId: "turn_0123456789abcdef0123456789abcdef" })).toThrow();
++
++    const unknownField = structuredClone(validObservation()) as any;
++    unknownField.model.agentDeclared = true;
++    expect(() => parseBrowserObservationV2(unknownField)).toThrow();
++  });
++
++  test("rejects GPT-6 Astra/Pro as a Sol observation", () => {
++    const pro = structuredClone(validObservation()) as any;
++    pro.model.canonicalId = "chatgpt-web/gpt-6-pro";
++    pro.model.effort = "max";
++    expect(() => parseBrowserObservationV2(pro, { requireCanonicalModel: "chatgpt-web/gpt-6-sol" })).toThrow();
++  });
++});
+
+From a8199d9e25e6d22df5dbdac6982a0668605a1f6b Mon Sep 17 00:00:00 2001
+From: m-amirov <jombo59rus@gmail.com>
+Date: Tue, 27 Oct 2026 10:57:55 +0300
+Subject: [PATCH 2/2] test(chatgpt-web): cover observation callback barriers
+
+---
+ .../chatgpt-web/launcher-helper-client.ts     |  7 +++--
+ tests/browser-observation-client.test.ts      | 30 +++++++++++++++++++
+ tests/skill-attachments.test.ts               | 10 +++++++
+ 3 files changed, 45 insertions(+), 2 deletions(-)
+
+diff --git a/src/adapters/chatgpt-web/launcher-helper-client.ts b/src/adapters/chatgpt-web/launcher-helper-client.ts
+index 24d0f00..0ecd351 100644
+--- a/src/adapters/chatgpt-web/launcher-helper-client.ts
++++ b/src/adapters/chatgpt-web/launcher-helper-client.ts
+@@ -235,7 +235,10 @@ export class LauncherBrowserHelperClient {
+   private readonly pending = new Map<string, PendingTurn>();
+   private helperFeatures = new Set<string>();
+ 
+-  constructor(private readonly config: ResolvedBrowserConfig) {}
++  constructor(
++    private readonly config: ResolvedBrowserConfig,
++    private readonly observationCallbackTimeoutMs = BROWSER_OBSERVATION_CALLBACK_TIMEOUT_MS,
++  ) {}
+ 
+   /**
+    * The helper that shipped with this daemon, when one sits beside its own entrypoint.
+@@ -563,7 +566,7 @@ export class LauncherBrowserHelperClient {
+       else if (message.event === "send_activated") {
+         const activation = pending.turn.requireBrowserObservationV2
+           ? (pending.observationCallback
+-            ? withObservationTimeout(pending.observationCallback, BROWSER_OBSERVATION_CALLBACK_TIMEOUT_MS)
++            ? withObservationTimeout(pending.observationCallback, this.observationCallbackTimeoutMs)
+             : Promise.reject(new Error("browser_observation_v2 observation is missing")))
+           : Promise.resolve();
+         void activation.then(() => Promise.resolve().then(() => pending.turn.onSendActivated?.())).then(() => {
+diff --git a/tests/browser-observation-client.test.ts b/tests/browser-observation-client.test.ts
+index 5d65055..ef0aed5 100644
+--- a/tests/browser-observation-client.test.ts
++++ b/tests/browser-observation-client.test.ts
+@@ -129,3 +129,33 @@ test("rejected observation callback aborts before Send acknowledgement", async (
+     await expect(client.run(turn)).rejects.toThrow("callback rejected");
+   } finally { await client.close(); }
+ });
++
++test("timed-out observation callback aborts without Send acknowledgement", async () => {
++  const root = mkdtempSync(join(tmpdir(), "codex-v2-client-timeout-")); roots.push(root);
++  const helper = join(root, "helper.ts");
++  const main = new URL("../src/adapters/chatgpt-web/browser-helper-main.ts", import.meta.url).href;
++  const worker = new URL("../src/adapters/chatgpt-web/browser-worker.ts", import.meta.url).href;
++  writeFileSync(helper, `
++    import { ChatGptBrowserWorker } from ${JSON.stringify(worker)};
++    ChatGptBrowserWorker.prototype.run = async function(turn) {
++      await turn.onPreparedSelected(false);
++      const prepared = await turn.prepare();
++      const image = prepared.images[0];
++      const bytes = Buffer.from(image.imageUrl.split(',')[1], 'base64');
++      await turn.onBrowserObservationV2({version:2, traceId:turn.traceId, source:'chatgpt-web-browser',
++        model:{canonicalId:'chatgpt-web/gpt-6-sol',backendModelId:'gpt-5.6-sol',family:'6',effort:'high',selectionLabel:'High'},
++        attachments:[{ref:image.ref,name:'candidate.png',mimeType:'image/png',sha256:${JSON.stringify(createHash("sha256").update(Buffer.from("v2-image")).digest("hex"))},bytes:bytes.length,
++          upload:{creationRequestObserved:true,processingRequestObserved:true,processingRequestKind:'process_upload_stream',processingEvent:'file.processing.completed',processingCompleted:true,visibleAttachmentChip:true}}]});
++      await turn.onSendActivated(); return 'must not be accepted';
++    };
++    await import(${JSON.stringify(main)});
++  `);
++  const client = new LauncherBrowserHelperClient(configFor(root, helper), 5);
++  let sendActivated = false;
++  try {
++    const run = validTurn("abcdef123459", () => new Promise(() => {}));
++    run.turn.onSendActivated = () => { sendActivated = true; };
++    await expect(client.run(run.turn)).rejects.toThrow("browser_observation_v2 callback timeout");
++    expect(sendActivated).toBe(false);
++  } finally { await client.close(); }
++});
+diff --git a/tests/skill-attachments.test.ts b/tests/skill-attachments.test.ts
+index 8565619..4f2192d 100644
+--- a/tests/skill-attachments.test.ts
++++ b/tests/skill-attachments.test.ts
+@@ -101,6 +101,16 @@ test("over-limit, malformed and manual requests fail explicitly without silently
+   })).toThrow("Zero Risk");
+ });
+ 
++test("v2 rejects duplicate image names before upload while v1 keeps its existing payload behavior", () => {
++  const prompt = { text: "", images: [
++    { ref: "same", imageUrl: "data:image/png;base64,iVBORw==" },
++    { ref: "same", imageUrl: "data:image/png;base64,iVBORw==" },
++  ] };
++  expect(chatGptPromptFilePayloads(prompt)).toHaveLength(2);
++  expect(() => chatGptPromptFilePayloads(prompt, { requireUniqueNames: true }))
++    .toThrow("duplicate file names");
++});
++
+ 
+ test("usage accounts for skills accumulated over many turns without applying a per-message upload cap", () => {
+   const parsed = parse(Array.from({ length: 11 }, (_, i) => input(text(`skill-${i}`))));

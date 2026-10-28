@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { defineGame } from '@ludory/core';
 import { inspectProject, planInit, planMigration, applyPlan } from './projects.mjs';
 import { listCatalog, showCatalog } from './catalog.mjs';
@@ -7,9 +9,10 @@ import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNati
   planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport,
   planNarrativeReview, executeNarrativeReview,
   planImageTask,
-  planImageImport, executeImageImport,
+  planImageImport, executeImageImport, planArtReview, executeArtReview,
   planQualityEnable, applyQualityEnable, planQualityCheck, executeQualityCheck,
-  qualityStatus, planQualityEvidence, snapshotQualitySource } from '@ludory/ai';
+  qualityStatus, planQualityEvidence, snapshotQualitySource,
+  installVendoredDevHelper } from '@ludory/ai';
 
 const usage = `Ludory Studio 0.1.0 — native game-development workflows
 
@@ -35,6 +38,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory workflow narrative-review --project <new-studio-game> [--run <id|latest>] [--apply] [--json]
   ludory workflow image --project <new-studio-game> --run <id> --brief <relative-art-brief> [--apply] [--json]
   ludory workflow image-import --project <new-studio-game> --run <id> --brief <relative-text> --file <relative-image> --handoff-sha256 <sha256> [--apply] [--json]
+  ludory workflow art-review --project <new-studio-game> --run <id> --image <imported-original> --source <scene:...;characters:...;location:...;style:...> --context-reviewed [--apply] [--json]
   ludory workflow status --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow next --project <game-directory> [--run <run-id|latest>] [--json]
   ludory workflow start --project <game-directory> --pipeline <audit-repair-loop|production-art> --target <text> --in-scope <a;b> --acceptance <text> --mutation-boundary <text> [--out-of-scope <a;b>] [--apply] [--json]
@@ -42,6 +46,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory workflow cycle --project <new-studio-game> --test <relative.test.js> [--run <run-id|latest>] [--repairs <0|1|2>] [--apply] [--json]
   ludory workflow recover --project <game-directory> [--run <run-id|latest>] [--confirm-no-executor] [--apply] [--json]
   ludory workflow checkpoint --project <game-directory> --stage <STAGE> [--run <run-id|latest>] [--artifact <path;path>] [--outcome <CONTINUE|PASS|FAIL|BLOCKED|ESCALATE>] [--apply] [--json]
+  ludory helper install [--apply] [--json]
   ludory help
 
 No writes by default. init/migrate --apply only create ludory.project.json;
@@ -62,6 +67,9 @@ the provider-selected model, whose identity cannot be attested by this CLI.
 workflow image --apply returns a source-bound agent handoff only; the CLI cannot call Codex tools.
 The primary agent imports the subagent's original with --handoff-sha256 from the generation packet.
 image-import stores checked original PNG/JPEG/WebP bytes as USER_DECLARED; neither route grants art, rights or release PASS.
+art-review --apply requires independent GPT-6 Sol(Web), source-locked references and an attested visual upload.
+P0/P1 requires REWORK, P2 alone does not; after two REWORK receipts the task ESCALATES to the owner.
+Artistic PASS_ART is never human, rights, platform or release acceptance. Actual Web host smoke is owner-operated.
 Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.
 workflow cycle checks Codex-observed Node test execution with at most two repairs; it never automatically advances a stage.
 Codex tool telemetry is not independent QA and cannot establish Release PASS.
@@ -88,6 +96,7 @@ function argumentsFor(command, argv) {
       : command === 'workflow-narrative-review' ? [...workflowCommon, '--run', '--apply']
       : command === 'workflow-image' ? [...workflowCommon, '--run', '--brief', '--apply']
       : command === 'workflow-image-import' ? [...workflowCommon, '--run', '--brief', '--file', '--handoff-sha256', '--apply']
+      : command === 'workflow-art-review' ? [...workflowCommon, '--run', '--image', '--source', '--context-reviewed', '--apply']
       : command === 'workflow-doctor' ? workflowCommon
       : command === 'workflow-status' || command === 'workflow-next' ? [...workflowCommon, '--run']
           : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
@@ -95,6 +104,7 @@ function argumentsFor(command, argv) {
               : command === 'workflow-cycle' ? [...workflowCommon, '--run', '--test', '--repairs', '--apply']
               : command === 'workflow-recover' ? [...workflowCommon, '--run', '--confirm-no-executor', '--apply']
               : [...workflowCommon, '--run', '--stage', '--artifact', '--outcome', '--apply'])
+    : command === 'helper-install' ? new Set(['--apply', '--json'])
     : command === 'init'
     ? new Set([...common, '--id', '--title', '--lang', '--engine', '--targets', '--version', '--apply'])
     : command === 'create'
@@ -119,7 +129,7 @@ function argumentsFor(command, argv) {
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
     flags.set(key, value);
   }
-  if (!['profiles-list', 'templates-list', 'profiles-show', 'templates-show'].includes(command) && !flags.get('--project')) {
+  if (!['helper-install', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show'].includes(command) && !flags.get('--project')) {
     throw new Error('--project is required');
   }
   if (command.endsWith('-show') && !flags.get('--name')) throw new Error('--name is required for show');
@@ -161,11 +171,14 @@ function displayWorkflow(result, json, out) {
   if (result.warning) out(`  warning: ${result.warning}\n`);
   if (result.executorCode) out(`  result: ${result.executorCode}\n`);
   if (result.provenance) out(`  provenance: ${result.provenance}\n`);
+  if (result.verdict) out(`  art verdict: ${result.verdict}\n`);
+  if (result.receiptPath) out(`  receipt: ${result.receiptPath}\n`);
   if (result.narrativeReview?.verdict) out(`  narrative verdict: ${result.narrativeReview.verdict}\n`);
   if (result.review?.verdict) out(`  narrative verdict: ${result.review.verdict}\n`);
   if (result.manualPacket?.skill === '$imagegen') {
     out('  imagegen: delegate to a separate Codex image-generator subagent inheriting the parent model\n');
     out('  subagent: invoke $imagegen using the source-bound packet; stop if delegation or skill is unavailable\n');
+    out('  session: CEOS is not required by Ludory; if a mandatory session policy conflicts, stop and report it\n');
     out('  prompt: rerun with --json to access manualPacket.prompt and its brief hash\n');
     out('  after generation: save the original and import with --handoff-sha256 from the packet\n');
   }
@@ -176,6 +189,16 @@ function displayWorkflow(result, json, out) {
   for (const run of result.runs ?? []) out(`  run: ${run.runId} · ${run.status} · ${run.nextStage ?? 'terminal'}\n`);
   if (result.status === 'READY') for (const item of result.writes ?? []) out(`  planned: ${item}\n`);
   for (const conflict of result.conflicts ?? []) out(`  blocked: ${conflict}\n`);
+}
+
+function displayHelperSupply(result, json, out) {
+  if (json) { out(`${JSON.stringify(result, null, 2)}\n`); return; }
+  out(`${result.status} · ${result.profileHome ?? 'DEV profile'}\n`);
+  if (result.artifact) out(`  helper: ${result.artifact.file} · ${result.artifact.sha256}\n`);
+  if (result.launcher) out(`  launcher: ${result.launcher}\n`);
+  for (const file of result.writes ?? []) out(`  ${result.status === 'APPLIED' ? 'written' : 'planned'}: ${file}\n`);
+  if (result.warning) out(`  warning: ${result.warning}\n`);
+  if (result.reasonCode) out(`  reason: ${result.reasonCode}\n`);
 }
 
 async function runDraftCommand(operation, flags, { out, devHost }) {
@@ -283,6 +306,31 @@ async function runImageCommand(operation, flags, { out }) {
   return result.status === 'BLOCKED' || (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
 }
 
+async function runArtReviewCommand(flags, { out, devHost }) {
+  const project = flags.get('--project');
+  const context = { run: flags.get('--run'), image: flags.get('--image'),
+    sources: flags.has('--source') ? flags.get('--source').split(';') : [],
+    contextReviewed: flags.has('--context-reviewed') };
+  let result = planArtReview(project, context);
+  if (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') {
+    const host = devHost();
+    if (host?.probe && host?.turn) {
+      try {
+        const capability = await host.probe();
+        const ready = planArtReview(project, context, { discover: () => capability });
+        result = await executeArtReview(ready, { apply: true, host });
+      } finally {
+        if (typeof host.close === 'function') {
+          try { await host.close(); } catch { /* Review ledger is authoritative. */ }
+        }
+      }
+    }
+  }
+  displayWorkflow(result, flags.has('--json'), out);
+  return result.status === 'ESCALATE' ? 3
+    : result.status === 'BLOCKED' || (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
+}
+
 function parsedTargets(flags) {
   const targets = flags.get('--targets').split(',').map(s => s.trim());
   if (targets.some(s => !s)) throw new Error('Empty target identifier');
@@ -375,7 +423,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'workflow') {
       const [operation, ...args] = rest;
-      if (!['doctor', 'route', 'draft', 'draft-import', 'narrative-review', 'image', 'image-import', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
+      if (!['doctor', 'route', 'draft', 'draft-import', 'narrative-review', 'image', 'image-import', 'art-review', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
         throw new Error(`Unknown workflow operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`workflow-${operation}`, args);
@@ -431,6 +479,15 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
           return pending ? 3 : 1;
         });
       }
+      if (operation === 'art-review') {
+        return runArtReviewCommand(flags, { out, devHost }).catch(error => {
+          const result = { engine: 'ludory-ai', operation, status: 'FAILED',
+            project: flags.get('--project'), writes: [], conflicts: [error.message] };
+          if (flags.has('--json')) displayWorkflow(result, true, out);
+          else err(`Ludory: ${error.message}\n`);
+          return 1;
+        });
+      }
       if (operation === 'route') {
         const plan = planTaskRoute(flags.get('--project'), {
           taskKind: flags.get('--task'),
@@ -439,9 +496,15 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
         return plan.status === 'BLOCKED' ? 2 : 0;
       }
       const plan = planWorkflow(flags.get('--project'), operation, workflowOptions(flags));
-      const autoQuality = flags.has('--apply') && plan.status === 'READY' &&
-        (operation === 'cycle' || (operation === 'continue' && flags.get('--executor') === 'codex')) &&
-        planQualityEnable(plan.project).status === 'IN_SYNC';
+      const qualityCandidate = flags.has('--apply') && plan.status === 'READY' &&
+        (operation === 'cycle' || (operation === 'continue' && flags.get('--executor') === 'codex'));
+      const qualityPolicy = qualityCandidate ? planQualityEnable(plan.project) : null;
+      let qualityAttempted = false;
+      if (qualityCandidate) {
+        try { fs.lstatSync(path.join(plan.project, '.ludory', 'quality')); qualityAttempted = true; }
+        catch (error) { if (error.code !== 'ENOENT') qualityAttempted = true; }
+      }
+      const autoQuality = qualityCandidate && (qualityPolicy.status === 'IN_SYNC' || qualityAttempted);
       let beforeDigest = null;
       let beforeError = null;
       if (autoQuality) {
@@ -452,7 +515,9 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       if (autoQuality && result.status === 'EXECUTED_UNVERIFIED') {
         let quality = null;
         try {
-          if (beforeError) quality = { status: 'BLOCKED', tier: 'quick', reasonCode: beforeError };
+          if (qualityPolicy.status !== 'IN_SYNC') quality = { status: 'BLOCKED', tier: 'quick',
+            reasonCode: qualityPolicy.conflicts?.[0] ?? 'QUALITY_POLICY_UNTRUSTED' };
+          else if (beforeError) quality = { status: 'BLOCKED', tier: 'quick', reasonCode: beforeError };
           else if (snapshotQualitySource(plan.project).digest !== beforeDigest) {
             quality = executeQualityCheck(planQualityCheck(plan.project, { tier: 'quick' }),
               { apply: true, executor });
@@ -467,6 +532,21 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       if (result.quality?.status === 'FAIL') return 1;
       return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : result.status === 'ESCALATE' ? 3
         : ['FAILED', 'FAILED_CHECKS'].includes(result.status) ? 1 : 0;
+    }
+    if (command === 'helper') {
+      const [operation, ...args] = rest;
+      if (operation !== 'install') throw new Error(`Unknown helper operation: ${operation || '(missing)'}`);
+      const flags = argumentsFor('helper-install', args);
+      try {
+        const result = installVendoredDevHelper({ apply: flags.has('--apply') });
+        displayHelperSupply(result, flags.has('--json'), out);
+        return 0;
+      } catch (error) {
+        const result = { status: 'BLOCKED', reasonCode: error.code ?? 'DEV_HELPER_INSTALL_FAILED',
+          writes: [], conflicts: [error.message] };
+        displayHelperSupply(result, flags.has('--json'), out);
+        return 2;
+      }
     }
     if (command === 'profiles' || command === 'templates') {
       const [operation, ...args] = rest;

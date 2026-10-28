@@ -6,6 +6,17 @@ import { qualityGame } from './helpers/quality-game.mjs';
 import { planQualityEnable, applyQualityEnable } from '../src/quality-policy.mjs';
 import { persistQualityReceipt, qualityStatus, planQualityEvidence } from '../src/quality-store.mjs';
 
+test('public receipt writer cannot manufacture PASS without a complete observed tier', t => {
+  const project = qualityGame(t);
+  applyQualityEnable(planQualityEnable(project));
+  assert.throws(() => persistQualityReceipt(project, {
+    tier: 'quick', status: 'PASS', checks: [
+      { name: 'tests', status: 'PASS', observed: true, exitCode: 0 },
+    ], report: {},
+  }), /QUALITY_PASS_UNATTESTED|QUALITY_RECEIPT_INVALID/);
+  assert.equal(qualityStatus(project).status, 'NOT_RUN');
+});
+
 const example = {
   tier: 'quick', status: 'BLOCKED', reasonCode: 'QUALITY_TOOL_MISSING',
   checks: [{ name: 'crapper', status: 'BLOCKED', reasonCode: 'QUALITY_TOOL_MISSING' }],
@@ -65,9 +76,13 @@ test('symlink replacement and pending/incomplete receipt fail closed without off
 
 test('an unfinished executor attempt without a committed receipt is inspectably blocked', t => {
   const project = enabled(t);
+  persistQualityReceipt(project, example);
   const orphan = path.join(project, '.ludory', 'quality', 'attempts', '1793000000000-abcdef123456');
   fs.mkdirSync(orphan, { recursive: true });
   const status = qualityStatus(project);
   assert.equal(status.status, 'BLOCKED');
   assert.equal(status.reasonCode, 'QUALITY_EXECUTION_INTERRUPTED');
+  const evidence = planQualityEvidence(project);
+  assert.equal(evidence.status, 'BLOCKED');
+  assert.equal(evidence.reasonCode, 'QUALITY_EXECUTION_INTERRUPTED');
 });

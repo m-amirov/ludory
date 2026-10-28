@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { qualityGame } from './helpers/quality-game.mjs';
 import { planQualityEnable, applyQualityEnable, readQualityPolicy, snapshotQualitySource } from '../src/quality-policy.mjs';
 
@@ -34,6 +35,13 @@ test('frozen or forged games cannot create a quality policy', t => {
   assert.equal(result.status, 'BLOCKED');
   assert.equal(fs.existsSync(path.join(project, '.ludory')), false);
   assert.throws(() => applyQualityEnable(result), /QUALITY_PLAN_NOT_READY/);
+  const manifest = fs.readFileSync(path.join(project, 'ludory.project.json'));
+  fs.writeFileSync(path.join(project, 'ludory.studio.json'), JSON.stringify({
+    schemaVersion: 1, profile: { id: 'web-game' }, template: { id: 'web-basic' },
+    files: { 'ludory.project.json': crypto.createHash('sha256').update(manifest).digest('hex') },
+  }));
+  assert.equal(planQualityEnable(project).status, 'BLOCKED',
+    'a thin, locally forged creation receipt must not unlock the new-project mode');
 });
 
 test('source binding becomes stale after code changes, not after quality artifacts', t => {
@@ -44,6 +52,16 @@ test('source binding becomes stale after code changes, not after quality artifac
   assert.equal(snapshotQualitySource(project).digest, first.digest);
   fs.writeFileSync(path.join(project, 'src/main.js'), 'export const number = 17;\n');
   assert.notEqual(snapshotQualitySource(project).digest, first.digest);
+});
+
+test('source-bound digest does not depend on machine locale collation', t => {
+  const project = qualityGame(t);
+  const first = snapshotQualitySource(project).digest;
+  const original = String.prototype.localeCompare;
+  try {
+    String.prototype.localeCompare = function(other) { return -original.call(this, other); };
+    assert.equal(snapshotQualitySource(project).digest, first);
+  } finally { String.prototype.localeCompare = original; }
 });
 
 test('symlinked quality storage is rejected without writing outside the project', t => {
