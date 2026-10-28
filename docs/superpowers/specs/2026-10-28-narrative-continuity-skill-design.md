@@ -1,6 +1,6 @@
-# Ludory Narrative Continuity — proposed S4-N1 skill contract v0
+# Ludory Narrative Continuity — S4-N1 skill contract v1
 
-**Status: PROPOSED / NOT OWNER-APPROVED (2026-10-28).** This file is an architecture/skill contract for review, not an installed skill or authorization to edit game content. See the [source overlap audit](../../audits/2026-10-28-narrative-skills-overlap.md).
+**Status: OWNER-APPROVED (2026-10-28); PR MERGE PENDING.** The owner approved the recommended option 3 after the Draft contract PR was opened. This file is an architecture/skill contract, not an installed skill or authorization to edit game content. See the [source overlap audit](../../audits/2026-10-28-narrative-skills-overlap.md).
 
 ## Intent and decision to approve
 
@@ -10,9 +10,9 @@ In a **new Studio-created narrative game that actually implements route-dependen
 
 1. **Two new CEOS-style editor + continuity skills:** declined as recommendation; dialogue editing already overlaps the existing narrative review trigger, and CEOS `context`, session and game-validator assumptions do not apply to Ludory.
 2. **Expand `ludory-narrative-review` to include all state-space checks:** possible, but risks confusing Web draft acceptance and deterministic game-source verification in one entrypoint.
-3. **Recommended for owner approval: optional `ludory-narrative-continuity` only.** Preserve `ludory-narrative-review` for prose, dialogue, character, genre and bounded independent draft reviews. Give source-state/route invariants an explicitly distinct read-only trigger, evidence labels and no automatic Web turn.
+3. **Owner-approved option: optional `ludory-narrative-continuity` only.** Preserve `ludory-narrative-review` for prose, dialogue, character, genre and bounded independent draft reviews. Give source-state/route invariants an explicitly distinct read-only trigger, evidence labels and no automatic Web turn.
 
-Approval must select or revise approach 3 before **any** `SKILL.md` implementation. Nothing in this contract expands default narrative requirements for arcade, puzzle or non-narrative games.
+The owner selected approach 3. **No** `SKILL.md` implementation begins until the contract PR is separately integrated and the implementation work is authorized. Nothing in this contract expands default narrative requirements for arcade, puzzle or non-narrative games.
 
 ## Activation, precedence and authority
 
@@ -63,4 +63,4 @@ Handoff: exact authorization and scope; source/canon digests; evidence table and
 
 This proposal neither implements a parser/solver nor adds new AI/Studio/Runtime interfaces. It does not mandate romance, scene counts, word quotas, emotional scores, source rewriting, blind reader claims or release checks. It deliberately defers reader-experience/romance companion skills to optional S4-N2 and runtime-dependent reachability to S3.
 
-**Next decision:** owner chooses the separate optional `ludory-narrative-continuity` path versus a bounded reference extension to existing `ludory-narrative-review` (or defers both). Approval of *this contract only* is needed before making a skill implementation PR; approval does not merge this draft document or establish runtime E2E evidence.
+**Recorded owner decision:** approve one separate optional `ludory-narrative-continuity` entrypoint, preserving `ludory-narrative-review` unchanged and deferring an independent dialogue-editor skill. **Next gates:** complete CI/review and obtain a separate merge decision on the contract PR; then authorize and execute skill implementation with RED/GREEN fixtures in another PR. Contract approval alone does not merge a branch, authorize changes to a game or establish runtime E2E evidence.
