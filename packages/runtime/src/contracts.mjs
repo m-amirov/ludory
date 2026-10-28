@@ -33,6 +33,7 @@ function isUtcTimestamp(value) {
  * @property {() => Promise<void>} destroy
  * @property {() => 'IDLE'|'READY'|'RUNNING'|'PAUSED'|'STOPPED'|'FAULTED'|'DESTROYED'} getStatus
  * @property {() => object} getSnapshot
+ * @property {() => import('./errors.mjs').RuntimeError|null} getLastError
  * @property {(listener: (event: RuntimeHostEventV1) => void) => () => void} subscribe
  */
 

@@ -296,13 +296,14 @@ test('RuntimeError exposes only stable machine codes and preserves cause', () =>
   assertTypeError(() => new RuntimeError('NOT_A_RUNTIME_CODE'));
 });
 
-test('Runtime imports in Node without browser, Phaser or platform globals and exposes no host factory in R1', async () => {
+test('Runtime R2 host imports in Node without browser, Phaser or platform globals', async () => {
   assert.equal('window' in globalThis, false);
   assert.equal('document' in globalThis, false);
   const runtime = await import('../src/index.mjs');
   const packageRuntime = await import('@ludory/runtime');
   assert.equal(packageRuntime.validateViewport, runtime.validateViewport);
-  assert.equal(typeof runtime.createRuntimeHost, 'undefined');
+  assert.equal(typeof runtime.createRuntimeHost, 'function');
+  assert.equal(packageRuntime.createRuntimeHost, runtime.createRuntimeHost);
   assert.equal(typeof runtime.createPhaserRenderer, 'undefined');
   assert.equal(typeof runtime.createYandexAdapter, 'undefined');
   assert.equal(typeof runtime.createVkAdapter, 'undefined');

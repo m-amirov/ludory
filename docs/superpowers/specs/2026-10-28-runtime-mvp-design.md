@@ -86,10 +86,13 @@ host.stop();
 await host.destroy();
 host.getStatus();
 host.getSnapshot();
+host.getLastError();
 host.subscribe(listener);
 ```
 
 Статусы Runtime: `IDLE`, `READY`, `RUNNING`, `PAUSED`, `STOPPED`, `FAULTED`, `DESTROYED`. Core использует lowercase `idle/ready/running/paused/stopped`; Runtime явно отображает их, но не расширяет Core transitions. Ошибка синхронной операции бросает `RuntimeError` с устойчивым `code`, `cause` при наличии и без ложного успешного статуса; асинхронная операция отклоняет Promise с тем же типом. Никаких смешанных `throw`/`{error}` для одного метода. Повторные `pause` из `PAUSED`, `resume` из `RUNNING`, `stop` из `STOPPED` и `destroy` из `DESTROYED` — безопасные no-op. Остальные недопустимые переходы дают `INVALID_RUNTIME_TRANSITION`.
+
+Согласованное дополнение R2: `getLastError(): RuntimeError | null` возвращает последнюю ошибку и её исходный `cause` после асинхронного `FAULTED`, ошибки `initialize()` или `destroy()`; до ошибки и после успешной повторной `initialize()` возвращает `null`. Диагностика остаётся доступной после `destroy()`. Это аддитивный метод, он не меняет 11 кодов ошибок R1 и структуру `RuntimeHostEventV1`.
 
 Правила lifecycle:
 
