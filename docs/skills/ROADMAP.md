@@ -1,6 +1,6 @@
 # Skills & Failure Prevention — delivery roadmap
 
-**Status:** proposed from the [2026-10-28 30→2 skill audit](../audits/2026-10-28-skills-gap.md); no skills have been ported by this document. This is a cross-cutting Ludory lane and **does not block Runtime R1**.
+**Status (2026-10-28):** S0 gap audit merged as [PR #18](https://github.com/m-amirov/ludory/pull/18); S1 engineering skills merged as [PR #19](https://github.com/m-amirov/ludory/pull/19). Ludory now has five first-party skills (two preexisting + three S1). S2 contracts are [proposed for separate approval](../superpowers/specs/2026-10-28-s2-native-skills-design.md); S2 skills are **not implemented**. This cross-cutting lane does **not** block Runtime R1.
 
 ## Operating contract
 
@@ -33,10 +33,10 @@ S1 and S2 may be developed while the independent Runtime R1 interface PR is prep
 5. Exercise the workflow in an isolated **new** Studio fixture/game; keep side effects in the authorized scope. For externally blocked routes, verify the honest blocked outcome rather than calling it PASS.
 6. Use branch/PR review, run relevant `npm test`, `npm run check`, `node examples/core-session.mjs`, inspect `git diff --check` and CI. An unchanged repo test suite alone does not prove new skill efficacy.
 
-## First S1 design decisions to review
+## Recorded S1 decisions (implemented on `main`)
 
 - `ludory-audit`: default read-only, classify product/test/infra/evidence findings by severity, return sources and remediation suggestions without changing code.
 - `ludory-verification`: map each user acceptance claim to an executable check, distinguish scoped functional verdict from browser/visual/platform gates, report a single scoped overall verdict.
 - `ludory-fix`: require a reproduced issue or explicit behavior test, minimal root-cause patch, RED/GREEN evidence, targeted regression, preserve unrelated dirty/unversioned files. Native AI cycle is an optional bounded mechanism, not proof of independent acceptance.
 
-**Owner decision still needed before S1 implementation:** approve the exact first-wave skill contracts and fixtures in a small design document. This roadmap authorizes planning, **not** blind copying or a claims-only PASS.
+**S1 decision:** [contracts approved](../superpowers/specs/2026-10-28-s1-native-skills-design.md) and the three skills merged with tests. Approval was limited to S1. **Next owner gate:** review [S2 contracts](../superpowers/specs/2026-10-28-s2-native-skills-design.md) and the [proposed implementation plan](../superpowers/plans/2026-10-28-s2-native-skills.md). Until approved, neither document authorizes S2 implementation or any real-art, pixel, rights or release PASS.
