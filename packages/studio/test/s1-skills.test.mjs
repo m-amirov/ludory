@@ -17,7 +17,7 @@ function parseSkillDocument(name, text) {
   assert.equal(match[1], name);
   assert.ok(match[2].length <= 500, `${name}: short, trigger-only description`);
   assert.ok(normalized.length < 16_000, `${name}: keep the skill concise`);
-  assert.doesNotMatch(normalized, /\b(?:ceos context|ceos capability-challenge|ceos continue|\.codex-os)\b/i,
+  assert.doesNotMatch(normalized, /\b(?:ceos context|ceos capability-challenge|ceos continue)\b|\.codex-os\b/i,
     `${name}: no legacy CEOS invocation dependency`);
   return normalized;
 }
@@ -119,4 +119,9 @@ test('S1 frontmatter parser accepts actual CRLF documents as on Windows', () => 
     const canonical = skill(name);
     assert.equal(parseSkillDocument(name, canonical.replace(/\n/g, '\r\n')), canonical);
   }
+});
+
+test('S1 document parser rejects legacy .codex-os invocation dependencies', () => {
+  const injected = `${skill('ludory-fix')}\nRun .codex-os to load legacy session state.\n`;
+  assert.throws(() => parseSkillDocument('ludory-fix', injected), /legacy CEOS invocation dependency/);
 });
