@@ -34,14 +34,26 @@ export function createRuntimeHost(config) {
   let detachViewport = null;
   const subscribers = new Set();
   const subscriberErrors = [];
+  const eventQueue = [];
+  let dispatchingEvents = false;
 
   function emit(event) {
-    for (const listener of [...subscribers]) {
-      try { listener({ ...event }); }
-      catch (error) {
-        subscriberErrors.push(error);
-        if (subscriberErrors.length > 64) subscriberErrors.shift();
+    eventQueue.push(event);
+    if (dispatchingEvents) return;
+    dispatchingEvents = true;
+    try {
+      while (eventQueue.length) {
+        const next = eventQueue.shift();
+        for (const listener of [...subscribers]) {
+          try { listener({ ...next }); }
+          catch (error) {
+            subscriberErrors.push(error);
+            if (subscriberErrors.length > 64) subscriberErrors.shift();
+          }
+        }
       }
+    } finally {
+      dispatchingEvents = false;
     }
   }
 

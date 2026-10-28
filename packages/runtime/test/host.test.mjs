@@ -245,6 +245,20 @@ test('subscriber may stop host during RUNNING event without leaving a live sched
   await f.host.destroy();
 });
 
+test('reentrant status transitions reach later subscribers in chronological event order', async () => {
+  const f = harness();
+  await f.host.initialize();
+  f.host.subscribe(event => {
+    if (event.type === 'status' && event.status === 'RUNNING') f.host.stop();
+  });
+  const observed = [];
+  f.host.subscribe(event => { if (event.type === 'status') observed.push(event.status); });
+  f.host.start();
+  assert.equal(f.host.getStatus(), 'STOPPED');
+  assert.deepEqual(observed, ['RUNNING', 'STOPPED']);
+  await f.host.destroy();
+});
+
 test('subscriber may asynchronously destroy during RUNNING event without scheduling on stopped Core', async () => {
   const f = harness();
   await f.host.initialize();
