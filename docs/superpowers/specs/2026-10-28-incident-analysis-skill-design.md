@@ -1,6 +1,6 @@
 # Ludory Incident Analysis — skill contract v1
 
-**Status: PROPOSED, separate owner acceptance required (2026-10-28).** The owner selected `ludory-incident-analysis` as the next transfer after the first nine repository skills. This document requests approval of its exact boundaries; it does **not** create a skill or authorize incident recovery, game mutation or publication.
+**Status: APPROVED by owner (2026-10-28); contract merged as [PR #23](https://github.com/m-amirov/ludory/pull/23), `6f217ada10f2c752c47273439c7251faec7ab2c6`.** The owner selected `ludory-incident-analysis` as the next transfer after the first nine repository skills. Approval covers the incident-analysis boundaries, **not** incident recovery, game mutation or publication. Implementation and tests belong to a subsequent, separately reviewed PR.
 
 **Baseline:** `main` `5e7e8a8ead6e752f296b25a7065c95569d35b684`. Runtime has no package in this baseline; Runtime architecture PR #16 and R1 PR #17 remain separately reviewed Draft work. `Connect` and `Release` are not present. This contract must work using existing read-only Studio/AI/Quality evidence only.
 
