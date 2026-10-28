@@ -1,6 +1,6 @@
 # Ludory Level Design — skill contract v1
 
-**Status: PROPOSED for owner approval (2026-10-28).** This is **contract-only**, not an implemented skill, new level validator, gameplay engine, solver, platform requirement or permission to modify game content. The current `main` at `d7285d06b1a62faf471b9ae46e5a14ca7a54115b` has ten first-party skills and only Core/Studio/AI packages; Runtime R1 is still separate Draft work and no browser/host-based game acceptance is available in `main`.
+**Status: OWNER-APPROVED (2026-10-28), contract merged in [PR #25](https://github.com/m-amirov/ludory/pull/25) at `f3ecf843cc1d0211ce806828cd232671fd6bbe81`.** The contract itself added **no implemented skill**, level validator, gameplay engine, solver, platform requirement or permission to modify game content. At contract merge, `main` had ten first-party skills and only Core/Studio/AI packages; Runtime R1 was separate Draft work and no browser/host-based game acceptance was available in `main`.
 
 ## Intent and approach decision
 
@@ -12,7 +12,7 @@ Considered approaches:
 2. **Original, optional source-first Ludory skill:** **recommended.** It checks level intent, data integrity, seed repeatability and any *existing* rule-consistent solver against a named game revision; it explicitly blocks claims of runtime-equivalent solvability without the corresponding real implementation and tests. It can produce useful authoring feedback today.
 3. **Wait for Runtime R6 and only then build a complete game-playtest skill:** defensible, but unnecessarily delays early authoring defects. Retain Runtime R6+ as a separate acceptance gate regardless of option 2.
 
-The owner must accept option 2 and this contract before a separate implementation PR starts.
+The owner accepted option 2 and this contract. The skill is implemented and reviewed in a **separate** PR, without automatically merging or asserting Runtime acceptance.
 
 ## Entry and precedence
 
