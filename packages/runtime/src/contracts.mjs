@@ -2,8 +2,7 @@ const slugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const semverPattern = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const eventTypes = new Set(['keyboard', 'pointer', 'touch']);
 const eventSources = new Set(['input', 'renderer']);
-const pointerPhases = new Set(['down', 'move', 'up', 'cancel']);
-const keyboardPhases = new Set(['down', 'up']);
+const eventPhases = new Set(['down', 'move', 'up', 'cancel']);
 const viewportOrientations = new Set(['landscape', 'portrait']);
 const commonEventFields = ['schemaVersion', 'type', 'action', 'phase', 'timestamp', 'source'];
 
@@ -175,11 +174,16 @@ function copyJson(value, label, ancestors = new WeakSet()) {
   ancestors.add(value);
   try {
     if (Array.isArray(value)) {
-      if (!Number.isSafeInteger(value.length) || keys.length !== value.length + 1 || !keys.includes('length')) {
+      let lengthDescriptor;
+      try { lengthDescriptor = Object.getOwnPropertyDescriptor(value, 'length'); }
+      catch { fail(label, 'contains an unreadable array length'); }
+      const length = lengthDescriptor?.value;
+      if (!Object.hasOwn(lengthDescriptor ?? {}, 'value') || !Number.isSafeInteger(length) ||
+          length < 0 || keys.length !== length + 1 || !keys.includes('length')) {
         fail(label, 'contains an invalid array');
       }
       const result = [];
-      for (let index = 0; index < value.length; index++) {
+      for (let index = 0; index < length; index++) {
         if (!Object.hasOwn(value, index)) fail(label, 'contains an array hole');
         const key = String(index);
         if (!keys.includes(key)) fail(label, 'contains an invalid array index');
@@ -225,8 +229,8 @@ function pointer(value, type) {
   for (const coordinate of ['x', 'y']) {
     if (typeof fields[coordinate] !== 'number' || !Number.isFinite(fields[coordinate])) fail(`${type} pointer`, `${coordinate} must be finite`);
   }
-  if (Object.hasOwn(fields, 'button') && (!Number.isSafeInteger(fields.button) || fields.button < 0)) {
-    fail(`${type} pointer`, 'button must be a non-negative safe integer');
+  if (Object.hasOwn(fields, 'button') && (!Number.isSafeInteger(fields.button) || fields.button < -1)) {
+    fail(`${type} pointer`, 'button must be a safe integer >= -1');
   }
   return Object.fromEntries(allowed.filter(field => Object.hasOwn(fields, field)).map(field => [field, fields[field]]));
 }
@@ -243,18 +247,19 @@ export function validateRuntimeInputEvent(event) {
   if (typeof common.action !== 'string' || !common.action) fail('input event', 'action must be a non-empty string');
   if (!Number.isFinite(common.timestamp) || common.timestamp < 0) fail('input event', 'timestamp must be finite and non-negative');
   if (!eventSources.has(common.source)) fail('input event', 'source is unsupported');
-  const phases = common.type === 'keyboard' ? keyboardPhases : pointerPhases;
-  if (!phases.has(common.phase)) fail('input event', 'phase is unsupported for type');
+  if (!eventPhases.has(common.phase)) fail('input event', 'phase is unsupported');
   const result = { ...common };
   if (common.type === 'keyboard') {
-    if (!Object.hasOwn(event, 'key') || typeof event.key !== 'string' || !event.key) fail('keyboard event', 'key is required');
     if (Object.hasOwn(event, 'pointer')) fail('keyboard event', 'pointer is not allowed');
-    result.key = ownDataDescriptor(event, 'key', 'keyboard event');
-    if (typeof result.key !== 'string' || !result.key) fail('keyboard event', 'key must be a non-empty string');
+    if (fields.includes('key')) {
+      result.key = ownDataDescriptor(event, 'key', 'keyboard event');
+      if (typeof result.key !== 'string' || !result.key) fail('keyboard event', 'key must be a non-empty string');
+    }
   } else {
-    if (!Object.hasOwn(event, 'pointer')) fail(`${common.type} event`, 'pointer is required');
     if (Object.hasOwn(event, 'key')) fail(`${common.type} event`, 'key is not allowed');
-    result.pointer = pointer(ownDataDescriptor(event, 'pointer', `${common.type} event`), common.type);
+    if (fields.includes('pointer')) {
+      result.pointer = pointer(ownDataDescriptor(event, 'pointer', `${common.type} event`), common.type);
+    }
   }
   return result;
 }

@@ -77,6 +77,49 @@ test('validates and detaches keyboard, pointer and touch input v1 events', () =>
   assert.equal(pointerMove.pointer.x, 10.5);
 });
 
+test('keeps optional input payloads optional and accepts documented event phases', () => {
+  const { key: ignoredKey, ...keyboardWithoutKey } = keyboardDown;
+  const { pointer: ignoredPointer, ...pointerWithoutCoordinates } = pointerMove;
+  assert.deepEqual(validateRuntimeInputEvent(keyboardWithoutKey), keyboardWithoutKey);
+  assert.deepEqual(validateRuntimeInputEvent(pointerWithoutCoordinates), pointerWithoutCoordinates);
+  assert.deepEqual(validateRuntimeInputEvent({ ...keyboardWithoutKey, phase: 'cancel' }), {
+    ...keyboardWithoutKey, phase: 'cancel',
+  });
+  assert.deepEqual(validateRuntimeInputEvent({ ...keyboardWithoutKey, phase: 'move' }), {
+    ...keyboardWithoutKey, phase: 'move',
+  });
+  assert.deepEqual(validateRuntimeInputEvent({
+    ...pointerMove, pointer: { id: 1, x: 10, y: 20, button: -1 },
+  }).pointer, { id: 1, x: 10, y: 20, button: -1 });
+});
+
+test('copies keyboard own-data descriptors without invoking proxy get traps', () => {
+  const event = new Proxy(keyboardDown, {
+    get(target, property, receiver) {
+      if (property === 'key') throw new Error('unsafe direct property read');
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  assert.deepEqual(validateRuntimeInputEvent(event), keyboardDown);
+});
+
+test('never silently drops optional payloads with changing proxy descriptors', () => {
+  for (const [input, optionalField] of [
+    [keyboardDown, 'key'],
+    [pointerMove, 'pointer'],
+  ]) {
+    let reads = 0;
+    const event = new Proxy(input, {
+      getOwnPropertyDescriptor(target, field) {
+        if (field === optionalField && ++reads > 1) return undefined;
+        return Reflect.getOwnPropertyDescriptor(target, field);
+      },
+    });
+    assertTypeError(() => validateRuntimeInputEvent(event));
+    assert.equal(reads, 2);
+  }
+});
+
 test('rejects missing, extra, accessor and inherited input fields', () => {
   assertTypeError(() => validateRuntimeInputEvent({ ...keyboardDown, key: undefined }));
   assertTypeError(() => validateRuntimeInputEvent({ ...pointerMove, pointer: undefined }));
@@ -98,8 +141,7 @@ test('rejects missing, extra, accessor and inherited input fields', () => {
 
 test('rejects unsupported input combinations and non-finite values', () => {
   for (const bad of [
-    { ...keyboardDown, type: 'keyboard', phase: 'move' },
-    { ...keyboardDown, type: 'keyboard', phase: 'cancel' },
+    { ...keyboardDown, type: 'keyboard', phase: 'scroll' },
     { ...keyboardDown, key: '' },
     { ...keyboardDown, timestamp: Number.NaN },
     { ...keyboardDown, timestamp: Infinity },
@@ -149,6 +191,38 @@ test('validates a persisted record around the exact Core snapshot shape', () => 
   assert.notStrictEqual(validated.snapshot.state, input.snapshot.state);
   validated.snapshot.state.score = 99;
   assert.equal(input.snapshot.state.score, 3);
+});
+
+test('preserves nonzero Core snapshot revision through record validation and restore', () => {
+  const source = createGameSession({
+    definition,
+    initialState: { score: 3 },
+    onUpdate: ({ state, setState }) => setState({ score: state.score + 1 }),
+  });
+  source.initialize();
+  source.start();
+  source.tick(16);
+  const validated = validatePersistedRecordShape(record({ snapshot: source.snapshot() }));
+  assert.equal(validated.snapshot.revision, 1);
+  assert.deepEqual(validated.snapshot.state, { score: 4 });
+  const target = createGameSession({ definition });
+  target.initialize();
+  target.restore(validated.snapshot);
+  assert.deepEqual(target.snapshot(), validated.snapshot);
+});
+
+test('never silently truncates arrays whose proxy reports a changing length', () => {
+  const lengths = [2, 2, 1, 1];
+  let reads = 0;
+  const values = new Proxy([1, 2], {
+    get(target, property, receiver) {
+      if (property === 'length') return lengths[reads++] ?? 1;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  const input = record({ snapshot: { ...snapshot(), state: { values } } });
+  const validated = validatePersistedRecordShape(input);
+  assert.deepEqual(validated.snapshot.state.values, [1, 2]);
 });
 
 test('rejects persisted records with wrong versions, fields, dates, hashes or snapshots', () => {
