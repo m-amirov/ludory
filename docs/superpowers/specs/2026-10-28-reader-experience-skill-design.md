@@ -1,0 +1,91 @@
+# Ludory S4-N2 — optional reader-experience skill contract v1
+
+**Status: PROPOSED FOR OWNER REVIEW (2026-10-28); NOT APPROVED OR IMPLEMENTED.** This is a design contract and does not create a `SKILL.md`, a reader session, a Web call or permission to edit games. It follows the [N2 read-only overlap audit](../../audits/2026-10-28-narrative-experience-overlap.md) against Ludory `main` after PR #29 (`46895aa29e070f551871ebd49524737d44dafdee`).
+
+## Decision proposed
+
+Create **one narrowly triggered, optional `ludory-reader-experience` skill**, located eventually at `.agents/skills/ludory-reader-experience/SKILL.md`. It prepares a bounded player-visible cold-read packet and, *only if genuine first-pass notes are supplied/observed*, compares the reader's own interpretation with author-approved intent **after locking the first-pass answers**. It can report comprehension risks; it cannot prove player enjoyment, real gameplay readiness or commercial outcomes.
+
+Keep `ludory-narrative-review` as the sole native `episode-script` editorial/Web DEV owner (including `romance` and `dialogue` categories). Keep `ludory-narrative-continuity` as the source-state/route evidence owner. **Do not create a separate `ludory-romance-narrative` skill in this wave.** Distinct romance-first premises and route/relationship editorial guidance may be a later *optional reference inside the existing review skill*, after a separate owner-approved brief; do not copy CEOS genre/CLI requirements.
+
+### Considered alternatives
+
+1. Copy both CEOS skills: low initial effort, but duplicate native review/romance triggers, legacy project context and dubious independent-reader claims.
+2. Extend `ludory-narrative-review` to do an automatic “blind” pass using the same supplied brief: lower file count, but exposure to author/canon context invalidates the blind label and mixes contradictory evidence protocols.
+3. **Recommended:** one distinct, explicitly requested read-only cold-read skill and no second romance/editor skill. Stronger evidence isolation, at the cost of a separate opt-in packet and reader handoff.
+
+**Owner choice required** before implementation or a change to an existing skill. This proposal does not imply acceptance of option 3.
+
+## Narrow activation and ownership
+
+- Proposed frontmatter starts `Use when...` and mentions an **explicit request** to assess first-pass comprehension, unprimed reading, perceived choice consequences, route differentiation or earned payoff for a bounded **new, authorized Ludory Studio narrative game**. A general narrative-draft edit, romance brief, ordinary review, UI design or non-narrative game does **not** activate it automatically.
+- The project path, game provenance and precise source/text scope must be authorized. `ludory.studio.json` is a mutable local marker, **not** independent evidence of ownership. Frozen CEOS, Starter Kit and pre-existing game repositories remain excluded even with copied markers; they may only serve as read-only migration references.
+- **Read-only by default:** neither packet preparation nor requested critique permits changing game code, dialogue, branch logic, saves, author canon or source; no unsolicited reader recruitment, network request, paid API usage, Web DEV rerun, publication or release submission. Any future repair is separately approved through `ludory-fix` with regression evidence.
+- `ludory-narrative-review` owns contextual editorial review, existing `NARRATIVE_REVIEW_REQUESTED`/`NARRATIVE_REVIEW_RESULT` receipts and strict `ACCEPT`/`REWORK`/`BLOCKED` JSON. **Never reinterpret editorial `ACCEPT` or a model summary as blind-reader observation**. Do not repeat, recover or relabel an existing pending review.
+- `ludory-narrative-continuity` owns current-game guards, branch knowledge and reachable source-state proof. Runtime owns live delivery of text, route input and reload; Connect/Release own platform/release readiness. This skill cannot grant their PASS.
+
+## Input identity and cold-read isolation
+
+Before preparing a packet, require:
+
+1. Verified new game scope and authorization; exact game/draft revision or commit, text/draft SHA-256, route/episode/scene IDs and locale. If a player-visible path is claimed, identify its actual current entrypoint and executable rules or a verified current-build recording. A screenplay's named branch or decoy graph alone is not proof it is playable.
+2. A **bounded slice of material the reader actually receives**: the selected narration, dialogue, meaningful choice labels and only the necessary prior choice history. Text must remain complete within the agreed scene/path; do not silently splice, truncate or omit essential earlier setup while claiming a full-context experience. Route and translation variants need separate IDs and hashes.
+3. An authorized reviewer/handoff method and an explicit **exposure boundary**: hide story bible, author explanations, future scenes, secret route logic, intended payoff ledger, approval labels and prior AI criticism until the first-pass record is sealed. Never claim “blind” if the reviewer already saw any of these relevant materials.
+4. If there is a reader: separate their independently captured first-pass notes/questions, scope, time/order and documented consent/permission to use or share them. Minimize personal data. Use marked **redacted verbatim excerpts** in reports; retention of identifiable raw notes requires separate explicit permission. Self-reported identity or pasted notes alone are not authenticated evidence.
+
+**Two separate representations are mandatory:**
+
+- **Reader-facing packet:** the exact ordered player-visible narration/dialogue, visible choice labels, minimally necessary *player-known* choice history, locale and neutral unleading questions. Never include internal route IDs, source paths, secret flags, file hashes, story bible, presumed correct answers, future scenes or author approval. Use an opaque packet label when identification is needed; names like `betrayal-ending` can themselves spoil the reader.
+- **Private provenance ledger:** game/draft revision, current source-file SHA-256, internal scene/route IDs, path evidence level (`DECLARATIVE_ONLY`, source-replayed or runtime-observed), approved canon and explicitly withheld material, reader exposure record, packet SHA-256 and permitted evidence location. This ledger is **not** sent to the reader.
+
+The packet digest is SHA-256 of the **entire exact emitted UTF-8 packet bytes**, including neutral questions and permitted visible choice history, with LF line endings and no BOM. For a future executable formatter, define a versioned deterministic schema with a fixed field/key order and array ordering: `schemaVersion:1`, `locale`, `visibleHistory`, `visiblePassages`, `visibleChoices`, `questions`, with no internal metadata. Build a fresh packet/digest for changed words, question wording, locale or route history. Source-file hashes stay in the private ledger and do **not** replace the packet hash. Avoid serializing private fields into the packet by accident.
+
+**Evidence precedence:** (1) No notes received: `PACKET_PREPARED` plus first-pass `NOT_RUN`. (2) Notes reported or pasted, but no credible proof of independent exposure order/text identity: `READER_PROVENANCE_UNVERIFIED` (not evidence that no reading happened), with no authenticated cold-read conclusion. (3) A first-pass record tied to the exact packet hash **and** accompanied by a consented observer/capture provenance, contemporaneous sequence showing answers before any canon/author spoilers, and identified reader method: `READER_FIRST_PASS_OBSERVED` for **that** participant/method. A dated owner assertion alone does not meet (3). If prior exposure to the relevant author information is known, label the response *primed editorial feedback*, not blind. A model instructed to impersonate a human or a canon-primed Web assistant cannot substitute for an unprimed reader. The existing Web DEV review is **canon-aware** by contract; its output does not become a cold read by relabeling.
+
+## Source-first bounded protocol
+
+1. **Prepare and freeze one packet.** Generate only the reader-visible schema fields, calculate its exact byte hash, and associate the internal route, current source digests and withheld author context **privately**. Review-only means **no automatic file or sidecar writes**: show an unsent packet and redacted ledger in the response unless the owner separately authorizes a precise destination, retention and privacy scope. Never create a permanent raw-reader archive by implication. Inspect all external commands and file side effects; there is no first-party `reader-experience` CLI or built-in human panel.
+2. **Ask unleading first-pass questions before revealing canon:** who/where/when, what changed, who knows which facts, what the protagonist wants, why this choice matters, what consequence the player expects, and which exact line/choice led to that impression. Let the reader say “not established” instead of requiring a guessed payoff. Questions must not reveal the desired answer.
+3. **Seal first-pass evidence:** link original statements (or authorized, marked-redacted excerpts) to the private packet/route/locale ledger and recorded sequence; distinguish a first read from later revision or model-polished notes. “Seal” is a logical immutability rule for already supplied evidence, **not permission to write files**. The parent may summarize afterward, but not rewrite a reader response into an invented universal conclusion. If consent forbids retention, only show a transient redacted summary and record that the raw answer was not preserved.
+4. **Only then reveal authored intent** where approved. Compare reported meaning or promised payoff with the declared canon, intended open ends and route-conditioned actual delivered text. Preserve intentional ambiguity, flashback, quiet resolution, missed clue, legitimate divergence and reader preference; one person's first impression is not statistical evidence that all players misunderstand the story.
+5. **Scope route comparisons:** for claims of route differentiation, compare source-identifiable *actually reachable* alternatives. Source-only routes need `ludory-narrative-continuity` evidence; real player-visible sequences need a current build/runtime observation. For *two blind first impressions*, each route must go to a separately unprimed participant/cold channel. If the **same** reader receives a second route, label the comparison `ORDER_CONDITIONED_FEEDBACK` and record exposure order: their second encounter is not a first blind read. If only a storyboard or excerpt exists, report a proposed comparison, not observed play.
+6. **Stop and hand off:** list supported confusion points and exact passages, author-only questions, further independent reader needs, unobserved variants and potential separately authorized editorial fixes. No automatic Web replay, iterative infinite polishing, score thresholds or changing canon on a single ambiguous answer.
+
+### Evidence labels and findings
+
+Use analyst-only labels, not native AI/Studio result enums:
+
+| Label | Meaning |
+| --- | --- |
+| `PACKET_PREPARED` | Selected source text, route, locale and hashes were assembled for an optional cold read; **no reader response proved**. |
+| `READER_FIRST_PASS_OBSERVED` | Consented independent observation with exact packet identity and captured sequence **before** author/canon exposure; attributable only to that bounded method/participant. |
+| `READER_PROVENANCE_UNVERIFIED` | Notes were supplied, but exposure order, capture method or text identity lacks credible evidence. Do not claim blind first-pass observation; do not assume no read occurred. |
+| `ORDER_CONDITIONED_FEEDBACK` | Same participant's later route read after relevant prior exposure; may inform editorial comparison but is not a fresh blind first read. |
+| `NOT_RUN` | No reader notes or separately executed browser/device/session were obtained for the particular claimed check. Do not use this label to erase supplied but unverified notes. |
+| `DECLARATIVE_ONLY` | Only authored text/scene declarations were inspected; playable route identity is unproved. |
+| `BLOCKED_RUNTIME_EQUIVALENCE` | Cannot establish that the real current game delivers the same words, timing, choice state or path. |
+| `NOT_APPLICABLE` | No authorized narrative cold-read target, or optional romance/route metric not part of the brief. |
+
+Findings: `OBSERVED_READER_RESPONSE` (what this participant actually understood, with exact supporting words), `COMPREHENSION_RISK` (supported likely ambiguity or unsupported expectation), `EDITORIAL_PREFERENCE` (subjective taste), `INTENTIONAL_CHOICE` (author-approved ambiguity/open payoff/route variation), and `EVIDENCE_GAP` (missing proof, provenance, source or coverage). A `CONFIRMED_DEFECT` needs an independently established game/source/canon violation through the owning narrative-continuity or verification workflow, **not** an unhappy reader alone.
+
+## Required report
+
+Report a compact source/evidence matrix with **game/revision, packet SHA-256, selected route/path identifier and proof basis** (`declarative`, `source-replayed` or `runtime-observed`) **and locale**, exact selected player-visible line/choice, reviewer exposure/provenance, **authorized redacted verbatim first-pass excerpt if available**, author-approved comparison (only after sealed first pass), finding, evidence label and untested scope. Keep internal route IDs/canon in the **private report** only, never in the reader-facing packet. Mark redactions and source limitations; do not imply a permanent raw-note archive. Keep notes attributable to one bounded participant or method; do not invent number of readers, percentages, enjoyment scores, conversion uplift or guaranteed emotional impact. Explain if the supposed reader already knew the outline or received non-player-visible material.
+
+Separate three acceptance statements: **packet reproducibility**, **individual observed interpretation** and **live game/player/Release readiness**. Only the first two can potentially be evidenced by this skill, and the second only when real external evidence exists. Reader findings can recommend an independent edit review but do not override the existing native `ACCEPT` verdict or trigger publication.
+
+## Tests and review required if owner approves implementation
+
+1. **Trigger and boundaries:** first-pass request in authorized new Studio narrative game versus generic script edit, romance/non-narrative and fake marker on a frozen game; no auto writes, global/legacy CLI, Web calls or duplicate review.
+2. **Source packet:** tiny new Studio narrative fixture with a **literal canonical UTF-8/LF byte-string example and pinned expected SHA-256** of the versioned reader packet (including neutral questions), locale/choice history and player-visible text. Confirm hidden route IDs, source digests, canon, author spoilers and expected answers remain only in the private ledger. Hash/bytes change with any visible question, text or history change. Stale or mixed-route/locale bytes fail closed.
+3. **Negative fake-reader:** an AI-generated “I am a human reader” report or a reviewer given the brief/author ledger **before** the answers must never become `READER_FIRST_PASS_OBSERVED`; no cold-reader verdict merely from Web `ACCEPT` or a zero-exit validation script. Owner-pasted notes without credible packet/exposure provenance are `READER_PROVENANCE_UNVERIFIED`, not falsely `NOT_RUN`.
+4. **Honest blocked/default path:** no reader notes yields a reproducible `PACKET_PREPARED` and reader `NOT_RUN`; no automatic sidecar writes. Separately authorized storage must respect exact path and retention/PII scope. Neither path implies `PASS`, synthetic engagement metric, mandatory romance or browser/device readiness.
+5. **Interpretation nuance:** a simulated positive attestation fixture demonstrates the required packet hash, participant consent, contemporaneous first-pass capture and author-context exposure **after** answers; mark it as a **synthetic protocol test, not a real reader**. Real independently evidenced notes that diverge from a later-seen author brief yield bounded `COMPREHENSION_RISK`, not automatic rewrite. Intentionally open ending, subtle setup and romance-free story are not failures. Preserve authorized evidence; source tests cannot prove authentic reader identity.
+6. **Route proof:** false route names/decoy solver do not prove actual playable text. Prove named source replay separately if applicable, and mark `BLOCKED_RUNTIME_EQUIVALENCE` for unobserved browser delivery. Two routes shown to one reader produce order-conditioned comparison, not two blind first reads.
+7. **Verification:** baseline/guided skill pressure trials, negative mutation tests for source spoofing and fake cold reads; focused tests, full `npm test`, `npm run check`, Core example, `git diff --check`, independent review and GitHub Ubuntu/Windows CI. A new Draft skill PR is separate from approval and merge of this contract.
+
+## Exclusions and approval gate
+
+No cold-reader panel, reader accounts, new connector, invented route CLI, universal romance score, screen capture, Web High duplicate, full-season writing, Runtime behavior, save/Back implementation, Connect integration or Release checks are authorized. Source SHA-256 does not attest human exposure, and an individual reviewer is not a population study.
+
+**Decision requested:** approve/reject the recommended *one optional `ludory-reader-experience`* skill with explicit handoff and blocked-no-reader behavior; keep romance-focused advice under the current narrative-review ownership rather than duplicating its trigger. If approved and the contract PR is merged, **a separate authorization** starts implementation. No skill has been installed by this contract.
