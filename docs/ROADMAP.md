@@ -14,14 +14,18 @@
 
 | Phase | Delivery | Required acceptance |
 | --- | --- | --- |
-| **0. Inventory (structural closure complete)** | Pin source SHAs, map CEOS/Starter Kit ownership, enumerate features and conflicts | 398 tracked files and 29 capability groups mapped; runtime parity not yet verified |
-| **1. Core foundation (now)** | `@ludory/core`: validated definition, state snapshot, lifecycle, tests, basic example | Node tests and syntax checks green; no SDK/DOM/storage coupling |
-| **2. Studio (profiles/templates in progress)** | Unified `ludory` CLI, manifest, safe metadata adoption and versioned profiles/templates for new projects; later ownership-aware updater | Preview/manifest creation and new-project scaffold covered by tests; mature-project update/rollback parity still pending |
-| 3. Runtime | Engine-agnostic host contract and optional Phaser integration, lifecycle, persistence, responsive UI, audio | Desktop/mobile behavior, persistence round trip, zero regressions in existing games |
-| 4. Connect | `@ludory/connect-yandex`, `@ludory/connect-vk`, feature/capability detection and per-platform entrypoints | SDK integration tests; isolated builds; real platform runtime observations |
-| 5. AI (controlled test/repair cycle in progress) | Native run/event store, opt-in Codex executor, bounded same-stage test/repair loop; later independent checking and process supervision | No CEOS dependency; preview no side effects; only new Studio-created games launch Codex; max two outer repairs; success remains unverified until independent evidence |
-| 6. Release | Consolidate updater/build validation, compliance, artifact/signature checks and publication workflows | Independent Yandex and VK gates, real uploaded builds, publish requires owner authorization |
-| 7. Optional fresh adoption (later) | Owner-selected attachment of an old game to a new Ludory run, **without importing CEOS history** | Explicit consent, read-only preview, frozen old source intact, rollback; no adoption while games are frozen |
+| **0. Inventory (complete)** | Source/capability inventory and CEOS/Starter Kit ownership map | 398 tracked files and 29 capability groups mapped; parity is not claimed |
+| **1. Core foundation (complete)** | `@ludory/core`: validated definition, state snapshot, lifecycle, tests, basic example | Current Node tests, syntax checks and example are green; Core remains platform-neutral |
+| **2. Studio foundation (partially complete)** | Unified `ludory` CLI, manifests, templates, profiles and new-project scaffold | New Studio game creation/inspect/doctor verified; managed component updater from PR #10 is not in `main` |
+| **3. AI controlled workflows (partially complete)** | Native run/event store, Codex executor, bounded cycle, routing, Web/ImageGen handoffs, narrative/art/Quality gates | Bounded new-game Codex E2E passed; a historical PR #13 run completed Native ImageGen → Web Art Review with `PASS_ART`, but fresh Web route and external Quality tools were unavailable in the 2026-10-28 audit environment |
+| **4. Control acceptance (parallel gate)** | Repeatable fresh-game E2E for Studio/Core/AI with source-bound receipts and explicit blocked outcomes | Keep Web DEV/StoryScope, ImageGen/art and Quality as `BLOCKED` for the current environment until retested; do not confuse historical PASS with fresh evidence, and do not block independent Runtime R1 on host availability |
+| **5. Runtime MVP (next, specification revision 2)** | Engine-neutral host, Core session binding, bounded variable tick, normalized input, manual save/restore, responsive desktop/mobile, audio, independent Phaser adapter | Review [Runtime MVP specification](superpowers/specs/2026-10-28-runtime-mvp-design.md) and [implementation plan R1–R7](superpowers/plans/2026-10-28-runtime-mvp.md); R1 requires a verified branch base and owner acceptance; later browser/mobile evidence is separate from Connect/Release |
+| **6. Connect Yandex** | Independent Yandex adapter, capability detection, platform entrypoint and isolated build | SDK contract tests plus real Yandex runtime observation; never infer from Runtime-only tests |
+| **7. Release MVP** | Build/release validation, compliance, artifact/signature checks and owner-authorized publication workflow | Independent Yandex evidence and release gates; no publish without owner authorization |
+| **8. Connect VK** | Independent VK Games adapter, capability detection and isolated VK build | VK-specific SDK/build/runtime evidence; do not reuse Yandex PASS |
+| **9. Studio updates and optional fresh adoption (later)** | Review PR #10 managed updates; optional owner-selected attachment of an old game without CEOS history import | Explicit consent, read-only preview, frozen old source intact, rollback; no adoption while games are frozen |
+
+The detailed current-state evidence is recorded in [the 2026-10-28 foundation audit](audits/2026-10-28-foundation-acceptance.md). The Runtime contract revision keeps Core untouched and resolves the previous ambiguities around game `update`/input, terminal `STOPPED`, Core-compatible snapshot envelope and frame scheduling. Runtime implementation is intentionally not part of the documentation revision.
 
 ## Source mapping
 
@@ -43,6 +47,13 @@
 3. **Platform leakage:** forbid VK/Yandex imports in `@ludory/core`; injection only from Connect and Runtime.
 4. **Existing project corruption:** frozen games receive no writes; any future voluntary adoption requires separate authorization, preview and ownership checks.
 5. **Premature release claims:** tests/builds do not replace live platform and human QA; retain independent gates and evidence.
+
+## Current technical-debt decisions
+
+- PR #5 (CEOS adapter) is obsolete relative to the native workflow and the frozen-CEOS boundary; owner action is still required to close/archive it.
+- PR #11 (routing preflight) is functionally superseded by merged PR #12 and the code is present in current `main`; owner action is still required to close/archive the duplicate draft.
+- PR #10 (managed component updates) remains an independent open draft and is not silently treated as merged or required for Runtime MVP.
+- Web Helper v2 source rebuild is not byte-reproducibility-verified; vendored artifact integrity and live browser capability remain separate gates.
 
 ## Not included in Phase 1
 
