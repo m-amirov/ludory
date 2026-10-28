@@ -1,12 +1,12 @@
-# S2 Native Art, Visual QA & Rights — Implementation Plan (proposed)
+# S2 Native Art, Visual QA & Rights — Implementation Plan (implemented)
 
-> **Implementation gate:** This is a plan for a future explicitly approved implementation, **not** permission to build the skills or accept live art/rights/visual output. Use `superpowers:executing-plans`, `superpowers:test-driven-development` and `superpowers:verification-before-completion` if the owner approves.
+> **Implementation status (2026-10-28):** Owner-approved S2 instruction contracts merged in PR #20 and three skills/tests merged in PR #21. This historical implementation plan **does not** authorize actual image generation, external review, licence acceptance, runtime-pixel PASS or release; those remain separate gated operations.
 
 **Goal:** Add three opt-in Ludory-native repository skills for art production, gameplay pixel QA and asset-rights review, with honest evidence boundaries.
 
 **Architecture:** Independent `.agents/skills/<name>/SKILL.md` files; Node 22+ `node:test` integration/static tests under `packages/studio/test/`; isolated new Studio fixture and agent pressure trials. No new CLI capability without an independently approved design. The S2 skill layer must reuse native image/art-review receipts, not counterfeit missing screenshot or rights engines.
 
-**Spec:** [S2 proposed contracts](../specs/2026-10-28-s2-native-skills-design.md). **Baseline:** merged S0/S1 `main` `5c47d19df998b6522325a39c04c6ab3a9c957cec`; rebase/refresh against the actual branch head before execution.
+**Spec:** [S2 approved contracts](../specs/2026-10-28-s2-native-skills-design.md). **Historical baseline:** merged S0/S1 `main` `5c47d19df998b6522325a39c04c6ab3a9c957cec`; implementation was completed in PR #21.
 
 ## Global constraints
 

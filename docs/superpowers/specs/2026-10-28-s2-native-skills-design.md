@@ -1,6 +1,6 @@
-# S2 Native Visual, Art & Rights Skills — Proposed Contract v1
+# S2 Native Visual, Art & Rights Skills — Approved Contract v1
 
-**Status: PROPOSED / owner review required.** This document specifies S2 instruction contracts. It does **not** approve implementation, create the three skills, establish a legal rights opinion, or provide visual/Release PASS.
+**Status: APPROVED / IMPLEMENTED (2026-10-28).** The owner approved these S2 instruction contracts; [PR #20](https://github.com/m-amirov/ludory/pull/20) and [PR #21](https://github.com/m-amirov/ludory/pull/21) merged the contract and three skills respectively. This is an approval of skill instructions, **not** a legal rights opinion, real image-production proof, visual-pixel acceptance or Release PASS.
 
 **Baseline:** `main` `5c47d19df998b6522325a39c04c6ab3a9c957cec` (S0 PR #18 and S1 PR #19 merged). S2 is independent of the open Runtime architecture/contract PRs #16/#17. See [skills roadmap](../../skills/ROADMAP.md), [source gap audit](../../audits/2026-10-28-skills-gap.md), and [existing Web art contract](2026-10-26-web-art-acceptance-design.md).
 
