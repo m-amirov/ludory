@@ -1,6 +1,6 @@
 # Ludory S4-N2 — optional reader-experience skill contract v1
 
-**Status: PROPOSED FOR OWNER REVIEW (2026-10-28); NOT APPROVED OR IMPLEMENTED.** This is a design contract and does not create a `SKILL.md`, a reader session, a Web call or permission to edit games. It follows the [N2 read-only overlap audit](../../audits/2026-10-28-narrative-experience-overlap.md) against Ludory `main` after PR #29 (`46895aa29e070f551871ebd49524737d44dafdee`).
+**Status: CONTRACT MERGED IN [PR #30](https://github.com/m-amirov/ludory/pull/30) (`cd023376e1726e26f619673a1fb21d2093fe1837`); OWNER SUBSEQUENTLY AUTHORIZED A SEPARATE SKILL IMPLEMENTATION (2026-10-28).** This contract by itself did not create a `SKILL.md`, reader session, Web call or game-edit permission. The first-party implementation is proposed independently in a **Draft PR**, not automatically approved for merge. The specification follows the [N2 read-only overlap audit](../../audits/2026-10-28-narrative-experience-overlap.md) against Ludory `main` after PR #29 (`46895aa29e070f551871ebd49524737d44dafdee`).
 
 ## Decision proposed
 
@@ -14,7 +14,7 @@ Keep `ludory-narrative-review` as the sole native `episode-script` editorial/Web
 2. Extend `ludory-narrative-review` to do an automatic “blind” pass using the same supplied brief: lower file count, but exposure to author/canon context invalidates the blind label and mixes contradictory evidence protocols.
 3. **Recommended:** one distinct, explicitly requested read-only cold-read skill and no second romance/editor skill. Stronger evidence isolation, at the cost of a separate opt-in packet and reader handoff.
 
-**Owner choice required** before implementation or a change to an existing skill. This proposal does not imply acceptance of option 3.
+**Recorded decision:** the owner selected option 3 for a separate implementation after contract PR #30 merged; this does not approve an automatic implementation PR merge or a change to existing narrative skill ownership.
 
 ## Narrow activation and ownership
 
@@ -74,7 +74,7 @@ Report a compact source/evidence matrix with **game/revision, packet SHA-256, se
 
 Separate three acceptance statements: **packet reproducibility**, **individual observed interpretation** and **live game/player/Release readiness**. Only the first two can potentially be evidenced by this skill, and the second only when real external evidence exists. Reader findings can recommend an independent edit review but do not override the existing native `ACCEPT` verdict or trigger publication.
 
-## Tests and review required if owner approves implementation
+## Tests and review required for the separately authorized implementation
 
 1. **Trigger and boundaries:** first-pass request in authorized new Studio narrative game versus generic script edit, romance/non-narrative and fake marker on a frozen game; no auto writes, global/legacy CLI, Web calls or duplicate review.
 2. **Source packet:** tiny new Studio narrative fixture with a **literal canonical UTF-8/LF byte-string example and pinned expected SHA-256** of the versioned reader packet (including neutral questions), locale/choice history and player-visible text. Confirm hidden route IDs, source digests, canon, author spoilers and expected answers remain only in the private ledger. Hash/bytes change with any visible question, text or history change. Stale or mixed-route/locale bytes fail closed.
@@ -84,8 +84,8 @@ Separate three acceptance statements: **packet reproducibility**, **individual o
 6. **Route proof:** false route names/decoy solver do not prove actual playable text. Prove named source replay separately if applicable, and mark `BLOCKED_RUNTIME_EQUIVALENCE` for unobserved browser delivery. Two routes shown to one reader produce order-conditioned comparison, not two blind first reads.
 7. **Verification:** baseline/guided skill pressure trials, negative mutation tests for source spoofing and fake cold reads; focused tests, full `npm test`, `npm run check`, Core example, `git diff --check`, independent review and GitHub Ubuntu/Windows CI. A new Draft skill PR is separate from approval and merge of this contract.
 
-## Exclusions and approval gate
+## Exclusions and integration gate
 
 No cold-reader panel, reader accounts, new connector, invented route CLI, universal romance score, screen capture, Web High duplicate, full-season writing, Runtime behavior, save/Back implementation, Connect integration or Release checks are authorized. Source SHA-256 does not attest human exposure, and an individual reviewer is not a population study.
 
-**Decision requested:** approve/reject the recommended *one optional `ludory-reader-experience`* skill with explicit handoff and blocked-no-reader behavior; keep romance-focused advice under the current narrative-review ownership rather than duplicating its trigger. If approved and the contract PR is merged, **a separate authorization** starts implementation. No skill has been installed by this contract.
+**Decision recorded:** the owner authorized implementing *one optional `ludory-reader-experience`* with explicit handoff and blocked-no-reader behavior after [PR #30](https://github.com/m-amirov/ludory/pull/30) merged. Romance-focused advice remains under existing narrative-review ownership. **A separate owner integration decision is still required** for the implementation Draft PR. No human reader, Runtime evidence or release authorization was created by either decision.
