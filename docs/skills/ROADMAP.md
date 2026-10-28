@@ -1,6 +1,6 @@
 # Skills & Failure Prevention — delivery roadmap
 
-**Status (2026-10-28):** S0 gap audit merged as [PR #18](https://github.com/m-amirov/ludory/pull/18), S1 engineering skills as [PR #19](https://github.com/m-amirov/ludory/pull/19), S2 approved contracts as [PR #20](https://github.com/m-amirov/ludory/pull/20), S2 art/visual/rights skills as [PR #21](https://github.com/m-amirov/ludory/pull/21) and UI design craft as [PR #22](https://github.com/m-amirov/ludory/pull/22). Incident-analysis contract [PR #23](https://github.com/m-amirov/ludory/pull/23) and implementation [PR #24](https://github.com/m-amirov/ludory/pull/24) are merged. Level-design contract [PR #25](https://github.com/m-amirov/ludory/pull/25) is approved and merged, with implementation in a separate review lane. `main` still has **ten** first-party skills until that skill implementation is merged. Runtime-dependent S3 remains blocked on real host/browser evidence and does **not** block Runtime R1.
+**Status (2026-10-28, after [PR #26](https://github.com/m-amirov/ludory/pull/26), merge `c86eb0e75dbe712b768c44d243368dad5bf38202`):** S0 [#18](https://github.com/m-amirov/ludory/pull/18), S1 [#19](https://github.com/m-amirov/ludory/pull/19), S2 contracts [#20](https://github.com/m-amirov/ludory/pull/20) and skills [#21](https://github.com/m-amirov/ludory/pull/21), UI [#22](https://github.com/m-amirov/ludory/pull/22), incident contract/skill [#23](https://github.com/m-amirov/ludory/pull/23)–[#24](https://github.com/m-amirov/ludory/pull/24), and level-design contract/skill [#25](https://github.com/m-amirov/ludory/pull/25)–[#26](https://github.com/m-amirov/ludory/pull/26) are **merged**. `main` has **11 first-party skill entrypoints**. This is migration of selected instruction contracts, **not** 30/30 functional parity or runtime/platform acceptance.
 
 ## Operating contract
 
@@ -11,21 +11,44 @@
 - Quality/Visual/Runtime/Release acceptance are independent. Developer test success never implies visual, rights, live platform or release PASS. No skill may publish, submit, force-update refs or change source outside authorized scope.
 - Reconcile existing Ludory skills first: preserve `ludory-engineering-quality` and `ludory-narrative-review` without overwriting their established contracts.
 
+## Reconciliation with the 30 pinned CEOS/Starter Kit skills
+
+The [S0 gap audit](../audits/2026-10-28-skills-gap.md) is a **historical pinned-commit inventory** (15 CEOS + 15 Starter Kit), not a current-count report; preserve its original snapshot. Current Ludory names below represent *intent and ownership*, not a claim that original implementations or their real E2E coverage were reproduced.
+
+| Disposition of the 30 source entrypoints | Count | What happened / where it belongs |
+| --- | ---: | --- |
+| Original Ludory skill implemented for a source analogue | **8** | CEOS `audit` → `ludory-audit`, `fix` → `ludory-fix`, `incident-analysis` → `ludory-incident-analysis`, `production-art` → `ludory-production-art`, `verification` → `ludory-verification`, `visual-qa` → `ludory-visual-qa`; Starter Kit `asset-provenance-and-rights` → `ludory-asset-rights`, `level-design-quality` → `ludory-level-design` |
+| Folded into an existing skill/native workflow, without duplicate entrypoint | **3** | CEOS `audit-repair-loop`; Starter Kit `implementation-cycle`, `visual-quality-gate` |
+| Native product workflow rather than a new skill | **1** | CEOS `ceos-continue` → Studio/AI continuation; no CEOS session/CLI compatibility promise |
+| Read-only reference; deliberately not installed | **2** | Starter Kit `codex-engineering-system`, `project-termination` |
+| Still deferred or contingent on product/genre prerequisites | **16** | CEOS: narrative continuity, dialogue editing, reader experience, romance, prod check, release, video (**7**). Starter Kit: accessibility, audio, feel, performance, mobile UX, product review, release audit, web playtest, Yandex release validation (**9**) |
+
+The other **3** Ludory entrypoints are `ludory-engineering-quality` and `ludory-narrative-review` (existing native skills) and `ludory-ui-design` (Ludory-specific UI craft, PR #22). Thus **8 source analogues + 3 native/Ludory-specific = 11** current skills. Folded/native/reference/deferred dispositions must **not** be counted as installed skills. The exact per-source reasoning and pinned SHAs remain in S0; no copies of old `SKILL.md` are required.
+
 ## PR sequence and dependencies
 
-| PR lane | Scope | Prerequisite | Acceptance |
+| PR lane | Delivery state | Scope | Remaining acceptance boundary |
 | --- | --- | --- | --- |
-| **S0 — gap audit (this document)** | Pin source skills, map all 30, classify create/merge/native/defer/reference; keep a separate skills roadmap | Current `main`, no old-project writes | Complete source map, correct counts, docs-only diff, no parity claim |
-| **S1 — engineering workflows (P0)** | Add `ludory-audit`, `ludory-verification`, `ludory-fix`; refer to native Studio/AI commands and existing Engineering Quality | S0 reviewed; native AI statuses understood | Trigger and precedence tests; read-only audit; reproducible RED/GREEN fix; criterion-to-evidence verdict; blocked executor remains unverified |
-| **S2 — visual/art/rights (P0)** | Add `ludory-production-art`, `ludory-visual-qa`, `ludory-asset-rights`; integrate source-bound image packets and review receipts | S0 reviewed; no assumption that Web DEV or native ImageGen is available | Verifiable original image hash, real screenshots and reviewer image receipt, rights manifest; absent tool/canon/live pixels stays BLOCKED |
-| **S2.5 — UI design craft (merged)** | Add `ludory-ui-design` for genre-specific menus, HUD, interface typography/composition/graphics and responsive interaction states | S2 boundaries preserved; new Studio games only; separate design approval | Screen-specific design decisions, font/license/localization plan and reviewable states; mockups do not pass runtime pixel QA |
-| **I1 — incident analysis (merged)** | `ludory-incident-analysis`: investigate native Studio/AI/Quality failures with bounded timelines and evidence identity, read-only | Approved PR #23; implementation PR #24 | Correlated observed events vs hypotheses, integrity/uncertainty gates, no unauthorized `recover --apply`; distinct from source fix or Release PASS |
-| **L1 — level design (P1, contract approved; implementation under review)** | Optional `ludory-level-design`: authored/generated level rules, deterministic seeds, solvability hypotheses, difficulty and variety | Level-based new Studio game with explicit game-owned rules; owner-approved [contract](../superpowers/specs/2026-10-28-level-design-skill-design.md), PR #25 merged | Source/solver-only results clearly bounded; no assumed level engine, runtime/player pass, universal difficulty or duration quota |
-| **S3 — runtime/player quality (P1)** | Add mobile UX, accessibility, audio, performance, game feel, web playtest, product review | Relevant Runtime R2–R7 functionality and browser fixtures | Representative responsive/touch/keyboard/pause/resume/load/cleanup scenarios, measured budgets, current-build evidence |
-| **S4 — optional authored content** | Narrative editor, continuity, reader-experience, romance, level-design | New game explicitly opts into corresponding genre/profile | No blanket genre imposition; authored versus runtime reachability distinct; exact source/route evidence and bounded independent review |
-| **S5 — release/media** | Independent release audit, Yandex and VK release skills, optional gameplay-evidence video and read-only live check | Connect and Release validators, real platform evidence, owner authorization | Separate Yandex/VK gates, inspected candidate ZIP, source identity, real observed host state; no implicit publish |
+| **S0 — source gap audit** | **MERGED #18** | All 30 upstream skills pinned and classified | Historical inventory, not feature parity |
+| **S1 — engineering workflows** | **MERGED #19** | `ludory-audit`, `ludory-verification`, `ludory-fix` | Independent evidence required for each actual task; bounded executor alone is unverified |
+| **S2 — visual/art/rights** | **MERGED #20–#21** | `ludory-production-art`, `ludory-visual-qa`, `ludory-asset-rights` | Skill text/tests do not prove real image receipt, actual pixels, rights clearance or Web DEV availability |
+| **S2.5 — UI craft** | **MERGED #22** | `ludory-ui-design`: type, layout, art direction, responsive states | Design review is separate from real-runtime pixel/interaction QA |
+| **I1 — incident analysis** | **MERGED #23–#24** | `ludory-incident-analysis`: read-only timeline, correlation, uncertainty | No automatic recovery or incident-resolution PASS |
+| **L1 — level design** | **MERGED #25–#26** | Optional `ludory-level-design`: bounded source rules, witness replay, exhaustive or invariant-based impossibility checks | Verified source fixture only; no general solver, live game/playability or Runtime equivalence claim |
+| **S4-N1 — optional narrative authoring** | **PROPOSE CONTRACT; NOT APPROVED** | Decide whether source-first dialogue/continuity safeguards belong in existing `ludory-narrative-review` or separate narrowly triggered skills | New *opt-in* narrative Studio game, source-bound rules/branches; no fictional run coverage or editor-only gameplay PASS |
+| **S3 — runtime/player quality** | **BLOCKED BY PRODUCT EVIDENCE** | Mobile UX, accessibility, audio, performance, game feel, web playtest, product review | Relevant Runtime R2–R7 implementation and real browser/device fixtures, actual build identity, independent interaction measurements |
+| **S4-N2 — experiential/genre review** | **DEFER / OPT-IN** | Reader experience and romance-specific editorial work | Author-approved genre, independent reader/player observations as required, no universal narrative quotas |
+| **S5 — release/media** | **BLOCKED BY CONNECT + RELEASE** | Release audit, Yandex/VK target gates, optional gameplay video/live inspection | Target-specific SDK/build/ZIP/platform evidence and explicit owner publication authorization |
 
-S1 and S2 may be developed while the independent Runtime R1 interface PR is prepared. S3/S5 must not issue fake acceptance before their runtime/platform dependencies are available. Defer `project-termination`, `codex-engineering-system` and legacy CEOS continuation as new skill entrypoints unless a separate scoped design establishes a new, nonlegacy need.
+The skill work completed through L1 is **instruction/fixture delivery**, not an all-green quality pipeline. Runtime R1 was a separate contract-layer Draft PR, not a runtime host or browser game; S3 and S5 must not issue acceptance before their product prerequisites exist. Do not recreate `project-termination`, `codex-engineering-system` or legacy CEOS continuation as Ludory skill entrypoints without a new scoped justification.
+
+## Next decision gates (recommended order)
+
+1. **N1, optionally now — narrative overlap audit and contract only.** Compare CEOS continuity/dialogue editor needs with the existing `ludory-narrative-review` trigger. Choose *merge into existing skill* versus a separate opt-in skill based on distinct inputs and independent tests. Require owner approval of the resulting contract **before** implementation; do not impose narrative workflows on other genres. Source-only route checks can be useful now, but real game reachability needs Runtime.
+2. **S3, after relevant Runtime milestones — one evidence-backed vertical slice first.** Start with actual new Studio game host/browser lifecycle and input/viewport fixtures; select the first mobile/accessibility/playtest skill only when its underlying observable APIs exist. Audio, performance and game-feel reviews follow their own measured paths. Do not batch seven skills as paper-only acceptance.
+3. **S5, after Connect/Release — independent platform gates.** Build separate Yandex and VK scopes, with explicit target, package and publication authority. A release-audit instruction can be drafted earlier but cannot become Release PASS or an authorized submission.
+
+Each future skill needs a separate contract, positive/negative evidence, CI/review and owner integration decision. Existing projects and both source repositories stay frozen/read-only throughout.
 
 ## Implementation requirements for each new skill
 
@@ -48,6 +71,6 @@ S1 and S2 may be developed while the independent Runtime R1 interface PR is prep
 
 **I1 decision:** [incident-analysis contract](../superpowers/specs/2026-10-28-incident-analysis-skill-design.md) approved in PR #23; skill implementation and [bounded pressure trials](../audits/2026-10-28-incident-analysis-skill-trials.md) merged in PR #24. It remains read-only and establishes neither incident recovery nor Runtime, Quality or Release PASS.
 
-**L1 decision:** [level-design contract](../superpowers/specs/2026-10-28-level-design-skill-design.md) approved and merged in PR #25; the instruction-only `ludory-level-design` skill is a separately reviewed implementation and **does not add a general level solver or Runtime acceptance**. Do not count it among skills in `main` until its own PR merges.
+**L1 decision:** [level-design contract](../superpowers/specs/2026-10-28-level-design-skill-design.md) approved and merged in PR #25; the original, source-bound `ludory-level-design` skill was independently reviewed and merged in [PR #26](https://github.com/m-amirov/ludory/pull/26). Its Windows/Ubuntu Node 22/24 CI was green for that PR's exact head SHA. This **does not** add a general solver, runtime/browser playtest, universal difficulty measure, or Release PASS.
 
-**Next optional-content gate:** independent review, CI and owner integration decision on the separate `ludory-level-design` implementation PR. S3 mobile/accessibility/audio/performance/playtest still requires actual Runtime/browser/player evidence; S5 waits for Connect/Release.
+**Next optional-content gate:** owner decision whether to commission a **contract-only S4-N1 narrative overlap audit**. No new skill is implicitly approved by this roadmap update. S3 mobile/accessibility/audio/performance/playtest still requires actual Runtime/browser/player evidence; S5 waits for Connect/Release.
