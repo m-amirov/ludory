@@ -1,0 +1,12 @@
+{
+  "name": "@ludory/runtime-narrative",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.mjs"
+  },
+  "dependencies": {
+    "@ludory/narrative": "0.1.0"
+  }
+}

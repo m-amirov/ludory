@@ -5,6 +5,8 @@ on:
       - 'packages/core/**'
       - 'packages/runtime/**'
       - 'packages/runtime-phaser/**'
+      - 'packages/runtime-narrative/**'
+      - 'packages/narrative/**'
       - 'packages/connect-yandex/**'
       - 'packages/studio/catalog/**'
       - 'packages/studio/src/**'
@@ -36,3 +38,16 @@ jobs:
         working-directory: packages/runtime-phaser/test/browser
       - run: npm run smoke
         working-directory: packages/runtime-phaser/test/browser
+      - run: npm ci --ignore-scripts
+        working-directory: packages/runtime-narrative/test/browser
+      - run: npm run smoke
+        working-directory: packages/runtime-narrative/test/browser
+        env:
+          LUDORY_N2_ARTIFACT_DIR: artifacts
+      - name: Upload N2 browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: narrative-n2-browser
+          path: packages/runtime-narrative/test/browser/artifacts/
+          if-no-files-found: ignore

@@ -2,3 +2,4 @@ node_modules/
 coverage/
 .superpowers/
 /.worktrees/
+packages/runtime-narrative/test/browser/artifacts/
