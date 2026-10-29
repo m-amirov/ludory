@@ -348,7 +348,7 @@ test('concurrent unmount calls both wait for the same in-flight Phaser cleanup',
   assert.equal(r.disposals, 1, 'scene dispose occurs exactly once');
 });
 
-test('remount waits for the previous stopped Phaser game to be fully released', async () => {
+test('mount during an in-flight release fails closed and cannot resurrect after cancellation', async () => {
   const { Phaser: base, games } = fakePhaser();
   const Phaser = { ...base, Game: class extends base.Game {
     constructor(config) { super(config); this.loop = { running: false }; }
@@ -360,10 +360,15 @@ test('remount waits for the previous stopped Phaser game to be fully released', 
   const release = renderer.unmount();
   const nextMount = renderer.mount(context);
   assert.equal(games.length, 1, 'new game must not be constructed before teardown settles');
-  await nextMount;
-  assert.equal(r.disposals, 1, 'prior scene must be disposed before next mount resolves');
-  assert.equal(games.length, 2);
+  const cancel = renderer.unmount();
+  await assert.rejects(nextMount, /unmounting/i,
+    'an overlapping mount must reject, not wait invisibly beyond a cancellation request');
+  await cancel;
   await release;
+  assert.equal(r.disposals, 1, 'prior scene must be disposed exactly once');
+  assert.equal(games.length, 1, 'the cancelled overlapping mount cannot resurrect a second game');
+  await renderer.mount(context);
+  assert.equal(games.length, 2, 'an explicit retry after teardown must work');
   await renderer.unmount();
 });
 

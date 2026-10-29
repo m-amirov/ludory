@@ -148,7 +148,11 @@
       const stoppedGame = stoppedGames[0];
       stoppedGame.loop.stop();
       const stoppedRelease = stoppedRenderer.unmount();
+      const overlappingMount = stoppedRenderer.mount({
+        root: document.getElementById('stalled'), viewport, snapshot, dispatchInput() {},
+      }).then(() => null, error => String(error));
       await stoppedRenderer.unmount();
+      const overlappingMountError = await overlappingMount;
       const stoppedDisposalsAfterSecond = stoppedDisposals;
       await stoppedRelease;
       await new Promise(resolve => setTimeout(resolve, 40));
@@ -157,6 +161,8 @@
         canvasCount: document.querySelectorAll('#stalled canvas').length,
         poolTotal: pool.total(),
         retainedScale: stoppedGame.scale?.game === stoppedGame,
+        overlappingMountError,
+        gamesConstructed: stoppedGames.length,
         disposalsAfterSecond: stoppedDisposalsAfterSecond,
         disposals: stoppedDisposals,
       };

@@ -77,6 +77,9 @@ try {
     'stopped game loop cannot defer cleanup to a future frame');
   assert.equal(result.stoppedLoopCleanup.poolTotal, result.stalledPoolBaseline);
   assert.equal(result.stoppedLoopCleanup.retainedScale, false);
+  assert.match(result.stoppedLoopCleanup.overlappingMountError, /still unmounting/i);
+  assert.equal(result.stoppedLoopCleanup.gamesConstructed, 1,
+    'an overlapping mount cannot create an uncancellable game');
   assert.equal(result.stoppedLoopCleanup.disposalsAfterSecond, 1,
     'a concurrent second unmount must await the same scene disposal');
   assert.equal(result.stoppedLoopCleanup.disposals, 1);

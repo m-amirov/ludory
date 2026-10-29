@@ -150,7 +150,11 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
 
   return {
     async mount({ root, viewport, snapshot, dispatchInput }) {
-      if (pendingRelease) await pendingRelease;
+      // Do not queue an invisible mount while another game is being torn
+      // down: a later unmount could only observe the old release and would
+      // be unable to cancel that queued game. Callers may retry after they
+      // have awaited the first unmount.
+      if (pendingRelease) throw new Error('Phaser renderer is still unmounting');
       if (active) throw new Error('Phaser renderer is already mounted');
       if (!root) throw new TypeError('root is required');
       if (typeof dispatchInput !== 'function') throw new TypeError('dispatchInput must be a function');
