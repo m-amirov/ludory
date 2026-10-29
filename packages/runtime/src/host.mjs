@@ -4,6 +4,7 @@ import { RuntimeError } from './errors.mjs';
 import { createInputQueue } from './input.mjs';
 import { createFrameScheduler } from './scheduler.mjs';
 import { createViewportTracker } from './viewport.mjs';
+import { encodePersistedRecord, decodePersistedRecord } from './persistence.mjs';
 
 const ACTIVE = new Set(['READY', 'RUNNING', 'PAUSED', 'STOPPED']);
 
@@ -18,14 +19,13 @@ function requiredMethod(value, method, name) {
 }
 
 /**
- * Engine-neutral host with R3 bounded input and responsive viewport handling.
- * Persistence remains fail-closed until R4.
+ * Engine-neutral Core host with bounded input and explicit persistence.
  */
 export function createRuntimeHost(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
     throw new TypeError('Runtime host options must be an object');
   }
-  const { game, initialState, update, renderer, input, environment, audio } = config;
+  const { game, initialState, update, renderer, input, environment, audio, storage, saveKey } = config;
   let status = 'IDLE';
   let lastError = null;
   let session = null;
@@ -36,6 +36,8 @@ export function createRuntimeHost(config) {
   let detachViewport = null;
   let inputGeneration = 0;
   let inputSince = null;
+  let pendingSaves = 0;
+  let saveTail = Promise.resolve();
   const subscribers = new Set();
   const subscriberErrors = [];
   const eventQueue = [];
@@ -154,6 +156,14 @@ export function createRuntimeHost(config) {
     if (!('root' in environment)) throw new TypeError('environment.root is required');
     if (audio !== undefined) {
       for (const method of ['pauseAll', 'resumeAll']) requiredMethod(audio, method, 'audio');
+    }
+    if (storage !== undefined) {
+      for (const method of ['load', 'save', 'clear']) requiredMethod(storage, method, 'storage');
+      if (typeof saveKey !== 'string' || !saveKey.trim() ||
+          typeof game?.id !== 'string' ||
+          !(saveKey === game.id || saveKey.startsWith(`${game.id}:`) || saveKey.startsWith(`${game.id}/`))) {
+        throw new TypeError('saveKey must be a non-empty game-namespaced storage key');
+      }
     }
   }
 
@@ -302,6 +312,9 @@ export function createRuntimeHost(config) {
 
   async function destroy() {
     checkOperation();
+    if (pendingSaves > 0) {
+      throw runtimeError('RUNTIME_OPERATION_IN_PROGRESS', 'Runtime saves are still in progress');
+    }
     if (status === 'DESTROYED') return;
     operation = 'destroy';
     inputGeneration++;
@@ -344,12 +357,65 @@ export function createRuntimeHost(config) {
 
   async function save() {
     requireStatus(['READY', 'RUNNING', 'PAUSED', 'STOPPED', 'FAULTED'], 'save');
-    throw runtimeError('STORAGE_UNAVAILABLE', 'Runtime persistence is not implemented until R4');
+    if (!storage) throw runtimeError('STORAGE_UNAVAILABLE', 'Runtime storage is not configured');
+    const snapshot = session.snapshot();
+    pendingSaves++;
+    const run = async () => {
+      try {
+        const record = await encodePersistedRecord(snapshot, {
+          savedAt: environment.utcNow?.(),
+          digestSha256: typeof environment.digestSha256 === 'function'
+            ? bytes => environment.digestSha256(bytes) : undefined,
+        });
+        try {
+          const completed = storage.save(saveKey, record);
+          if (!completed || typeof completed.then !== 'function') {
+            throw new TypeError('RuntimeStorage.save must return a completion promise');
+          }
+          await completed;
+        }
+        catch (error) { throw runtimeError('SAVE_FAILED', 'Runtime save write failed', error); }
+      } catch (error) {
+        if (error instanceof RuntimeError && ['DIGEST_UNAVAILABLE', 'SAVE_FAILED'].includes(error.code)) throw error;
+        throw runtimeError('SAVE_FAILED', 'Runtime save failed', error);
+      } finally {
+        pendingSaves--;
+      }
+    };
+    const result = saveTail.then(run, run);
+    saveTail = result.catch(() => {});
+    return result;
   }
 
   async function restore() {
     requireStatus(['READY'], 'restore');
-    throw runtimeError('STORAGE_UNAVAILABLE', 'Runtime persistence is not implemented until R4');
+    if (pendingSaves > 0) {
+      throw runtimeError('RUNTIME_OPERATION_IN_PROGRESS', 'Runtime saves are still in progress');
+    }
+    if (!storage) throw runtimeError('STORAGE_UNAVAILABLE', 'Runtime storage is not configured');
+    if (typeof environment.digestSha256 !== 'function') {
+      throw runtimeError('DIGEST_UNAVAILABLE', 'Runtime SHA-256 provider is unavailable');
+    }
+    operation = 'restore';
+    try {
+      let record;
+      try { record = await storage.load(saveKey); }
+      catch (error) {
+        if (error instanceof RuntimeError && error.code === 'RESTORE_CORRUPT') throw error;
+        throw runtimeError('RESTORE_FAILED', 'Runtime storage read failed', error);
+      }
+      if (record === null) throw runtimeError('RESTORE_FAILED', 'No saved record exists');
+      const snapshot = await decodePersistedRecord(record, {
+        game, digestSha256: bytes => environment.digestSha256(bytes),
+      });
+      try { session.restore(snapshot); }
+      catch (error) { throw runtimeError('RESTORE_CORRUPT', 'Core rejected persisted state', error); }
+      // Present the restored state before the first gameplay tick.
+      try { renderer.render(session.snapshot()); }
+      catch (error) { throw fail(error); }
+    } finally {
+      operation = null;
+    }
   }
 
   return Object.freeze({
