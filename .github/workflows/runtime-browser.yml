@@ -1,0 +1,37 @@
+name: Runtime browser R6
+on:
+  pull_request:
+    paths:
+      - 'packages/core/**'
+      - 'packages/runtime/**'
+      - 'packages/runtime-phaser/**'
+      - 'packages/studio/catalog/**'
+      - 'packages/studio/src/**'
+      - 'scripts/build-runtime-template.mjs'
+      - '.github/workflows/runtime-browser.yml'
+      - 'package*.json'
+  workflow_dispatch:
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build:runtime-template
+      - name: Assert generated browser bundle is committed unchanged
+        run: git diff --exit-code -- packages/studio/catalog/templates/runtime-basic/assets/ludory-runtime.js
+      - run: npm ci --ignore-scripts
+        working-directory: packages/runtime/test/browser
+      - run: npx playwright install --with-deps chromium firefox webkit
+        working-directory: packages/runtime/test/browser
+      - run: npm run smoke
+        working-directory: packages/runtime/test/browser
+      - run: npm ci --ignore-scripts
+        working-directory: packages/runtime-phaser/test/browser
+      - run: npm run smoke
+        working-directory: packages/runtime-phaser/test/browser

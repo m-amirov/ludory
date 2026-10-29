@@ -4,7 +4,7 @@
   "description": "Platform-neutral game definition, state and lifecycle primitives for LUDORY",
   "type": "module",
   "engines": { "node": ">=22" },
-  "exports": { ".": "./src/index.mjs" },
+  "exports": { ".": { "browser": "./src/browser.mjs", "default": "./src/index.mjs" } },
   "files": ["src", "README.md"],
   "sideEffects": false,
   "license": "UNLICENSED"

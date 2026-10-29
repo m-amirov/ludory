@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ludory Runtime</title>
+  <style>
+    body { margin: 0; font: 16px system-ui; background: #101b2a; color: white; }
+    main { max-width: 800px; margin: auto; padding: 16px; }
+    #game { height: min(65dvh, 460px); min-height: 200px; background: #243a56; touch-action: none; }
+    button { padding: 12px; margin: 5px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Ludory Runtime</h1>
+    <div id="game" tabindex="0" aria-label="Game area"></div>
+    <p>Score: <output id="score">0</output></p>
+    <button id="start">Start</button><button id="pause">Pause</button>
+    <button id="resume">Resume</button><button id="save">Save</button>
+    <button id="restore">Restore</button><button id="stop">Stop</button>
+    <button id="sound">Play sound</button>
+    <p id="status" role="status">IDLE</p>
+  </main>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

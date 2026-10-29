@@ -60,6 +60,29 @@ test('creation preview never writes and explicit apply creates runnable files an
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/main.js'), 'utf8'), /<script>/);
 });
 
+test('runtime browser template is offline, source-bound and preview-first', t => {
+  const root = empty(t);
+  const options = { ...params, profile: 'web-game', template: 'runtime-basic' };
+  const plan = planCreate(root, options);
+  assert.equal(plan.status, 'READY', plan.conflicts.join(' '));
+  assert.deepEqual(fs.readdirSync(root), []);
+  assert.ok(plan.writes.includes('assets/ludory-runtime.js'));
+  assert.ok(plan.writes.includes('src/main.js'));
+  const result = applyCreatePlan(plan);
+  assert.equal(result.status, 'APPLIED');
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const entry = fs.readFileSync(path.join(root, 'src/main.js'), 'utf8');
+  const bundle = fs.readFileSync(path.join(root, 'assets/ludory-runtime.js'), 'utf8');
+  assert.match(html, /src\/main\.js/);
+  assert.match(entry, /\.\.\/assets\/ludory-runtime\.js/);
+  assert.doesNotMatch(html + entry, /https?:\/\/|from ['"]@ludory\//);
+  assert.ok(bundle.length > 1000);
+  const receipt = JSON.parse(fs.readFileSync(path.join(root, 'ludory.studio.json')));
+  for (const [name, sha] of Object.entries(receipt.files)) {
+    assert.equal(hash(fs.readFileSync(path.join(root, name))), sha, name);
+  }
+});
+
 test('nonempty and nonexistent project roots are never overwritten', t => {
   const root = empty(t);
   fs.writeFileSync(path.join(root, 'owner.txt'), 'owner');

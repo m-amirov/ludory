@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "runtime-basic",
+  "version": "0.1.0",
+  "description": "Offline browser Runtime lifecycle and persistence starter",
+  "profile": "web-game",
+  "engine": "web",
+  "targets": ["yandex-games", "vk-games"],
+  "files": ["index.html", "src/main.js", "assets/ludory-runtime.js"]
+}
