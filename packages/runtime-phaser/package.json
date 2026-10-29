@@ -1,0 +1,14 @@
+{
+  "name": "@ludory/runtime-phaser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.mjs" },
+  "files": ["src", "README.md"],
+  "engines": { "node": ">=22" },
+  "dependencies": { "@ludory/runtime": "0.1.0" },
+  "peerDependencies": { "phaser": "^3.90.0" },
+  "peerDependenciesMeta": { "phaser": { "optional": true } },
+  "sideEffects": false,
+  "license": "UNLICENSED"
+}
