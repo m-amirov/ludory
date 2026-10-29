@@ -4,7 +4,7 @@
   "description": "Engine-neutral Runtime contracts for LUDORY",
   "type": "module",
   "engines": { "node": ">=22" },
-  "exports": { ".": "./src/index.mjs" },
+  "exports": { ".": "./src/index.mjs", "./contracts": "./src/contracts.mjs" },
   "files": ["src", "README.md"],
   "dependencies": { "@ludory/core": "0.1.0" },
   "sideEffects": false,

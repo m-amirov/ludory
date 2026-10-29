@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>R5 pre-DOM-ready cancellation</title>
+  <script type="importmap">
+    { "imports": { "@ludory/runtime/contracts": "/contracts.mjs" } }
+  </script>
+  <script src="/phaser.js"></script>
+</head>
+<body>
+  <div id="game"></div>
+  <script>
+    (async () => {
+      try {
+        const { createPhaserRenderer } = await import('/adapter.mjs');
+        const pool = Phaser.Display.Canvas.CanvasPool;
+        const baseline = pool.total();
+        let constructed = 0;
+        const trackedPhaser = { ...Phaser, Game: class extends Phaser.Game {
+          constructor(config) { super(config); constructed++; }
+        } };
+        const renderer = createPhaserRenderer({ Phaser: trackedPhaser,
+          readyTimeoutMs: 2_000,
+          gameConfig: { type: Phaser.CANVAS },
+          sceneFactory() { return { scene: {}, renderSnapshot() {} }; },
+        });
+        const viewport = { width: 640, height: 360, dpr: 1, orientation: 'landscape' };
+        const snapshot = { schemaVersion: 1, gameId: 'r5-early', gameVersion: '1.0.0',
+          revision: 0, state: {} };
+        const stateAtStart = document.readyState;
+        const pendingMount = renderer.mount({ root: document.getElementById('game'),
+          viewport, snapshot, dispatchInput() {} });
+        const constructedBefore = constructed;
+        let unmountError = null;
+        try { await renderer.unmount(); } catch (error) { unmountError = String(error); }
+        const mountError = await pendingMount.then(() => null, error => String(error));
+        window.__early = { stateAtStart, constructedBefore, mountError, unmountError,
+          constructedAfter: constructed, baseline };
+      } catch (error) { window.__early = { testError: String(error?.stack ?? error) }; }
+    })();
+  </script>
+  <!-- PARSER_WAIT_HERE -->
+</body>
+</html>

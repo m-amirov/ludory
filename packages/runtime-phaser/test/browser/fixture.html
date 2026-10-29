@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ludory Phaser R5 browser smoke</title>
+  <script type="importmap">
+    { "imports": { "@ludory/runtime/contracts": "/contracts.mjs" } }
+  </script>
+  <script src="/phaser.js"></script>
+</head>
+<body>
+  <div id="game"></div>
+  <div id="stalled"></div>
+  <script type="module">
+    import { createPhaserRenderer } from '/adapter.mjs';
+    const viewport = { width: 640, height: 360, dpr: 1, orientation: 'landscape' };
+    const snapshot = { schemaVersion: 1, gameId: 'r5-smoke', gameVersion: '1.0.0',
+      revision: 0, state: { label: 'initial' } };
+    const events = [];
+    let sceneDispatch;
+    let lastSnapshot;
+    let lastViewport;
+    const renderer = createPhaserRenderer({ Phaser: window.Phaser, readyTimeoutMs: 15_000,
+      gameConfig: { type: Phaser.CANVAS, backgroundColor: '#1a2b3c', parent: 'wrong', width: 123,
+        scale: { parent: 'wrong', width: 123, height: 234 } },
+      sceneFactory({ dispatchInput }) {
+        sceneDispatch = dispatchInput;
+        let resolveReady;
+        const ready = new Promise(resolve => { resolveReady = resolve; });
+        return {
+          scene: { create() { window.__sceneCreated = true; resolveReady(); } },
+          ready,
+          renderSnapshot(next) { lastSnapshot = next; },
+          onResize(next) { lastViewport = next; },
+        };
+      },
+    });
+    try {
+      await renderer.mount({ root: document.getElementById('game'), viewport, snapshot,
+        dispatchInput(event) { events.push(event); } });
+      const initialCanvas = document.querySelector('#game canvas');
+      const initialCanvasValid = initialCanvas?.parentElement === document.getElementById('game') &&
+        initialCanvas?.width === 640 && initialCanvas?.height === 360;
+      renderer.render(snapshot);
+      lastSnapshot.state.label = 'local view mutation';
+      const inputAccepted = sceneDispatch({ schemaVersion: 1, type: 'keyboard',
+        action: 'confirm', phase: 'down', timestamp: 1, source: 'renderer', key: 'Enter' });
+      renderer.resize({ width: 360, height: 640, dpr: 2, orientation: 'portrait' });
+      const canvas = document.querySelector('#game canvas');
+      const result = {
+        booted: window.__sceneCreated === true,
+        initialCanvasValid,
+        originalUntouched: snapshot.state.label === 'initial',
+        inputAccepted,
+        inputCount: events.length,
+        inputSource: events[0]?.source,
+        canvasWidth: canvas?.width,
+        canvasHeight: canvas?.height,
+        viewport: lastViewport,
+      };
+      await renderer.unmount();
+      result.inputAfterUnmount = sceneDispatch({ schemaVersion: 1, type: 'keyboard',
+        action: 'confirm', phase: 'up', timestamp: 2, source: 'renderer', key: 'Enter' });
+      await new Promise(resolve => setTimeout(resolve, 40));
+      const pool = Phaser.Display.Canvas.CanvasPool;
+      result.stalledPoolBaseline = pool.total();
+      const stalledGames = [];
+      const stalledPhaser = { ...Phaser, Game: class extends Phaser.Game {
+        constructor(config) { super(config); stalledGames.push(this); }
+      } };
+      result.stalledAttempts = [];
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const stalledRenderer = createPhaserRenderer({ Phaser: stalledPhaser,
+          readyTimeoutMs: 60,
+          gameConfig: { type: Phaser.CANVAS, images: { default: null } },
+          sceneFactory() { return { scene: {}, ready: new Promise(() => {}), renderSnapshot() {} }; },
+        });
+        let stalledError = null;
+        try {
+          await stalledRenderer.mount({ root: document.getElementById('stalled'), viewport,
+            snapshot, dispatchInput() {} });
+        } catch (error) { stalledError = error?.message ?? String(error); }
+        await new Promise(resolve => setTimeout(resolve, 80));
+        const game = stalledGames.at(-1);
+        result.stalledAttempts.push({ error: stalledError,
+          canvasCount: document.querySelectorAll('#stalled canvas').length,
+          poolTotal: pool.total(),
+          retainedInput: game.input?.game === game,
+          retainedScale: game.scale?.game === game,
+          retainedTextures: game.textures?.game === game,
+        });
+      }
+      const abortedGames = [];
+      const abortedPhaser = { ...Phaser, Game: class extends Phaser.Game {
+        constructor(config) { super(config); abortedGames.push(this); }
+      } };
+      const abortedRenderer = createPhaserRenderer({ Phaser: abortedPhaser, readyTimeoutMs: 2_000,
+        gameConfig: { type: Phaser.CANVAS },
+        sceneFactory() { return { scene: {}, ready: new Promise(() => {}), renderSnapshot() {} }; },
+      });
+      const abortedMount = abortedRenderer.mount({ root: document.getElementById('stalled'),
+        viewport, snapshot, dispatchInput() {} });
+      let abortUnmountError = null;
+      try { await abortedRenderer.unmount(); } catch (error) { abortUnmountError = String(error); }
+      const abortMountError = await abortedMount.then(() => null, error => String(error));
+      await new Promise(resolve => setTimeout(resolve, 160));
+      const abortedGame = abortedGames[0];
+      result.immediateAbort = {
+        abortMountError, abortUnmountError,
+        poolTotal: pool.total(),
+        canvasCount: document.querySelectorAll('#stalled canvas').length,
+        retainedInput: abortedGame.input?.game === abortedGame,
+        retainedScale: abortedGame.scale?.game === abortedGame,
+        retainedTextures: abortedGame.textures?.game === abortedGame,
+      };
+      const freshRenderer = createPhaserRenderer({ Phaser: window.Phaser,
+        gameConfig: { type: Phaser.CANVAS },
+        sceneFactory() {
+          let resolveReady;
+          const ready = new Promise(resolve => { resolveReady = resolve; });
+          return { scene: { create() { resolveReady(); } }, ready, renderSnapshot() {} };
+        },
+      });
+      await freshRenderer.mount({ root: document.getElementById('stalled'),
+        viewport, snapshot, dispatchInput() {} });
+      result.remountAfterAbort = document.querySelectorAll('#stalled canvas').length === 1;
+      await freshRenderer.unmount();
+      await new Promise(resolve => setTimeout(resolve, 50));
+      result.remountCanvasRemoved = document.querySelectorAll('#stalled canvas').length === 0;
+      window.__smoke = { ok: true, result };
+    } catch (error) {
+      window.__smoke = { ok: false, error: String(error?.stack ?? error) };
+    }
+  </script>
+</body>
+</html>
