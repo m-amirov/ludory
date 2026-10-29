@@ -1,2 +1,9 @@
 packages/ai/vendor/codex-chatgpt-web/browser-helper.cjs binary
 packages/ai/vendor/codex-chatgpt-web/node_modules/** binary
+
+# N3 author proofs hash the exact text bytes; Windows checkout must not rewrite LF.
+packages/studio/catalog/templates/narrative-interactive/*.json text eol=lf
+packages/studio/catalog/templates/narrative-interactive/*.html text eol=lf
+packages/studio/catalog/templates/narrative-interactive/src/*.js text eol=lf
+packages/studio/catalog/templates/narrative-interactive/assets/*.js text eol=lf
+packages/studio/catalog/templates/narrative-interactive/assets/*.svg text eol=lf
