@@ -1,8 +1,9 @@
 # @ludory/connect-yandex
 
 Independent Yandex Games SDK adapter for **new** LUDORY games. C1 provides
-loading, initialization, availability detection and bounded errors. It does not
-implement gameplay events, cloud saves, ads, a Yandex build or Release gates.
+loading, initialization, availability detection and bounded errors. C2 adds a
+standalone Runtime lifecycle bridge. Cloud saves, ads, a Yandex build and live
+platform acceptance remain separate C3–C5 stages.
 
 ## C1 usage
 
@@ -36,12 +37,50 @@ the actual `sdk` object remains owned by Yandex. Timeouts cover the script and
 SDK `init()` stage. Loader/network/initialization errors remain visible with
 stable codes and original causes where provided.
 
+## C2 lifecycle bridge
+
+Use `createYandexLifecycle({ sdk, host, audio?, canResume?, windowObject?, documentObject? })`
+only with the initialized SDK and an existing `@ludory/runtime` host.
+
+1. `lifecycle.attach()` before game start (preferably before `host.initialize()`).
+2. `await host.initialize()` and load all game resources; then explicitly call
+   `await lifecycle.markReady()` and check it returned `true` before treating
+   Yandex loading tagging as complete.
+3. Start the Runtime host. Yandex `GameplayAPI.start/stop` markers follow actual
+   `host.getStatus()`, never a guessed game intent.
+4. On menu/manual pause set `lifecycle.setManualPaused(true)` **before**
+   `host.pause()`. Clear the flag only when your game allows resume; clearing
+   alone never calls `host.resume()`. Call `lifecycle.detach()` on teardown.
+
+The bridge listens to `sdk.on('game_api_pause'/'game_api_resume')`, then uses
+`host.pause()` / `host.resume()`; Runtime stops/resumes input, frame scheduling
+and its audio adapter. Pass optional `audio` only if it is not already owned by
+the host or its `pauseAll/resumeAll` methods are idempotent. The bridge also
+observes `pagehide/pageshow({ persisted: true })` and document visibility,
+keeping independent pause reasons so an SDK resume cannot override a hidden
+tab. Teardown removes listeners and invalidates old event callbacks.
+
+Manual ownership is explicit: a separate direct `host.pause()` while the host
+is already platform-paused is not observable via Runtime status, so menu logic
+**must** call `setManualPaused(true)`. A `canResume` callback may return `false`
+to forbid resume and must be synchronous (do not return a Promise). Browser
+autoplay restrictions and user mute remain managed by Runtime audio.
+
+SDK markers are optional, observable integration operations, not Release proof.
+`getLastError()` preserves `CAPABILITY_UNAVAILABLE`/`LIFECYCLE_FAILED` diagnostics.
+
 ## Acceptance boundaries
 
 - `node --test packages/connect-yandex/test/*.test.mjs` validates fake SDK/DOM
   contracts, including cancellation, timeout and double-init races.
-- Browser Runtime, physical devices, cloud storage, ads and a live Yandex draft
-  are separate C2–C5 gates. C1 mock tests never imply `YANDEX_LIVE_PASS`.
+- C2 lifecycle tests use a fake SDK with the real Runtime host. A dedicated
+  Playwright smoke uses Chromium, Firefox, Android Chromium emulation and iPhone
+  WebKit emulation; it is a **browser SDK contract test**, not a physical-device
+  or hosted-Yandex test.
+- Physical devices, cloud storage, ads and a live Yandex draft are separate
+  gates. Fake-SDK tests never imply `YANDEX_LIVE_PASS`.
 - No CEOS/Starter Kit migration and no modification of existing game projects.
 
 Official documentation: https://yandex.ru/dev/games/doc/ru/sdk/sdk-about.html
+Lifecycle documentation: https://yandex.ru/dev/games/doc/ru/sdk/sdk-game-events
+and https://yandex.ru/dev/games/doc/ru/sdk/sdk-events (checked 2026-10-29).

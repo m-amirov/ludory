@@ -5,6 +5,7 @@ on:
       - 'packages/core/**'
       - 'packages/runtime/**'
       - 'packages/runtime-phaser/**'
+      - 'packages/connect-yandex/**'
       - 'packages/studio/catalog/**'
       - 'packages/studio/src/**'
       - 'scripts/build-runtime-template.mjs'
