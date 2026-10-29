@@ -11,6 +11,7 @@ on:
       - 'packages/studio/catalog/**'
       - 'packages/studio/src/**'
       - 'scripts/build-runtime-template.mjs'
+      - 'scripts/build-narrative-template.mjs'
       - '.github/workflows/runtime-browser.yml'
       - 'package*.json'
   workflow_dispatch:
@@ -26,6 +27,7 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run build:runtime-template
+      - run: npm run check:narrative-template
       - name: Assert generated browser bundle is committed unchanged
         run: git diff --exit-code -- packages/studio/catalog/templates/runtime-basic/assets/ludory-runtime.js
       - run: npm ci --ignore-scripts
@@ -50,4 +52,15 @@ jobs:
         with:
           name: narrative-n2-browser
           path: packages/runtime-narrative/test/browser/artifacts/
+          if-no-files-found: ignore
+      - run: npm run smoke:n3
+        working-directory: packages/runtime-narrative/test/browser
+        env:
+          LUDORY_N3_ARTIFACT_DIR: artifacts/n3
+      - name: Upload N3 Studio browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: narrative-n3-studio-browser
+          path: packages/runtime-narrative/test/browser/artifacts/n3/
           if-no-files-found: ignore

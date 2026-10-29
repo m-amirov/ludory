@@ -51,13 +51,28 @@ test('creation preview never writes and explicit apply creates runnable files an
   assert.equal(manifest.title.ru, params.title);
   assert.equal(manifest.engine, 'web');
   const receipt = JSON.parse(fs.readFileSync(path.join(root, 'ludory.studio.json')));
-  assert.deepEqual(receipt.profile, { id: 'narrative-game', version: '1.0.0' });
+  assert.deepEqual(receipt.profile, { id: 'narrative-game', version: '1.1.0' });
   assert.deepEqual(receipt.template, { id: 'narrative-basic', version: '1.0.0' });
   assert.deepEqual(Object.keys(receipt.files), ['ludory.project.json', 'index.html', 'src/main.js']);
   for (const [name, sha] of Object.entries(receipt.files)) {
     assert.equal(hash(fs.readFileSync(path.join(root, name))), sha);
   }
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/main.js'), 'utf8'), /<script>/);
+});
+
+test('interactive narrative creation is opt-in, preview-only and refuses occupied project', t => {
+  const root = empty(t);
+  const interactive = { ...params, template: 'narrative-interactive' };
+  const plan = planCreate(root, interactive);
+  assert.equal(plan.status, 'READY', plan.conflicts.join(' '));
+  assert.ok(plan.writes.includes('src/story.js'));
+  assert.deepEqual(fs.readdirSync(root), []);
+  const incompatible = planCreate(root, { ...interactive, profile: 'web-game' });
+  assert.equal(incompatible.status, 'BLOCKED');
+  fs.writeFileSync(path.join(root, 'owner.txt'), 'keep');
+  assert.equal(planCreate(root, interactive).status, 'BLOCKED');
+  assert.throws(() => applyCreatePlan(plan), /stale|conflict|empty/i);
+  assert.deepEqual(fs.readdirSync(root), ['owner.txt']);
 });
 
 test('runtime browser template is offline, source-bound and preview-first', t => {

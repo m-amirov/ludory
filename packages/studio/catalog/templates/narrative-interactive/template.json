@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "narrative-interactive",
+  "version": "1.0.0",
+  "description": "Offline, graph-driven interactive narrative sample with memories and messages",
+  "profile": "narrative-game",
+  "engine": "web",
+  "targets": ["yandex-games", "vk-games"],
+  "files": ["index.html", "src/main.js", "src/story.js", "narrative-assets.json", "assets/lighthouse.svg", "assets/shoreline.svg", "assets/ludory-narrative.js"]
+}

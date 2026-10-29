@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ludory — интерактивная история</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; min-height: 100dvh; background: radial-gradient(ellipse at 68% 10%, #495367, #192b3b 50%, #0f1e2a); color: #f8f3ec; font: 16px/1.5 system-ui, sans-serif; }
+    header { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; justify-content: space-between; max-width: 1000px; margin: auto; padding: 12px 20px; }
+    header strong { font: 600 1.14rem/1.2 Georgia, serif; }
+    header nav { display: flex; flex-wrap: wrap; gap: 8px; }
+    header button { min-height: 42px; background: #e1cfb3; color: #102431; padding: 8px 14px; border: 0; border-radius: 8px; cursor: pointer; }
+    header button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+    #status { margin: 0 auto; max-width: 1000px; color: #e9d6bd; font-size: .86rem; padding: 0 20px; min-height: 1.25rem; }
+    #game { min-height: calc(100dvh - 95px); width: 100%; margin: auto; }
+    @media(max-width: 480px) { header { padding: 9px 12px; } header strong { width: 100%; } header button { font-size: .85rem; } #game { min-height: calc(100dvh - 118px); } }
+  </style>
+</head>
+<body>
+  <header>
+    <strong id="story-title">Вечер у маяка · Ludory</strong>
+    <nav id="story-controls" aria-label="Управление историей">
+      <button id="language" type="button">English</button>
+      <button id="save" type="button">Сохранить</button>
+      <button id="restart" type="button">Начать заново</button>
+    </nav>
+  </header>
+  <p id="status" role="status" aria-live="polite"></p>
+  <main id="game" aria-label="Интерактивная история"></main>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
