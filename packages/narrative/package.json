@@ -1,0 +1,11 @@
+{
+  "name": "@ludory/narrative",
+  "version": "0.1.0",
+  "description": "Pure offline narrative scene engine and interactive novel mechanics for Ludory",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "exports": { ".": "./src/index.mjs" },
+  "files": ["src", "README.md"],
+  "sideEffects": false,
+  "license": "UNLICENSED"
+}
