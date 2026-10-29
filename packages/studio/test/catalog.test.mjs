@@ -25,9 +25,16 @@ function external(t) {
 test('built-in catalogs are versioned, valid, and only expose public descriptors', () => {
   const profiles = listCatalog('profiles');
   assert.deepEqual(profiles.map(x => x.id), ['narrative-game', 'web-game']);
-  assert.deepEqual(listCatalog('templates').map(x => x.id), ['narrative-basic', 'runtime-basic', 'web-basic']);
+  assert.deepEqual(listCatalog('templates').map(x => x.id), ['narrative-basic', 'narrative-interactive', 'runtime-basic', 'web-basic']);
   assert.equal(showCatalog('profiles', 'narrative-game').engine, 'web');
+  assert.equal(showCatalog('profiles', 'narrative-game').version, '1.1.0');
+  assert.deepEqual(showCatalog('profiles', 'narrative-game').templates, ['narrative-basic', 'narrative-interactive']);
   assert.deepEqual(showCatalog('templates', 'narrative-basic').files, ['index.html', 'src/main.js']);
+  assert.equal(showCatalog('templates', 'narrative-basic').version, '1.0.0');
+  const interactive = showCatalog('templates', 'narrative-interactive');
+  assert.equal(interactive.version, '1.0.0');
+  assert.equal(interactive.profile, 'narrative-game');
+  assert.ok(interactive.files.includes('src/story.js'));
   assert.equal(Object.hasOwn(showCatalog('templates', 'web-basic'), 'assetBytes'), false);
   const first = loadCatalog().templates.get('web-basic');
   assert.ok(first.assets.get('index.html').bytes.length > 0);

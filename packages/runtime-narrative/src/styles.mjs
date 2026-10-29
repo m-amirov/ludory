@@ -19,6 +19,8 @@ export const NARRATIVE_CSS = `
 .ludory-narrative__fallback{color:#eed9a9;font-size:.85em}
 .ludory-narrative__journal{padding:10px;border:1px solid #acc4d1;border-radius:12px;background:#182c3a}
 .ludory-narrative__journal ul{padding-left:22px;margin:8px 0}
+.ludory-narrative__journal li{margin-bottom:9px}
+.ludory-narrative__journal img{display:block;max-width:min(100%,290px);max-height:170px;object-fit:contain;margin:7px 0;border-radius:8px}
 .ludory-narrative__reply{padding:10px 0;color:#d9e8f8;font-style:italic}
 .ludory-narrative[data-orientation=portrait]{padding:12px}
 .ludory-narrative[data-orientation=portrait] .ludory-narrative__panel{padding:14px}

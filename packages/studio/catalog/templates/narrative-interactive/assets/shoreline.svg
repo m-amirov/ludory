@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" role="img" aria-label="Морской берег с ракушками в сумерках">
+  <defs>
+    <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#25384e"/><stop offset=".7" stop-color="#82768a"/><stop offset="1" stop-color="#e6a787"/></linearGradient>
+    <linearGradient id="water" x2="0" y2="1"><stop stop-color="#587c8a"/><stop offset="1" stop-color="#26465a"/></linearGradient>
+    <linearGradient id="sand" x2="0" y2="1"><stop stop-color="#bca58e"/><stop offset="1" stop-color="#665d62"/></linearGradient>
+  </defs>
+  <rect width="900" height="520" fill="url(#sky)"/>
+  <circle cx="670" cy="150" r="46" fill="#f2c2a4" opacity=".8"/>
+  <path d="M0 260Q180 257 330 265T640 258T900 270V520H0Z" fill="url(#water)"/>
+  <path d="M0 310Q170 320 298 340T600 320Q750 304 900 360V520H0Z" fill="#8ca5a8" opacity=".5"/>
+  <path d="M0 340Q168 380 304 364T570 390Q721 395 900 356V520H0Z" fill="url(#sand)"/>
+  <path d="M0 352Q168 386 304 371T570 397Q721 402 900 362" fill="none" stroke="#ebdfce" stroke-width="6" opacity=".7"/>
+  <path d="M188 436q28-38 55 0t55 0q-13 37-55 37t-55-37Z" fill="#e8d2b9" stroke="#927d80" stroke-width="5"/>
+  <path d="M243 398v74M222 406l21 66m19-66-19 66m-40-51 40 51m38-51-38 51" stroke="#aa8d90" stroke-width="4" fill="none"/>
+  <path d="M645 438q21-24 44 0t44 0q-11 27-44 27t-44-27Z" fill="#d8b9a4" stroke="#947c7a" stroke-width="4"/>
+  <path d="M689 409v55m-32-42 32 42m32-42-32 42" stroke="#ab9088" stroke-width="3"/>
+  <path d="M315 475q34-7 50-2m85-34q32-5 48 0m250-18q27-7 44-4" fill="none" stroke="#e6c8ae" stroke-width="5" opacity=".6"/>
+</svg>

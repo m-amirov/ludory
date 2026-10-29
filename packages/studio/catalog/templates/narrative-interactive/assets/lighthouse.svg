@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" role="img" aria-label="Маяк в сумерках">
+  <defs>
+    <linearGradient id="sky" x2="0" y2="1"><stop stop-color="#213551"/><stop offset=".7" stop-color="#6c6481"/><stop offset="1" stop-color="#daa38a"/></linearGradient>
+    <linearGradient id="sea" x2="0" y2="1"><stop stop-color="#263d56"/><stop offset="1" stop-color="#102a3a"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#fff4be" stop-opacity=".85"/><stop offset="1" stop-color="#ffe4a7" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="900" height="520" fill="url(#sky)"/><circle cx="553" cy="190" r="164" fill="url(#glow)"/>
+  <path fill="#26374b" d="M0 359 113 331 182 353 251 310 347 347 437 329 533 353 609 316 710 335 780 314 900 349V520H0Z"/>
+  <path fill="url(#sea)" d="M0 395Q130 382 265 390T534 389T900 402V520H0Z"/>
+  <path fill="#3a4b57" d="M461 380 502 112 554 112 598 380Z"/>
+  <path fill="#d8bcad" d="m478 279 103 0 8 48-120 0Z"/><path fill="#d8bcad" d="m490 216 80 0 8 40-94 0Z"/>
+  <rect x="496" y="90" width="65" height="43" fill="#ffe6a4"/>
+  <path d="M484 90h89l-45-32Z" fill="#26374b"/><rect x="490" y="84" width="77" height="9" fill="#1b2a3a"/>
+  <path d="M560 97 848 47 848 150 561 124Z" fill="#fff3c6" opacity=".18"/>
+  <path d="M0 457q60-22 120 0t120 0t120 0t120 0t120 0t120 0t120 0" fill="none" stroke="#dac2b0" stroke-width="2" opacity=".3"/>
+</svg>

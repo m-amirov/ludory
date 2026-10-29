@@ -92,6 +92,38 @@ function readProfile(source, origin) {
   return { ...data, origin, sourceSha256: sha256 };
 }
 
+/** A build-time author proof binds JS-authored narrative references to exact local image bytes.
+ * Studio verifies only JSON/digests: never execute arbitrary template JavaScript during create. */
+export function validateNarrativeAuthorProof(assets, { templateId } = {}) {
+  const proofFile = assets.get('narrative-assets.json');
+  if (!proofFile) {
+    if (templateId === 'narrative-interactive') throw new Error('Interactive narrative template requires an asset proof');
+    return;
+  }
+  const story = assets.get('src/story.js');
+  if (!story) throw new Error('Narrative asset proof requires src/story.js');
+  let proof;
+  try { proof = JSON.parse(proofFile.bytes.toString('utf8')); }
+  catch { throw new Error('Narrative asset proof is not valid JSON'); }
+  exactKeys(proof, ['schemaVersion', 'storySha256', 'assets'], 'narrative asset proof');
+  if (proof.schemaVersion !== 1 || proof.storySha256 !== story.sha256) {
+    throw new Error('Narrative asset proof: story source hash mismatch; rebuild author proof');
+  }
+  if (!proof.assets || typeof proof.assets !== 'object' || Array.isArray(proof.assets) ||
+      Object.keys(proof.assets).length === 0) throw new Error('Narrative asset proof: images required');
+  for (const [id, image] of Object.entries(proof.assets)) {
+    token(id, 'narrative asset ID');
+    exactKeys(image, ['path', 'sha256'], `narrative image ${id}`);
+    const filename = safeFileName(image.path);
+    if (!/^assets\/[a-z0-9_-]+\.(?:svg|png|webp|jpg|jpeg)$/.test(filename)) {
+      throw new Error(`Narrative image path is unsafe: ${filename}`);
+    }
+    if (!assets.has(filename) || assets.get(filename).sha256 !== image.sha256) {
+      throw new Error(`Narrative asset proof: missing or stale image ${filename}`);
+    }
+  }
+}
+
 function readTemplate(source, origin) {
   const { data, sha256 } = jsonSource(source);
   exactKeys(data, ['schemaVersion', 'id', 'version', 'description', 'profile', 'engine', 'targets', 'files'], source);
@@ -118,6 +150,7 @@ function readTemplate(source, origin) {
     const bytes = checkedBytes(path.join(path.dirname(source), ...segments));
     assets.set(filename, { bytes, sha256: digest(bytes) });
   }
+  validateNarrativeAuthorProof(assets, { templateId: data.id });
   return { ...data, origin, sourceSha256: sha256, assets };
 }
 

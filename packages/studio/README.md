@@ -54,24 +54,43 @@ Those features require independent validation before any legacy adoption.
 
 Profile declarations specify a web engine, allowed targets and compatible templates.
 Built-in profiles are `web-game` and optional `narrative-game`; built-in templates
-are `web-basic`, `narrative-basic` and opt-in `runtime-basic`. The first two are
-standalone demos; `runtime-basic` uses the locally bundled `@ludory/runtime`
-Core host, with browser-smoke coverage. None contains VK/Yandex SDK integrations
+are `web-basic`, `narrative-basic`, opt-in `narrative-interactive` and `runtime-basic`.
+The basic story is a standalone click-through; `narrative-interactive` bundles
+the complete N1/N2 graph engine and DOM Runtime with local art, photo/keepsake
+interactions, finite guided messages, authored reactions, delayed echoes,
+relationships, route locks, endings, RU/EN, journal, save/restore and replay.
+It uses no backend, runtime AI or external CDN. `runtime-basic` uses the locally
+bundled `@ludory/runtime` Core host, with browser-smoke coverage. None contains VK/Yandex SDK integrations
 or proves platform compatibility.
+
+To create an interactive story, use `--profile narrative-game` and
+`--template narrative-interactive` for preview, then add `--apply` after checking the file
+list. Serve the generated directory through local static HTTP or VK/Yandex
+hosting, not `file://`: the browser loads the Studio-generated
+`ludory.project.json` from the same origin. Edit `src/story.js` and provide
+actual local images, then revalidate scenario logic before release. The
+source-bound `narrative-assets.json` proof is produced at template-build time
+and checked by Studio before preview/apply; it binds the authored source and
+the local image hashes without executing the template code during creation. All
+messages are authored combinations, not free-form player input. The sample
+art is only a demo; custom projects must review their own rights, content and
+age ratings. `npm run check:narrative-template` checks that the source-bound
+bundle committed to this repository is current. No existing game is rewritten.
 
 ```sh
 node packages/studio/bin/ludory.mjs profiles list --json
 node packages/studio/bin/ludory.mjs templates show --name narrative-basic
+node packages/studio/bin/ludory.mjs templates show --name narrative-interactive
 
 # Preview: creates nothing.
 node packages/studio/bin/ludory.mjs create --project /path/to/empty-dir \
   --id my-story --title 'Моя история' --lang ru \
-  --profile narrative-game --template narrative-basic --targets yandex-games,vk-games
+  --profile narrative-game --template narrative-interactive --targets yandex-games,vk-games
 
 # Only after reviewing the preview:
 node packages/studio/bin/ludory.mjs create --project /path/to/empty-dir \
   --id my-story --title 'Моя история' --lang ru \
-  --profile narrative-game --template narrative-basic --targets yandex-games,vk-games --apply
+  --profile narrative-game --template narrative-interactive --targets yandex-games,vk-games --apply
 ```
 
 `create` requires an **existing empty** directory. It writes

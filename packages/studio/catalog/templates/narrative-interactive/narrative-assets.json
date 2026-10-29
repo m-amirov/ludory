@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "storySha256": "8c72d3d63f04f2986fba58895fa9eb4d83caf6820cee72cc7897bd4f8813fc32",
+  "assets": {
+    "lighthouse": {
+      "path": "assets/lighthouse.svg",
+      "sha256": "850eca9c5f6829f7c4a5c3fe2267d174236bc83de568ed494c16e500a30cf772"
+    },
+    "shoreline": {
+      "path": "assets/shoreline.svg",
+      "sha256": "b95df7d7019e16a4885deff503260c602832b0561f38eb2b190c06f44c85abb5"
+    }
+  }
+}

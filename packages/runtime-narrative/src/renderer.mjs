@@ -4,12 +4,14 @@ import { NARRATIVE_CSS } from './styles.mjs';
 
 const UI = {
   ru: { next: 'Далее', back: 'Назад', journal: 'Журнал', hide: 'Скрыть журнал', empty: 'Пока нет воспоминаний',
+    story: 'История',
     memories: 'Воспоминания', photos: 'Фотоальбом', keepsakes: 'Памятные предметы', messages: 'Сообщения',
     intent: 'Смысл сообщения', tone: 'Тон', attachment: 'Вложение', none: 'Без вложения',
     recipient: 'Кому', preview: 'Предпросмотр', send: 'Отправить', cancel: 'Отмена', compose: 'Составить сообщение',
     facts: 'Отношения', reply: 'Ответ', ending: 'Конец истории',
     unavailable: 'Изображение недоступно', choice: 'Выбор', photo: 'Фото', keepsake: 'Предмет' },
   en: { next: 'Continue', back: 'Back', journal: 'Journal', hide: 'Hide journal', empty: 'Nothing collected yet',
+    story: 'Narrative',
     memories: 'Memories', photos: 'Photo album', keepsakes: 'Keepsakes', messages: 'Messages',
     intent: 'Message intent', tone: 'Tone', attachment: 'Attachment', none: 'No attachment',
     recipient: 'To', preview: 'Preview', send: 'Send', cancel: 'Cancel', compose: 'Compose message',
@@ -191,7 +193,9 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
       for (const item of content[name]) {
         const value = typeof item === 'string' ? humanLabel('journal', item) :
           `${humanLabel('recipient', item.recipient)}: ${item.reply}`;
-        list.appendChild(element('li', value));
+        const entry = element('li', value);
+        if (name === 'album' && typeof item === 'string') addAsset(entry, item, element('span', value));
+        list.appendChild(entry);
       }
       wrapper.appendChild(list);
     }
@@ -285,7 +289,7 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
       style = element('style', NARRATIVE_CSS);
       surface = element('section', undefined, 'ludory-narrative');
       surface.setAttribute('role', 'region');
-      surface.setAttribute('aria-label', 'Narrative');
+      surface.setAttribute('aria-label', UI[locale].story);
       root.appendChild(style);
       root.appendChild(surface);
       this.resize(viewport);
@@ -299,6 +303,7 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
     setLocale(next) {
       if (!UI[next]) throw new TypeError('unsupported locale');
       locale = next;
+      surface?.setAttribute('aria-label', UI[locale].story);
       selectedVariantId = null;
       composerOpen = true;
       draw(true);
