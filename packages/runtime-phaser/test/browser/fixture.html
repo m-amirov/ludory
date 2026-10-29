@@ -128,6 +128,51 @@
       await freshRenderer.unmount();
       await new Promise(resolve => setTimeout(resolve, 50));
       result.remountCanvasRemoved = document.querySelectorAll('#stalled canvas').length === 0;
+
+      const stoppedGames = [];
+      const stoppedPhaser = { ...Phaser, Game: class extends Phaser.Game {
+        constructor(config) { super(config); stoppedGames.push(this); }
+      } };
+      const stoppedRenderer = createPhaserRenderer({ Phaser: stoppedPhaser,
+        gameConfig: { type: Phaser.CANVAS },
+        sceneFactory() {
+          let resolveReady;
+          const ready = new Promise(resolve => { resolveReady = resolve; });
+          return { scene: { create() { resolveReady(); } }, ready, renderSnapshot() {} };
+        },
+      });
+      await stoppedRenderer.mount({ root: document.getElementById('stalled'), viewport,
+        snapshot, dispatchInput() {} });
+      const stoppedGame = stoppedGames[0];
+      stoppedGame.loop.stop();
+      await stoppedRenderer.unmount();
+      await new Promise(resolve => setTimeout(resolve, 40));
+      result.stoppedLoopCleanup = {
+        gameStillMarkedRunning: stoppedGame.isRunning === true,
+        canvasCount: document.querySelectorAll('#stalled canvas').length,
+        poolTotal: pool.total(),
+        retainedScale: stoppedGame.scale?.game === stoppedGame,
+      };
+
+      let reentrantRenderer;
+      let preBootCalled = false;
+      const reentrantRendererConfig = { type: Phaser.CANVAS,
+        callbacks: { preBoot() { preBootCalled = true; void reentrantRenderer.unmount(); } },
+      };
+      reentrantRenderer = createPhaserRenderer({ Phaser,
+        gameConfig: reentrantRendererConfig,
+        sceneFactory() { return { scene: {}, renderSnapshot() {} }; },
+      });
+      let reentrantError = null;
+      try {
+        await reentrantRenderer.mount({ root: document.getElementById('stalled'), viewport,
+          snapshot, dispatchInput() {} });
+      } catch (error) { reentrantError = String(error); }
+      await new Promise(resolve => setTimeout(resolve, 80));
+      result.reentrantPreBootCleanup = { preBootCalled, mountError: reentrantError,
+        canvasCount: document.querySelectorAll('#stalled canvas').length,
+        poolTotal: pool.total(),
+      };
       window.__smoke = { ok: true, result };
     } catch (error) {
       window.__smoke = { ok: false, error: String(error?.stack ?? error) };

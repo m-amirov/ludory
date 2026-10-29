@@ -265,6 +265,55 @@ test('stalled boot fallback attempts every Phaser destroy listener after one par
   assert.equal(cleaned, 1, 'one broken destroy listener must not prevent later subsystem cleanup');
 });
 
+test('unmount finishes destruction immediately if a previously running Phaser loop was stopped', async () => {
+  const { Phaser: base, games } = fakePhaser();
+  const Phaser = { ...base, Game: class extends base.Game {
+    constructor(config) {
+      super(config);
+      // Phaser Game.isRunning stays true after TimeStep.stop(); no next
+      // frame is scheduled to process pendingDestroy in this state.
+      this.loop = { running: false };
+    }
+  } };
+  const renderer = makeRenderer(Phaser, records());
+  await renderer.mount({ root: {}, viewport, snapshot, dispatchInput() {} });
+  assert.equal(games[0].isRunning, true);
+  await renderer.unmount();
+  assert.deepEqual(games[0].destroyed, [[true, false]]);
+  assert.equal(games[0].runDestroyed, 1, 'stopped frame loop must not strand pending destruction');
+});
+
+test('reentrant unmount inside Phaser.Game constructor cleans the constructed game', async () => {
+  const { Phaser: base, games } = fakePhaser();
+  let renderer;
+  const Phaser = { ...base, Game: class extends base.Game {
+    constructor(config) {
+      super(config);
+      // A game callback can synchronously unmount while new Game executes,
+      // before its returned value is assigned to renderer state.
+      void renderer.unmount();
+    }
+  } };
+  renderer = makeRenderer(Phaser, records());
+  await assert.rejects(renderer.mount({ root: {}, viewport, snapshot, dispatchInput() {} }), /interrupted/i);
+  assert.equal(games.length, 1);
+  assert.deepEqual(games[0].destroyed, [[true, false]], 'constructed game cannot be orphaned');
+  await renderer.unmount();
+});
+
+test('reentrant unmount inside sceneFactory disposes the returned scene without constructing Phaser', async () => {
+  const { Phaser, games } = fakePhaser();
+  let renderer;
+  let disposals = 0;
+  renderer = createPhaserRenderer({ Phaser, sceneFactory() {
+    void renderer.unmount();
+    return { scene: {}, renderSnapshot() {}, dispose() { disposals++; } };
+  } });
+  await assert.rejects(renderer.mount({ root: {}, viewport, snapshot, dispatchInput() {} }), /interrupted/i);
+  assert.equal(disposals, 1, 'a scene returned after cancellation still needs disposal');
+  assert.equal(games.length, 0, 'cancelled factory must not create a Phaser game');
+});
+
 test('optional scene ready promise must settle before mount resolves or initial rendering starts', async () => {
   const { Phaser, games } = fakePhaser();
   let resolveScene;

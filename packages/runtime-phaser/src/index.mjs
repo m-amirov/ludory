@@ -76,6 +76,16 @@ function destroyStalledGame(game, Phaser) {
   }
 }
 
+function destroyOwnedGame(game, Phaser) {
+  game.destroy(true, false);
+  // Game.isRunning is not reset by TimeStep.stop(). A stopped loop has no
+  // future step to execute Phaser's queued runDestroy(), even when the game
+  // previously finished booting.
+  if (game.isRunning === false || game.loop?.running === false) {
+    destroyStalledGame(game, Phaser);
+  }
+}
+
 /**
  * Create a RuntimeRenderer backed by an explicitly injected Phaser 3 constructor.
  * Phaser is deliberately not imported here: Core, Runtime and Node callers remain
@@ -110,11 +120,7 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
     let firstError;
     state.cancelBoot?.();
     try {
-      state.game?.destroy(true, false);
-      // Phaser 3 ordinarily runs destruction on its *next frame*. If
-      // startup never reached the game loop there can be no next frame,
-      // so request its internal disposal path immediately on failure.
-      if (state.game?.isRunning === false) destroyStalledGame(state.game, Phaser);
+      if (state.game) destroyOwnedGame(state.game, Phaser);
     } catch (error) { firstError = error; }
     try { state.scene?.dispose?.(); } catch (error) { firstError ??= error; }
     if (firstError) throw firstError;
@@ -148,6 +154,14 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
         };
         const scene = sceneFactory({ Phaser, root, viewport: initialViewport,
           snapshot: copySnapshot(snapshot), dispatchInput: guardedInput });
+        // A factory may synchronously unmount before returning its scene.
+        // Release could not dispose a scene it did not yet own.
+        if (state.released || active !== state) {
+          try { scene?.dispose?.(); } catch (error) {
+            throw new Error('Phaser mount was interrupted', { cause: error });
+          }
+          throw new Error('Phaser mount was interrupted');
+        }
         if (!isObject(scene) || !scene.scene || typeof scene.renderSnapshot !== 'function') {
           throw new TypeError('sceneFactory must return { scene, renderSnapshot }');
         }
@@ -191,7 +205,7 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
           });
         }
         if (active !== state || state.released) throw new Error('Phaser mount was interrupted');
-        state.game = new Phaser.Game({
+        const game = new Phaser.Game({
           ...gameConfig,
           type: gameConfig.type ?? Phaser.AUTO,
           scale: { ...(gameConfig.scale ?? {}), mode: Phaser.Scale?.NONE ?? 0,
@@ -201,6 +215,16 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
           height: initialViewport.height,
           scene: scene.scene,
         });
+        state.game = game;
+        // Phaser may synchronously invoke preBoot callbacks in its Game
+        // constructor. If one unmounts, release saw no game yet, so dispose
+        // this newly returned instance without touching any newer mount.
+        if (state.released || active !== state) {
+          try { destroyOwnedGame(game, Phaser); } catch (error) {
+            throw new Error('Phaser mount was interrupted', { cause: error });
+          }
+          throw new Error('Phaser mount was interrupted');
+        }
 
         // Phaser 3 sets isBooted before its asynchronous texture ready event;
         // isRunning is the stronger signal that the engine finished startup.

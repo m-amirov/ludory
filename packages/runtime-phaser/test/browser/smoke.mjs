@@ -71,6 +71,18 @@ try {
   assert.equal(result.immediateAbort.retainedTextures, false);
   assert.equal(result.remountAfterAbort, true, 'Phaser must mount again after cancelled startup');
   assert.equal(result.remountCanvasRemoved, true, 'remounted game must unmount cleanly');
+  assert.equal(result.stoppedLoopCleanup.gameStillMarkedRunning, true,
+    'regression must reproduce actual Phaser TimeStep.stop() keeping Game.isRunning true');
+  assert.equal(result.stoppedLoopCleanup.canvasCount, 0,
+    'stopped game loop cannot defer cleanup to a future frame');
+  assert.equal(result.stoppedLoopCleanup.poolTotal, result.stalledPoolBaseline);
+  assert.equal(result.stoppedLoopCleanup.retainedScale, false);
+  assert.equal(result.reentrantPreBootCleanup.preBootCalled, true,
+    'real Phaser must invoke a preBoot callback during its constructor');
+  assert.match(result.reentrantPreBootCleanup.mountError, /interrupted/i);
+  assert.equal(result.reentrantPreBootCleanup.canvasCount, 0,
+    'preBoot reentrant unmount cannot leave an orphan canvas');
+  assert.equal(result.reentrantPreBootCleanup.poolTotal, result.stalledPoolBaseline);
   assert.deepEqual(errors, []);
   const earlyPage = await browser.newPage();
   const earlyErrors = [];
