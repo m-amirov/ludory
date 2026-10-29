@@ -140,6 +140,31 @@ test('save and restore fail closed without storage or crypto provider', async ()
   await missing.host.destroy();
 });
 
+test('save and restore preserve the digest provider method receiver', async () => {
+  const storage = memoryStorage();
+  const fixture = hostFixture({
+    storage,
+    environment: {
+      hasher: digest,
+      async digestSha256(bytes) { return this.hasher(bytes); },
+    },
+  });
+  await fixture.host.initialize();
+  await fixture.host.save();
+  await fixture.host.restore();
+  assert.equal(fixture.host.getSnapshot().revision, 0);
+  await fixture.host.destroy();
+});
+
+test('save rejects adapters that do not acknowledge asynchronous write completion', async () => {
+  const storage = memoryStorage();
+  storage.save = () => undefined; // A write scheduled later is not a committed save.
+  const fixture = hostFixture({ storage });
+  await fixture.host.initialize();
+  await assert.rejects(fixture.host.save(), errorCode('SAVE_FAILED'));
+  await fixture.host.destroy();
+});
+
 test('invalid persisted data and digests are rejected before mutating Core; identity/versions are incompatible', async () => {
   const baseline = await encodePersistedRecord({ schemaVersion: 1, gameId: game.id,
     gameVersion: '1.0.0', revision: 3, state: { score: 7 } },

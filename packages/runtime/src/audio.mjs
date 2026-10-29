@@ -29,9 +29,9 @@ function readOptions(options) {
     }
     fields[key] = descriptor.value;
   }
-  const loop = fields.loop ?? false;
+  const loop = Object.hasOwn(fields, 'loop') ? fields.loop : false;
   if (typeof loop !== 'boolean') throw new TypeError('Audio loop must be boolean');
-  return { loop, volume: volume(fields.volume ?? 1, 'Audio volume') };
+  return { loop, volume: volume(Object.hasOwn(fields, 'volume') ? fields.volume : 1, 'Audio volume') };
 }
 
 /** Browser media adapter; game-owned IDs are resolved by the caller, never by SDK. */
@@ -42,6 +42,11 @@ export function createBrowserAudio({ resolveAsset, AudioClass = globalThis.Audio
   let masterVolume = 1;
   let suspended = false;
   let destroyed = false;
+
+  function silence(track) {
+    try { track.element.pause(); } catch { /* optional media cleanup is best effort */ }
+    try { track.element.currentTime = 0; } catch { /* some media sources are not seekable */ }
+  }
 
   function stop(handle) {
     const track = tracks.get(handle);
@@ -54,8 +59,7 @@ export function createBrowserAudio({ resolveAsset, AudioClass = globalThis.Audio
       track.element.removeEventListener('ended', track.onEnded);
       track.element.removeEventListener('error', track.onError);
     }
-    try { track.element.pause(); } catch { /* avoid losing other handles during cleanup */ }
-    try { track.element.currentTime = 0; } catch { /* some media sources are not seekable */ }
+    silence(track);
   }
 
   function applyMix() {
@@ -101,7 +105,8 @@ export function createBrowserAudio({ resolveAsset, AudioClass = globalThis.Audio
       try {
         await element.play();
         if (destroyed || !tracks.has(handle)) {
-          stop(handle);
+          if (tracks.has(handle)) stop(handle);
+          else silence(track);
           throw unavailable();
         }
         if (suspended) element.pause();
@@ -135,7 +140,12 @@ export function createBrowserAudio({ resolveAsset, AudioClass = globalThis.Audio
         track.resumePending = true;
         const attempt = ++track.resumeAttempt;
         const settled = succeeded => {
-          if (tracks.get(handle) !== track) return;
+          if (tracks.get(handle) !== track) {
+            // A removed handle owns no playback, even if an older play()
+            // promise resumes its media element after stop/destroy.
+            silence(track);
+            return;
+          }
           // A superseded play() continuation cannot pause a newer playback.
           if (attempt !== track.resumeAttempt) {
             if (!track.wantPlaying || suspended) {

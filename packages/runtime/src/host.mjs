@@ -363,9 +363,17 @@ export function createRuntimeHost(config) {
     const run = async () => {
       try {
         const record = await encodePersistedRecord(snapshot, {
-          savedAt: environment.utcNow?.(), digestSha256: environment.digestSha256,
+          savedAt: environment.utcNow?.(),
+          digestSha256: typeof environment.digestSha256 === 'function'
+            ? bytes => environment.digestSha256(bytes) : undefined,
         });
-        try { await storage.save(saveKey, record); }
+        try {
+          const completed = storage.save(saveKey, record);
+          if (!completed || typeof completed.then !== 'function') {
+            throw new TypeError('RuntimeStorage.save must return a completion promise');
+          }
+          await completed;
+        }
         catch (error) { throw runtimeError('SAVE_FAILED', 'Runtime save write failed', error); }
       } catch (error) {
         if (error instanceof RuntimeError && ['DIGEST_UNAVAILABLE', 'SAVE_FAILED'].includes(error.code)) throw error;
@@ -397,7 +405,9 @@ export function createRuntimeHost(config) {
         throw runtimeError('RESTORE_FAILED', 'Runtime storage read failed', error);
       }
       if (record === null) throw runtimeError('RESTORE_FAILED', 'No saved record exists');
-      const snapshot = await decodePersistedRecord(record, { game, digestSha256: environment.digestSha256 });
+      const snapshot = await decodePersistedRecord(record, {
+        game, digestSha256: bytes => environment.digestSha256(bytes),
+      });
       try { session.restore(snapshot); }
       catch (error) { throw runtimeError('RESTORE_CORRUPT', 'Core rejected persisted state', error); }
       // Present the restored state before the first gameplay tick.
