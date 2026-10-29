@@ -133,25 +133,32 @@
       const stoppedPhaser = { ...Phaser, Game: class extends Phaser.Game {
         constructor(config) { super(config); stoppedGames.push(this); }
       } };
+      let stoppedDisposals = 0;
       const stoppedRenderer = createPhaserRenderer({ Phaser: stoppedPhaser,
         gameConfig: { type: Phaser.CANVAS },
         sceneFactory() {
           let resolveReady;
           const ready = new Promise(resolve => { resolveReady = resolve; });
-          return { scene: { create() { resolveReady(); } }, ready, renderSnapshot() {} };
+          return { scene: { create() { resolveReady(); } }, ready, renderSnapshot() {},
+            dispose() { stoppedDisposals++; } };
         },
       });
       await stoppedRenderer.mount({ root: document.getElementById('stalled'), viewport,
         snapshot, dispatchInput() {} });
       const stoppedGame = stoppedGames[0];
       stoppedGame.loop.stop();
+      const stoppedRelease = stoppedRenderer.unmount();
       await stoppedRenderer.unmount();
+      const stoppedDisposalsAfterSecond = stoppedDisposals;
+      await stoppedRelease;
       await new Promise(resolve => setTimeout(resolve, 40));
       result.stoppedLoopCleanup = {
         gameStillMarkedRunning: stoppedGame.isRunning === true,
         canvasCount: document.querySelectorAll('#stalled canvas').length,
         poolTotal: pool.total(),
         retainedScale: stoppedGame.scale?.game === stoppedGame,
+        disposalsAfterSecond: stoppedDisposalsAfterSecond,
+        disposals: stoppedDisposals,
       };
 
       let reentrantRenderer;

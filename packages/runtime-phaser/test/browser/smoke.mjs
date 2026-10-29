@@ -77,6 +77,9 @@ try {
     'stopped game loop cannot defer cleanup to a future frame');
   assert.equal(result.stoppedLoopCleanup.poolTotal, result.stalledPoolBaseline);
   assert.equal(result.stoppedLoopCleanup.retainedScale, false);
+  assert.equal(result.stoppedLoopCleanup.disposalsAfterSecond, 1,
+    'a concurrent second unmount must await the same scene disposal');
+  assert.equal(result.stoppedLoopCleanup.disposals, 1);
   assert.equal(result.reentrantPreBootCleanup.preBootCalled, true,
     'real Phaser must invoke a preBoot callback during its constructor');
   assert.match(result.reentrantPreBootCleanup.mountError, /interrupted/i);
@@ -85,6 +88,7 @@ try {
   assert.equal(result.reentrantPreBootCleanup.poolTotal, result.stalledPoolBaseline);
   assert.equal(result.reentrantPostBootCleanup.postBootCalled, true,
     'real Phaser must invoke postBoot immediately before starting its loop');
+  assert.match(result.reentrantPostBootCleanup.mountResult, /interrupted/i);
   assert.equal(result.reentrantPostBootCleanup.canvasCount, 0,
     'postBoot reentrant unmount cannot leave an orphan canvas');
   assert.equal(result.reentrantPostBootCleanup.poolTotal, result.stalledPoolBaseline);

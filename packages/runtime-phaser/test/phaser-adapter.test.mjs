@@ -332,6 +332,63 @@ test('postBoot unmount cannot destroy the Phaser loop before Game.start calls lo
     'a postBoot callback must not destroy Phaser loop before the start stack unwinds');
 });
 
+test('concurrent unmount calls both wait for the same in-flight Phaser cleanup', async () => {
+  const { Phaser: base } = fakePhaser();
+  const Phaser = { ...base, Game: class extends base.Game {
+    constructor(config) { super(config); this.loop = { running: false }; }
+  } };
+  const r = records();
+  const renderer = makeRenderer(Phaser, r);
+  await renderer.mount({ root: {}, viewport, snapshot, dispatchInput() {} });
+  const first = renderer.unmount();
+  const second = renderer.unmount();
+  await second;
+  assert.equal(r.disposals, 1, 'later callers cannot observe unmount completion before cleanup');
+  await first;
+  assert.equal(r.disposals, 1, 'scene dispose occurs exactly once');
+});
+
+test('remount waits for the previous stopped Phaser game to be fully released', async () => {
+  const { Phaser: base, games } = fakePhaser();
+  const Phaser = { ...base, Game: class extends base.Game {
+    constructor(config) { super(config); this.loop = { running: false }; }
+  } };
+  const r = records();
+  const renderer = makeRenderer(Phaser, r);
+  const context = { root: {}, viewport, snapshot, dispatchInput() {} };
+  await renderer.mount(context);
+  const release = renderer.unmount();
+  const nextMount = renderer.mount(context);
+  assert.equal(games.length, 1, 'new game must not be constructed before teardown settles');
+  await nextMount;
+  assert.equal(r.disposals, 1, 'prior scene must be disposed before next mount resolves');
+  assert.equal(games.length, 2);
+  await release;
+  await renderer.unmount();
+});
+
+test('all concurrent unmount callers observe the same cleanup failure', async () => {
+  const { Phaser: base } = fakePhaser();
+  const Phaser = { ...base, Game: class extends base.Game {
+    constructor(config) { super(config); this.loop = { running: false }; }
+  } };
+  let failDisposal = true;
+  const renderer = createPhaserRenderer({ Phaser, sceneFactory() {
+    return { scene: {}, renderSnapshot() {}, dispose() {
+      if (failDisposal) throw new Error('scene teardown failed');
+    } };
+  } });
+  const context = { root: {}, viewport, snapshot, dispatchInput() {} };
+  await renderer.mount(context);
+  const first = renderer.unmount();
+  const second = renderer.unmount();
+  await assert.rejects(second, /scene teardown failed/);
+  await assert.rejects(first, /scene teardown failed/);
+  failDisposal = false;
+  await renderer.mount(context);
+  await renderer.unmount();
+});
+
 test('reentrant unmount inside sceneFactory disposes the returned scene without constructing Phaser', async () => {
   const { Phaser, games } = fakePhaser();
   let renderer;

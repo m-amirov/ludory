@@ -113,20 +113,34 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
 
   let active = null;
   let generation = 0;
+  let pendingRelease = null;
 
-  async function release(state) {
-    if (state.released) return;
+  function release(state) {
+    if (state.releasePromise) return state.releasePromise;
+    if (state.released) return pendingRelease ?? Promise.resolve();
     state.released = true;
     generation++;
     if (active === state) active = null;
 
-    let firstError;
     state.cancelBoot?.();
-    try {
-      if (state.game) await destroyOwnedGame(state.game, Phaser);
-    } catch (error) { firstError = error; }
-    try { state.scene?.dispose?.(); } catch (error) { firstError ??= error; }
-    if (firstError) throw firstError;
+    // An async stopped-loop fallback may outlive the initial unmount call.
+    // Share exactly one completion Promise across concurrent unmounts,
+    // interrupted mounts, and any remount waiting for prior teardown.
+    const cleanup = (async () => {
+      let firstError;
+      try {
+        if (state.game) await destroyOwnedGame(state.game, Phaser);
+      } catch (error) { firstError = error; }
+      try { state.scene?.dispose?.(); } catch (error) { firstError ??= error; }
+      if (firstError) throw firstError;
+    })();
+    state.releasePromise = cleanup;
+    pendingRelease = cleanup;
+    void cleanup.then(
+      () => { if (pendingRelease === cleanup) pendingRelease = null; },
+      () => { if (pendingRelease === cleanup) pendingRelease = null; },
+    );
+    return cleanup;
   }
 
   function requireActive() {
@@ -136,6 +150,7 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
 
   return {
     async mount({ root, viewport, snapshot, dispatchInput }) {
+      if (pendingRelease) await pendingRelease;
       if (active) throw new Error('Phaser renderer is already mounted');
       if (!root) throw new TypeError('root is required');
       if (typeof dispatchInput !== 'function') throw new TypeError('dispatchInput must be a function');
@@ -291,8 +306,8 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
       requireActive().scene.renderSnapshot(copySnapshot(snapshot));
     },
     async unmount() {
-      if (!active) return;
-      await release(active);
+      if (active) await release(active);
+      else if (pendingRelease) await pendingRelease;
     },
   };
 }
