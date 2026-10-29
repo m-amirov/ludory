@@ -1,0 +1,11 @@
+{
+  "name": "@ludory/connect-yandex",
+  "version": "0.1.0",
+  "description": "Independent Yandex Games SDK adapter for LUDORY",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "exports": { ".": "./src/index.mjs" },
+  "files": ["src", "README.md"],
+  "sideEffects": false,
+  "license": "UNLICENSED"
+}
