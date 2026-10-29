@@ -35,14 +35,24 @@ root.addEventListener('keydown', event => {
 });
 
 const renderer = {
-  async mount({ root: mountRoot, snapshot }) { mountRoot.dataset.mounted = 'true'; score.textContent = String(snapshot.state.score); },
+  async mount({ root: mountRoot, snapshot, viewport }) {
+    mountRoot.dataset.mounted = 'true';
+    mountRoot.dataset.orientation = viewport.orientation;
+    score.textContent = String(snapshot.state.score);
+  },
   resize(viewport) { root.dataset.orientation = viewport.orientation; },
   render(snapshot) { score.textContent = String(snapshot.state.score); },
   async unmount() { delete root.dataset.mounted; },
 };
 
 const environment = createBrowserEnvironment({ root });
-const storage = createBrowserStorage({ namespace: game.id });
+let storage;
+try { storage = createBrowserStorage({ namespace: game.id }); }
+catch (error) {
+  if (error.code !== 'STORAGE_UNAVAILABLE') throw error;
+  // Persistence is optional; denied storage must not prevent gameplay.
+  status.dataset.storage = 'unavailable';
+}
 // Tiny built-in WAV beep: no remote audio or SDK/CDN dependency.
 const beep = 'data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YRAAAACAgICAgICAgICAgICAgA==';
 const audio = createBrowserAudio({ resolveAsset: id => id === 'beep' ? beep : null });
@@ -62,12 +72,34 @@ host.subscribe(event => { status.textContent = event.status; });
 await host.initialize();
 for (const action of ['start', 'pause', 'resume', 'save', 'restore', 'stop']) {
   document.getElementById(action).addEventListener('click', async () => {
-    try { await host[action](); }
-    catch (error) { status.textContent = `${error.code ?? 'ERROR'}: ${error.message}`; }
+    delete status.dataset.lastOperation;
+    try {
+      await host[action]();
+      status.dataset.lastOperation = `${action}:ok`;
+    } catch (error) {
+      status.dataset.lastOperation = `${action}:error`;
+      status.textContent = `${error.code ?? 'ERROR'}: ${error.message}`;
+    }
   });
 }
 document.getElementById('sound').addEventListener('click', async () => {
   try { await audio.play('beep'); }
   catch (error) { status.textContent = error.code ?? 'AUDIO_UNAVAILABLE'; }
 });
-window.addEventListener('pagehide', () => { void host.destroy().finally(() => audio.destroy()); }, { once: true });
+let pausedForCache = false;
+window.addEventListener('pagehide', event => {
+  if (event.persisted) {
+    pausedForCache = host.getStatus() === 'RUNNING';
+    if (pausedForCache) host.pause();
+    return;
+  }
+  void host.destroy().catch(error => {
+    status.textContent = `${error.code ?? 'DESTROY_FAILED'}: ${error.message}`;
+  }).finally(() => audio.destroy());
+});
+window.addEventListener('pageshow', event => {
+  if (event.persisted && pausedForCache) {
+    pausedForCache = false;
+    host.resume();
+  }
+});

@@ -76,6 +76,7 @@ test('runtime browser template is offline, source-bound and preview-first', t =>
   assert.match(html, /src\/main\.js/);
   assert.match(entry, /\.\.\/assets\/ludory-runtime\.js/);
   assert.doesNotMatch(html + entry, /https?:\/\/|from ['"]@ludory\//);
+  assert.doesNotMatch(bundle, /https?:\/\/|\bimport\s*\(/);
   assert.ok(bundle.length > 1000);
   const receipt = JSON.parse(fs.readFileSync(path.join(root, 'ludory.studio.json')));
   for (const [name, sha] of Object.entries(receipt.files)) {
