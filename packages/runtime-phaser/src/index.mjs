@@ -76,11 +76,14 @@ function destroyStalledGame(game, Phaser) {
   }
 }
 
-function destroyOwnedGame(game, Phaser) {
+async function destroyOwnedGame(game, Phaser) {
   game.destroy(true, false);
   // Game.isRunning is not reset by TimeStep.stop(). A stopped loop has no
-  // future step to execute Phaser's queued runDestroy(), even when the game
-  // previously finished booting.
+  // future step to execute Phaser's queued runDestroy(). But Game.start()
+  // sets isRunning=true and invokes postBoot BEFORE calling loop.start().
+  // Defer the decision one microtask so a reentrant postBoot unmount cannot
+  // destroy the loop while Phaser is about to start it in the same stack.
+  if (game.isRunning === true && game.loop?.running === false) await Promise.resolve();
   if (game.isRunning === false || game.loop?.running === false) {
     destroyStalledGame(game, Phaser);
   }
@@ -111,7 +114,7 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
   let active = null;
   let generation = 0;
 
-  function release(state) {
+  async function release(state) {
     if (state.released) return;
     state.released = true;
     generation++;
@@ -120,7 +123,7 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
     let firstError;
     state.cancelBoot?.();
     try {
-      if (state.game) destroyOwnedGame(state.game, Phaser);
+      if (state.game) await destroyOwnedGame(state.game, Phaser);
     } catch (error) { firstError = error; }
     try { state.scene?.dispose?.(); } catch (error) { firstError ??= error; }
     if (firstError) throw firstError;
@@ -220,7 +223,7 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
         // constructor. If one unmounts, release saw no game yet, so dispose
         // this newly returned instance without touching any newer mount.
         if (state.released || active !== state) {
-          try { destroyOwnedGame(game, Phaser); } catch (error) {
+          try { await destroyOwnedGame(game, Phaser); } catch (error) {
             throw new Error('Phaser mount was interrupted', { cause: error });
           }
           throw new Error('Phaser mount was interrupted');
@@ -274,7 +277,7 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
         if (active !== state || state.released) throw new Error('Phaser mount was interrupted');
         state.ready = true;
       } catch (error) {
-        try { release(state); } catch (cleanupError) { error.cause = cleanupError; }
+        try { await release(state); } catch (cleanupError) { error.cause = cleanupError; }
         throw error;
       }
     },
@@ -289,7 +292,7 @@ export function createPhaserRenderer({ Phaser, sceneFactory, gameConfig = {}, re
     },
     async unmount() {
       if (!active) return;
-      release(active);
+      await release(active);
     },
   };
 }

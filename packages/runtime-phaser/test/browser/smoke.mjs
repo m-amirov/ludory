@@ -83,6 +83,12 @@ try {
   assert.equal(result.reentrantPreBootCleanup.canvasCount, 0,
     'preBoot reentrant unmount cannot leave an orphan canvas');
   assert.equal(result.reentrantPreBootCleanup.poolTotal, result.stalledPoolBaseline);
+  assert.equal(result.reentrantPostBootCleanup.postBootCalled, true,
+    'real Phaser must invoke postBoot immediately before starting its loop');
+  assert.equal(result.reentrantPostBootCleanup.canvasCount, 0,
+    'postBoot reentrant unmount cannot leave an orphan canvas');
+  assert.equal(result.reentrantPostBootCleanup.poolTotal, result.stalledPoolBaseline);
+  assert.equal(result.reentrantPostBootCleanup.retainedScale, false);
   assert.deepEqual(errors, []);
   const earlyPage = await browser.newPage();
   const earlyErrors = [];

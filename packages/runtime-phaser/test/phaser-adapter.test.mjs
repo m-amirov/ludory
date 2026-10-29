@@ -301,6 +301,37 @@ test('reentrant unmount inside Phaser.Game constructor cleans the constructed ga
   await renderer.unmount();
 });
 
+test('postBoot unmount cannot destroy the Phaser loop before Game.start calls loop.start', async () => {
+  const { Phaser: base, games } = fakePhaser({ booted: false, running: false });
+  let renderer;
+  const Phaser = { ...base, Game: class extends base.Game {
+    constructor(config) {
+      super(config);
+      this.loop = { running: false, startedAfterDestroy: false,
+        start: () => {
+          this.loop.startedAfterDestroy = this.runDestroyed > 0;
+          this.loop.running = true;
+        },
+      };
+      this.events.on('ready', () => {
+        // Phaser Game.start(): isRunning=true; postBoot(game); loop.start()
+        this.isRunning = true;
+        config.callbacks.postBoot(this);
+        this.loop.start();
+      });
+    }
+  } };
+  renderer = makeRenderer(Phaser, records(), { gameConfig: {
+    callbacks: { postBoot() { void renderer.unmount(); } },
+  } });
+  const mounting = renderer.mount({ root: {}, viewport, snapshot, dispatchInput() {} });
+  games[0].events.emit('ready');
+  await assert.rejects(mounting, /interrupted/i);
+  assert.deepEqual(games[0].destroyed, [[true, false]]);
+  assert.equal(games[0].loop.startedAfterDestroy, false,
+    'a postBoot callback must not destroy Phaser loop before the start stack unwinds');
+});
+
 test('reentrant unmount inside sceneFactory disposes the returned scene without constructing Phaser', async () => {
   const { Phaser, games } = fakePhaser();
   let renderer;

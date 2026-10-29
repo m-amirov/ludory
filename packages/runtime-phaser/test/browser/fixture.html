@@ -173,6 +173,30 @@
         canvasCount: document.querySelectorAll('#stalled canvas').length,
         poolTotal: pool.total(),
       };
+
+      let postBootRenderer;
+      let postBootGame;
+      let postBootUnmount;
+      const postBootConfig = { type: Phaser.CANVAS,
+        callbacks: { postBoot(game) {
+          postBootGame = game;
+          postBootUnmount = postBootRenderer.unmount();
+        } },
+      };
+      postBootRenderer = createPhaserRenderer({ Phaser, gameConfig: postBootConfig,
+        sceneFactory() { return { scene: {}, renderSnapshot() {} }; },
+      });
+      const postBootMountResult = await postBootRenderer.mount({
+        root: document.getElementById('stalled'), viewport, snapshot, dispatchInput() {},
+      }).then(() => 'mounted', error => String(error));
+      await postBootUnmount;
+      await new Promise(resolve => setTimeout(resolve, 100));
+      result.reentrantPostBootCleanup = {
+        postBootCalled: Boolean(postBootGame), mountResult: postBootMountResult,
+        canvasCount: document.querySelectorAll('#stalled canvas').length,
+        poolTotal: pool.total(),
+        retainedScale: postBootGame?.scale?.game === postBootGame,
+      };
       window.__smoke = { ok: true, result };
     } catch (error) {
       window.__smoke = { ok: false, error: String(error?.stack ?? error) };
