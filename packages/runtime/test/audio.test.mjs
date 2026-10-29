@@ -104,7 +104,8 @@ test('autoplay denial, missing browser audio and unknown asset return AUDIO_UNAV
 
 test('invalid clip settings are rejected instead of escaping into browser audio objects', async () => {
   const { audio, instances } = audioFixture();
-  for (const options of [{ volume: NaN }, { volume: 2 }, { loop: 'yes' }, { autoplay: true }]) {
+  for (const options of [{ volume: NaN }, { volume: 2 }, { loop: 'yes' },
+    { loop: null }, { volume: null }, { autoplay: true }]) {
     await assert.rejects(audio.play('theme', options), TypeError);
   }
   await assert.rejects(audio.play(''), TypeError);
@@ -194,4 +195,53 @@ test('natural media ended event retires one-shot handles and releases media from
   audio.setMuted(true);
   assert.equal(instances[0].muted, false, 'completed clip is no longer mixed');
   audio.destroy();
+});
+
+test('late initial media play cannot restart sound after audio destroy', async () => {
+  let finishPlay;
+  let element;
+  class DelayedAudio {
+    constructor() { this.paused = true; element = this; }
+    play() {
+      return new Promise(resolve => {
+        finishPlay = () => { this.paused = false; resolve(); };
+      });
+    }
+    pause() { this.paused = true; }
+  }
+  const audio = createBrowserAudio({ resolveAsset: () => '/sound.ogg', AudioClass: DelayedAudio });
+  const pending = audio.play('theme');
+  audio.destroy();
+  finishPlay();
+  await assert.rejects(pending, error => error.code === 'AUDIO_UNAVAILABLE');
+  assert.equal(element.paused, true, 'destroy must silence a late initial play fulfillment');
+});
+
+test('late resumed playback remains silent after its handle is stopped or destroyed', async () => {
+  for (const ending of ['stop', 'destroy']) {
+    let finishResume;
+    let element;
+    class DelayedResumeAudio {
+      constructor() { this.paused = true; this.plays = 0; element = this; }
+      play() {
+        this.plays++;
+        if (this.plays === 1) { this.paused = false; return Promise.resolve(); }
+        return new Promise(resolve => {
+          finishResume = () => { this.paused = false; resolve(); };
+        });
+      }
+      pause() { this.paused = true; }
+    }
+    const audio = createBrowserAudio({ resolveAsset: () => '/sound.ogg', AudioClass: DelayedResumeAudio });
+    const handle = await audio.play('theme');
+    audio.pauseAll();
+    audio.resumeAll();
+    if (ending === 'stop') audio.stop(handle);
+    else audio.destroy();
+    finishResume();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(element.paused, true, `${ending} must silence a late resumed play fulfillment`);
+    audio.destroy();
+  }
 });
