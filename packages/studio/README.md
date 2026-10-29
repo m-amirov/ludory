@@ -45,16 +45,19 @@ root keys and continuations of `schemaVersion` are also blocked. Extra gameplay 
 left unmodified. A blocked
 case requires a manual decision; no inference of additional platform targets.
 
-This slice is **not** the Starter Kit updater, a CEOS orchestration replacement,
-a runtime, or a release/publishing pipeline. Those features require separate
-behavioral parity validation before migration.
+The legacy metadata-only `migrate` slice is **not** the Starter Kit updater,
+a CEOS orchestration replacement, a runtime migrator or a release/publishing
+pipeline. Studio's separate `runtime-basic` template is for **new** games only.
+Those features require independent validation before any legacy adoption.
 
 ## Profiles and templates (new projects only)
 
 Profile declarations specify a web engine, allowed targets and compatible templates.
 Built-in profiles are `web-game` and optional `narrative-game`; built-in templates
-are `web-basic` and `narrative-basic`. The demos work in a regular browser but
-do **not** contain VK/Yandex SDK integrations or claim host compatibility tests.
+are `web-basic`, `narrative-basic` and opt-in `runtime-basic`. The first two are
+standalone demos; `runtime-basic` uses the locally bundled `@ludory/runtime`
+Core host, with browser-smoke coverage. None contains VK/Yandex SDK integrations
+or proves platform compatibility.
 
 ```sh
 node packages/studio/bin/ludory.mjs profiles list --json
@@ -77,6 +80,15 @@ containing source versions and output SHA-256 hashes. It never updates an
 existing game. Previews are read-only, and apply rechecks directory identity,
 catalog source checksums and output collisions. In-flight failures trigger
 best-effort rollback only of unchanged files created by the current command.
+
+To exercise the Runtime MVP in a new **web** game, preview and apply with
+`--profile web-game --template runtime-basic` instead of the narrative example.
+Serve the resulting directory over HTTP, not `file://`. `runtime-basic` ships
+its own local browser ESM file; `create` does not install packages or fetch a CDN.
+It demonstrates manual save/restore, normalized input, audio and lifecycle, but
+is not a Phaser game or a platform SDK integration. See
+[`@ludory/runtime` setup](../runtime/README.md) and the
+[R7 technical acceptance](../../docs/audits/2026-10-29-runtime-r7-acceptance.md).
 
 External local catalogs are explicit with `--catalog /path/to/catalog`, and
 must contain `profiles/<id>.json` and `templates/<id>/template.json` plus

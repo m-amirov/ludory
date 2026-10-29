@@ -11,7 +11,7 @@ LUDORY is a modular toolkit for building and shipping browser games to Yandex Ga
 | Ludory Studio | Projects, profiles, templates, development workflows and project updates | Metadata + scaffolding + profile updates + native AI CLI |
 | Ludory Core | Framework-independent game definition, state and lifecycle | Foundation |
 | Ludory AI | Native workflow state, checkpoints and Codex task execution | Bounded Codex MVP; agent/release parity pending |
-| Ludory Runtime | Host UI, browser lifecycle, input, persistence, sound | Planned |
+| Ludory Runtime | Engine-neutral Core host, browser lifecycle/input, manual persistence/audio and optional Phaser adapter | R1–R6 in `main`; R7 acceptance review |
 | Ludory Connect | Optional SDK adapters for Yandex Games, VK Games and others | Planned |
 | Ludory Release | Validation, builds, evidence and distribution gates | Planned migration |
 
@@ -49,6 +49,12 @@ const snapshot = game.snapshot();
 ```
 
 The Core is optional for existing games. It does **not** import platform SDKs or choose renderers. Platform services are added through separate Runtime/Connect adapters in later stages.
+
+## Runtime browser starter (new games only)
+
+Studio now includes an opt-in offline `runtime-basic` template. It bundles the Core/Runtime ESM code locally and starts a small playable DOM game with keyboard/pointer/touch input, pause/resume, manual save/reload/restore and optional audio. Inspect it with `node packages/studio/bin/ludory.mjs templates show --name runtime-basic`, then use the [full create/preview commands](packages/runtime/README.md#create-and-run-a-new-browser-game) in a **new, existing empty** directory. `--apply` creates files only after preview. Serve the created directory over HTTP (not `file://`).
+
+See [Runtime setup and API](packages/runtime/README.md), [independent Phaser adapter](packages/runtime-phaser/README.md) and [R7 acceptance evidence](docs/audits/2026-10-29-runtime-r7-acceptance.md). Browser emulation is not a physical-device check. Runtime is not yet a Yandex/VK integration or a Release approval.
 
 ## Ludory Studio: project metadata and safe scaffolding
 
