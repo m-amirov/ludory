@@ -1,7 +1,9 @@
 import { createGameSession } from '@ludory/core';
-import { validateViewport } from './contracts.mjs';
+import { validateRuntimeInputEvent } from './contracts.mjs';
 import { RuntimeError } from './errors.mjs';
+import { createInputQueue } from './input.mjs';
 import { createFrameScheduler } from './scheduler.mjs';
+import { createViewportTracker } from './viewport.mjs';
 
 const ACTIVE = new Set(['READY', 'RUNNING', 'PAUSED', 'STOPPED']);
 
@@ -16,8 +18,8 @@ function requiredMethod(value, method, name) {
 }
 
 /**
- * R2 engine-neutral host. Persistence and game input ingestion are introduced
- * in R4 and R3 respectively; neither is reported as successful by R2.
+ * Engine-neutral host with R3 bounded input and responsive viewport handling.
+ * Persistence remains fail-closed until R4.
  */
 export function createRuntimeHost(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) {
@@ -32,10 +34,17 @@ export function createRuntimeHost(config) {
   let mounted = false;
   let detachInput = null;
   let detachViewport = null;
+  let inputGeneration = 0;
+  let inputSince = null;
   const subscribers = new Set();
   const subscriberErrors = [];
   const eventQueue = [];
   let dispatchingEvents = false;
+  const inputQueue = createInputQueue({
+    onOverflow(error) {
+      emit({ schemaVersion: 1, type: 'error', status, errorCode: error.code });
+    },
+  });
 
   function emit(event) {
     eventQueue.push(event);
@@ -79,6 +88,21 @@ export function createRuntimeHost(config) {
     return status === 'RUNNING' && operation === null && session?.getStatus() === 'running';
   }
 
+  function ingestInput(event, source) {
+    if (!gameplayActive()) return false;
+    try {
+      const normalized = validateRuntimeInputEvent(event);
+      if (normalized.source !== source) return false;
+      if (inputSince === null || normalized.timestamp < inputSince) return false;
+      return inputQueue.push(normalized);
+    } catch (error) {
+      // Invalid input is untrusted adapter data; ignore it without taking
+      // down the running game or admitting malformed events to Core.
+      if (error instanceof TypeError) return false;
+      throw error;
+    }
+  }
+
   function safeDisable() {
     try { input?.disable(); } catch { /* disabled best-effort during fault/cleanup */ }
   }
@@ -101,6 +125,8 @@ export function createRuntimeHost(config) {
   function fail(error) {
     if (['FAULTED', 'DESTROYED'].includes(status)) return lastError;
     try { scheduler?.stop(); } catch { /* never leave gameplay scheduled */ }
+    inputQueue.clear();
+    inputSince = null;
     safeDisable();
     safePauseAudio();
     if (session && !['stopped', 'idle'].includes(session.getStatus())) {
@@ -134,14 +160,24 @@ export function createRuntimeHost(config) {
   async function initialize() {
     requireStatus(['IDLE'], 'initialize');
     operation = 'initialize';
+    const generation = ++inputGeneration;
     try {
       validateDependencies();
-      const viewport = validateViewport(environment.getViewport());
+      inputQueue.clear();
+      const viewportTracker = createViewportTracker({
+        getViewport: () => environment.getViewport(),
+        observeViewport: listener => environment.observeViewport(listener),
+        onResize: viewport => renderer.resize(viewport),
+        onError: fail,
+        isActive: () => status !== 'FAULTED' &&
+          (operation === 'initialize' || (operation === null && ['READY', 'RUNNING', 'PAUSED'].includes(status))),
+      });
+      const viewport = viewportTracker.initial();
       session = createGameSession({
         definition: game,
         initialState,
         onUpdate({ deltaMs, state, setState }) {
-          return update({ deltaMs, inputs: [], state, setState });
+          return update({ deltaMs, inputs: inputQueue.drain(), state, setState });
         },
       });
       scheduler = createFrameScheduler({
@@ -163,24 +199,26 @@ export function createRuntimeHost(config) {
         root: environment.root,
         viewport,
         snapshot: session.snapshot(),
-        dispatchInput() { throw runtimeError('INVALID_RUNTIME_TRANSITION', 'Runtime input is not available until R3'); },
+        dispatchInput(event) {
+          if (generation === inputGeneration) ingestInput(event, 'renderer');
+        },
       });
       session.initialize();
-      // In R2 events are intentionally not fed to Core. R3 adds the shared
-      // validator and 256-event queue to this subscription.
-      detachInput = input.subscribe(() => {});
-      if (typeof detachInput !== 'function') throw new TypeError('input.subscribe must return unsubscribe');
-      detachViewport = environment.observeViewport(next => {
-        if (operation !== null || !['READY', 'RUNNING', 'PAUSED'].includes(status)) return;
-        try { renderer.resize(validateViewport(next)); }
-        catch (error) { fail(error); }
+      detachInput = input.subscribe(event => {
+        if (generation === inputGeneration) ingestInput(event, 'input');
       });
-      if (typeof detachViewport !== 'function') throw new TypeError('environment.observeViewport must return unsubscribe');
+      if (typeof detachInput !== 'function') throw new TypeError('input.subscribe must return unsubscribe');
+      detachViewport = () => viewportTracker.detach();
+      viewportTracker.attach();
       input.disable();
+      if (status === 'FAULTED') throw lastError;
       lastError = null;
       setStatus('READY');
     } catch (error) {
+      inputGeneration++;
+      inputSince = null;
       try { scheduler?.stop(); } catch { /* best effort */ }
+      inputQueue.clear();
       detachAdapters();
       safeDisable();
       if (mounted) {
@@ -200,7 +238,12 @@ export function createRuntimeHost(config) {
   function start() {
     requireStatus(['READY'], 'start');
     try {
+      const since = environment.now();
+      if (typeof since !== 'number' || !Number.isFinite(since) || since < 0) {
+        throw new TypeError('Runtime input clock must provide finite non-negative milliseconds');
+      }
       session.start();
+      inputSince = since;
       setStatus('RUNNING');
       if (gameplayActive()) input.enable();
       if (gameplayActive()) scheduler.start();
@@ -216,6 +259,8 @@ export function createRuntimeHost(config) {
       scheduler.stop();
       input.disable();
       session.pause();
+      inputQueue.clear();
+      inputSince = null;
       safePauseAudio();
       setStatus('PAUSED');
     } catch (error) { throw fail(error); }
@@ -225,7 +270,13 @@ export function createRuntimeHost(config) {
     requireStatus(['RUNNING', 'PAUSED'], 'resume');
     if (status === 'RUNNING') return;
     try {
+      inputQueue.clear();
+      const since = environment.now();
+      if (typeof since !== 'number' || !Number.isFinite(since) || since < 0) {
+        throw new TypeError('Runtime input clock must provide finite non-negative milliseconds');
+      }
       session.resume();
+      inputSince = since;
       setStatus('RUNNING');
       if (gameplayActive()) input.enable();
       if (gameplayActive()) {
@@ -241,6 +292,8 @@ export function createRuntimeHost(config) {
     try {
       scheduler.stop();
       input.disable();
+      inputQueue.clear();
+      inputSince = null;
       session.stop();
       safePauseAudio();
       setStatus('STOPPED');
@@ -251,9 +304,12 @@ export function createRuntimeHost(config) {
     checkOperation();
     if (status === 'DESTROYED') return;
     operation = 'destroy';
+    inputGeneration++;
+    inputSince = null;
     let cleanupError;
     try {
       try { scheduler?.stop(); } catch (error) { cleanupError ??= error; }
+      inputQueue.clear();
       try { input?.disable(); } catch (error) { cleanupError ??= error; }
       if (session && !['stopped', 'idle'].includes(session.getStatus())) {
         try { session.stop(); } catch (error) { cleanupError ??= error; }

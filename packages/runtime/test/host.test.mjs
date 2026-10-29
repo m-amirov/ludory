@@ -15,6 +15,7 @@ function harness(overrides = {}) {
   const viewportListeners = new Set();
   const inputListeners = new Set();
   const actions = [];
+  let mountContext;
   let viewport = { width: 800, height: 600, dpr: 1, orientation: 'landscape' };
   const environment = {
     root: Object.freeze({ name: 'test-root' }),
@@ -31,7 +32,7 @@ function harness(overrides = {}) {
     destroy() { actions.push('input:destroy'); },
   };
   const renderer = {
-    async mount(context) { actions.push('renderer:mount'); assert.equal(context.root, environment.root); },
+    async mount(context) { mountContext = context; actions.push('renderer:mount'); assert.equal(context.root, environment.root); },
     resize(next) { actions.push(`renderer:resize:${next.width}`); },
     render(snapshot) { actions.push(`renderer:render:${snapshot.revision}`); },
     async unmount() { actions.push('renderer:unmount'); },
@@ -56,6 +57,8 @@ function harness(overrides = {}) {
     step() { assert.equal(pending.size, 1); const [[handle, callback]] = pending; pending.delete(handle); callback(); },
     late(handle) { callbacks.get(handle)(); },
     emitViewport(next) { viewport = next; for (const listener of [...viewportListeners]) listener(next); },
+    emitInput(next) { for (const listener of [...inputListeners]) listener(next); },
+    get mountContext() { return mountContext; },
     get subscriptions() { return { viewport: viewportListeners.size, input: inputListeners.size }; },
   };
 }
@@ -377,5 +380,253 @@ test('last error captures failed initialization and clears when a fresh initiali
   failMount = false;
   await f.host.initialize();
   assert.equal(f.host.getLastError(), null);
+  await f.host.destroy();
+});
+
+test('both input paths deliver ordered, detached events once per frame and never replay', async () => {
+  const received = [];
+  let dispatch;
+  const f = harness({
+    renderer: { mount({ dispatchInput }) { dispatch = dispatchInput; }, resize() {}, render() {}, unmount() {} },
+    update({ inputs }) { received.push(inputs); },
+  });
+  await f.host.initialize();
+  const keyboard = { schemaVersion: 1, type: 'keyboard', action: 'jump', phase: 'down', timestamp: 1, source: 'input', key: 'Space' };
+  f.emitInput(keyboard);
+  dispatch({ schemaVersion: 1, type: 'pointer', action: 'aim', phase: 'move', timestamp: 2,
+    source: 'renderer', pointer: { id: 0, x: 10, y: 20 } });
+  f.host.start();
+  const touch = { schemaVersion: 1, type: 'touch', action: 'tap', phase: 'up', timestamp: 3,
+    source: 'input', pointer: { id: 2, x: 15, y: 30 } };
+  const pointer = { schemaVersion: 1, type: 'pointer', action: 'aim', phase: 'move', timestamp: 4,
+    source: 'renderer', pointer: { id: 1, x: 50, y: 60 } };
+  f.emitInput(touch);
+  dispatch(pointer);
+  touch.pointer.x = 999;
+  pointer.pointer.y = 999;
+  f.step();
+  assert.deepEqual(received, [[
+    { ...touch, pointer: { id: 2, x: 15, y: 30 } },
+    { ...pointer, pointer: { id: 1, x: 50, y: 60 } },
+  ]]);
+  f.step();
+  assert.deepEqual(received[1], []);
+  await f.host.destroy();
+});
+
+test('invalid input and mismatched source are blocked on both injection paths', async () => {
+  const received = [];
+  let dispatch;
+  const f = harness({
+    renderer: { mount(context) { dispatch = context.dispatchInput; }, resize() {}, render() {}, unmount() {} },
+    update({ inputs }) { received.push(inputs); },
+  });
+  await f.host.initialize();
+  f.host.start();
+  const valid = { schemaVersion: 1, type: 'keyboard', action: 'jump', phase: 'down', timestamp: 1, source: 'input', key: 'Space' };
+  const accessor = { ...valid };
+  Object.defineProperty(accessor, 'key', { enumerable: true, get() { throw Error('must not run'); } });
+  f.emitInput({ ...valid, timestamp: Infinity });
+  f.emitInput(accessor);
+  f.emitInput({ ...valid, source: 'renderer' });
+  dispatch({ ...valid, source: 'input' });
+  dispatch({ ...valid, source: 'renderer', unexpected: 1 });
+  f.step();
+  assert.deepEqual(received, [[]]);
+  assert.equal(f.host.getStatus(), 'RUNNING');
+  await f.host.destroy();
+});
+
+test('queue overflow is observable and nonfatal; first 256 inputs reach Core once', async () => {
+  const received = [];
+  const errors = [];
+  const f = harness({ update({ inputs }) { received.push(inputs); } });
+  f.host.subscribe(event => { if (event.type === 'error') errors.push(event); });
+  await f.host.initialize();
+  f.host.start();
+  for (let i = 0; i < 257; i++) {
+    f.emitInput({ schemaVersion: 1, type: 'keyboard', action: 'tap', phase: 'down',
+      timestamp: i, source: 'input', key: String(i) });
+  }
+  assert.deepEqual(errors, [{ schemaVersion: 1, type: 'error', status: 'RUNNING', errorCode: 'INPUT_QUEUE_OVERFLOW' }]);
+  assert.equal(f.host.getStatus(), 'RUNNING');
+  f.step();
+  assert.equal(received[0].length, 256);
+  assert.equal(received[0][0].key, '0');
+  assert.equal(received[0][255].key, '255');
+  f.step();
+  assert.deepEqual(received[1], []);
+  await f.host.destroy();
+});
+
+test('pause/resume, stop, fault and destroy clear input and block inactive events', async () => {
+  const received = [];
+  let dispatch;
+  const f = harness({
+    renderer: { mount(context) { dispatch = context.dispatchInput; }, resize() {}, render() {}, unmount() {} },
+    update({ inputs }) { received.push(inputs); },
+  });
+  const send = () => ({ schemaVersion: 1, type: 'keyboard', action: 'jump', phase: 'down', timestamp: 1, source: 'input', key: 'Space' });
+  await f.host.initialize();
+  f.emitInput(send());
+  f.host.start();
+  f.emitInput(send());
+  f.host.pause();
+  f.emitInput(send());
+  dispatch({ ...send(), source: 'renderer' });
+  f.host.resume();
+  f.step();
+  assert.deepEqual(received, [[]]);
+  f.emitInput(send());
+  f.step();
+  assert.equal(received[1].length, 1);
+  f.emitInput(send());
+  f.host.stop();
+  f.emitInput(send());
+  dispatch({ ...send(), source: 'renderer' });
+  await f.host.destroy();
+  f.emitInput(send());
+  dispatch({ ...send(), source: 'renderer' });
+  assert.equal(f.host.getStatus(), 'DESTROYED');
+
+  const faulty = harness({ update() { throw Error('fault'); } });
+  await faulty.host.initialize();
+  faulty.host.start();
+  faulty.emitInput(send());
+  faulty.step();
+  assert.equal(faulty.host.getStatus(), 'FAULTED');
+  faulty.emitInput(send());
+  await faulty.host.destroy();
+});
+
+test('input emitted during tick is delayed until following tick, with a fresh event list', async () => {
+  let fixture;
+  const batches = [];
+  fixture = harness({ update({ inputs }) {
+    batches.push(inputs);
+    if (batches.length === 1) fixture.emitInput({ schemaVersion: 1, type: 'keyboard', action: 'later',
+      phase: 'down', timestamp: 4, source: 'input', key: 'L' });
+  } });
+  await fixture.host.initialize();
+  fixture.host.start();
+  fixture.step();
+  fixture.step();
+  assert.deepEqual(batches.map(batch => batch.map(event => event.action)), [[], ['later']]);
+  assert.notStrictEqual(batches[0], batches[1]);
+  await fixture.host.destroy();
+});
+
+test('resize during pending mount is replayed once after mount with latest DPR; callbacks stop at destroy', async () => {
+  let releaseMount;
+  const observed = [];
+  const f = harness({ renderer: {
+    mount({ viewport }) { observed.push(['mount', viewport]); return new Promise(resolve => { releaseMount = resolve; }); },
+    resize(viewport) { observed.push(['resize', viewport]); },
+    render() {}, unmount() {},
+  } });
+  const initialization = f.host.initialize();
+  f.emitViewport({ width: 360, height: 640, dpr: 2, orientation: 'portrait' });
+  releaseMount();
+  await initialization;
+  assert.deepEqual(observed, [
+    ['mount', { width: 800, height: 600, dpr: 1, orientation: 'landscape' }],
+    ['resize', { width: 360, height: 640, dpr: 2, orientation: 'portrait' }],
+  ]);
+  f.emitViewport({ width: 480, height: 480, dpr: 3, orientation: 'portrait' });
+  assert.deepEqual(observed[2], ['resize', { width: 480, height: 480, dpr: 3, orientation: 'portrait' }]);
+  await f.host.destroy();
+  f.emitViewport({ width: 900, height: 400, dpr: 1, orientation: 'landscape' });
+  assert.equal(observed.length, 3);
+});
+
+test('viewport callbacks after a fault never touch the renderer', async () => {
+  let resized = 0;
+  const f = harness({
+    renderer: { mount() {}, resize() { resized++; }, render() {}, unmount() {} },
+    update() { throw Error('game fault'); },
+  });
+  await f.host.initialize();
+  f.host.start();
+  f.step();
+  assert.equal(f.host.getStatus(), 'FAULTED');
+  f.emitViewport({ width: 320, height: 640, dpr: 2, orientation: 'portrait' });
+  assert.equal(resized, 0);
+  await f.host.destroy();
+});
+
+test('renderer dispatch callback from failed mount cannot inject after successful retry', async () => {
+  const dispatchers = [];
+  const batches = [];
+  const f = harness({
+    renderer: {
+      mount({ dispatchInput }) {
+        dispatchers.push(dispatchInput);
+        if (dispatchers.length === 1) throw Error('mount failed');
+      },
+      resize() {}, render() {}, unmount() {},
+    },
+    update({ inputs }) { batches.push(inputs); },
+  });
+  await assert.rejects(f.host.initialize(), assertError('INITIALIZE_FAILED'));
+  await f.host.initialize();
+  f.host.start();
+  const event = { schemaVersion: 1, type: 'keyboard', action: 'shoot', phase: 'down',
+    timestamp: 10, source: 'renderer', key: 'S' };
+  dispatchers[0](event);
+  dispatchers[1](event);
+  f.step();
+  assert.deepEqual(batches.map(batch => batch.map(item => item.action)), [['shoot']]);
+  await f.host.destroy();
+});
+
+test('old subscribed input callbacks cannot inject into retried initialization', async () => {
+  const callbacks = [];
+  const batches = [];
+  const f = harness({ update({ inputs }) { batches.push(inputs); } });
+  f.input.subscribe = callback => { callbacks.push(callback); return () => {}; };
+  const originalObserve = f.environment.observeViewport;
+  let first = true;
+  f.environment.observeViewport = callback => {
+    if (first) { first = false; throw Error('subscribe failed'); }
+    return originalObserve(callback);
+  };
+  await assert.rejects(f.host.initialize(), assertError('INITIALIZE_FAILED'));
+  await f.host.initialize();
+  f.host.start();
+  const event = { schemaVersion: 1, type: 'keyboard', action: 'jump', phase: 'down',
+    timestamp: 10, source: 'input', key: 'Space' };
+  callbacks[0](event);
+  callbacks[1](event);
+  f.step();
+  assert.deepEqual(batches.map(batch => batch.map(item => item.action)), [['jump']]);
+  await f.host.destroy();
+});
+
+test('stale pre-start and pre-resume timestamps are rejected on both ingress paths', async () => {
+  let dispatch;
+  const batches = [];
+  const f = harness({
+    renderer: { mount(context) { dispatch = context.dispatchInput; }, resize() {}, render() {}, unmount() {} },
+    update({ inputs }) { batches.push(inputs); },
+  });
+  const event = (source, timestamp, action) => ({
+    schemaVersion: 1, type: 'keyboard', action, phase: 'down', timestamp, source, key: 'Space',
+  });
+  await f.host.initialize();
+  f.setTime(50);
+  f.host.start();
+  f.emitInput(event('input', 49, 'stale-before-start'));
+  dispatch(event('renderer', 50, 'same-time-start'));
+  f.step();
+  assert.deepEqual(batches[0].map(item => item.action), ['same-time-start']);
+  f.host.pause();
+  f.setTime(100);
+  f.host.resume();
+  f.emitInput(event('input', 75, 'stale-input'));
+  dispatch(event('renderer', 99, 'stale-renderer'));
+  f.emitInput(event('input', 100, 'same-time-resume'));
+  dispatch(event('renderer', 101, 'fresh-renderer'));
+  f.step();
+  assert.deepEqual(batches[1].map(item => item.action), ['same-time-resume', 'fresh-renderer']);
   await f.host.destroy();
 });
