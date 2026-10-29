@@ -25,7 +25,7 @@ function external(t) {
 test('built-in catalogs are versioned, valid, and only expose public descriptors', () => {
   const profiles = listCatalog('profiles');
   assert.deepEqual(profiles.map(x => x.id), ['narrative-game', 'web-game']);
-  assert.deepEqual(listCatalog('templates').map(x => x.id), ['narrative-basic', 'web-basic']);
+  assert.deepEqual(listCatalog('templates').map(x => x.id), ['narrative-basic', 'runtime-basic', 'web-basic']);
   assert.equal(showCatalog('profiles', 'narrative-game').engine, 'web');
   assert.deepEqual(showCatalog('templates', 'narrative-basic').files, ['index.html', 'src/main.js']);
   assert.equal(Object.hasOwn(showCatalog('templates', 'web-basic'), 'assetBytes'), false);
