@@ -24,8 +24,8 @@ const renderer = createPhaserRenderer({
   },
 });
 // Supply `renderer` alongside game, initialState, update, input and environment
-// to createRuntimeHost({ ... }) in an environment/bundle supporting that host.
-// R6 will provide complete direct-browser host wiring and mobile acceptance.
+// to createRuntimeHost({ ... }) in a browser build supporting that host.
+// The R6 runtime-basic Studio starter uses a DOM renderer; it does not use Phaser.
 ```
 
 ## Contracts
@@ -57,4 +57,4 @@ npx playwright install chromium
 npm run smoke
 ```
 
-The smoke starts a local HTTP server, loads a real Phaser Canvas scene in headless Chromium, verifies mounting/rendering/input/resize and actual canvas removal. It also runs three consecutive intentionally stalled Phaser startups, asserting no retained canvases, occupied CanvasPool slots or attached Input/Scale/Texture manager game references; tests a stopped loop and concurrent unmount, plus synchronous `preBoot`/`postBoot` cancellation; then cancels a normal startup during image loading, checks for zero late page errors, and mounts/unmounts again. A second streamed HTML fixture verifies cancellation while `document.readyState` is still `loading`, before `DOMContentLoaded`, without late game boot or resource resurrection. This is **not** mobile, VK/Yandex, WebGL, visual, or Release acceptance.
+The smoke starts a local HTTP server, loads a real Phaser Canvas scene in headless Chromium, verifies mounting/rendering/input/resize and actual canvas removal. It also runs three consecutive intentionally stalled Phaser startups, asserting no retained canvases, occupied CanvasPool slots or attached Input/Scale/Texture manager game references; tests a stopped loop and concurrent unmount, plus synchronous `preBoot`/`postBoot` cancellation; then cancels a normal startup during image loading, checks for zero late page errors, and mounts/unmounts again. A second streamed HTML fixture verifies cancellation while `document.readyState` is still `loading`, before `DOMContentLoaded`, without late game boot or resource resurrection. R7 documents the independent Runtime-level review in [`its acceptance report`](../../docs/audits/2026-10-29-runtime-r7-acceptance.md). This is **not** mobile, VK/Yandex, WebGL, visual, or Release acceptance.
