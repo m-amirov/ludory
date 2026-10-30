@@ -643,6 +643,10 @@ export function commitNewRun(plan) {
       sha256(serial(plan.run)) !== plan.fingerprint || plan.project !== plan.source?.project ||
       plan.run?.source?.project !== plan.project ||
       plan.run?.projectId !== plan.source?.manifest?.id) throw new Error('NATIVE_STALE_RUN_PLAN');
+  // A caller can recompute the preview fingerprint. Reject path-shaped IDs
+  // before withLock() or mkdirSync(), not only when the committed run is read.
+  if (typeof plan.run.runId !== 'string' || !RUN_ID.test(plan.run.runId) ||
+      plan.run.runId.includes('..')) throw new Error('NATIVE_INVALID_RUN_ID');
   const integrity = verifyNativeSource(plan.source);
   if (!integrity.ok) throw new Error(`NATIVE_SOURCE_STALE: ${integrity.code}`);
   return withLock(plan.project, plan.source, () => {

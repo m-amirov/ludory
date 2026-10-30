@@ -187,6 +187,27 @@ test('a trusted start preview cannot commit a substituted foreign native run', t
   assert.equal(fs.existsSync(path.join(foreign, '.ludory')), false);
 });
 
+for (const [entrypoint, commit] of [
+  ['direct storage commit', (preview, injected) => commitNewRun(injected)],
+  ['exported workflow apply', (preview, injected) => executeWorkflow({ ...preview, nativePlan: injected }, { apply: true })],
+]) {
+  test(`${entrypoint} rejects an absolute run ID without writing outside the trusted project`, t => {
+    const { project: trusted } = newStudioGame(t);
+    const foreign = nativeProject(t);
+    const escapedRun = path.join(foreign, 'unauthorized-run');
+    const preview = planWorkflow(trusted, 'start', startOptions);
+    assert.equal(preview.status, 'READY');
+    const run = { ...preview.nativePlan.run, runId: escapedRun };
+    const injected = { ...preview.nativePlan, run,
+      fingerprint: crypto.createHash('sha256').update(`${JSON.stringify(run, null, 2)}\n`).digest('hex') };
+    const before = treeFingerprint(foreign);
+
+    assert.throws(() => commit(preview, injected), /NATIVE_INVALID_RUN_ID/);
+    assert.equal(fs.existsSync(escapedRun), false);
+    assert.equal(treeFingerprint(foreign), before);
+  });
+}
+
 test('a trusted manual continue preview cannot commit a foreign event', t => {
   const { project: trusted } = newStudioGame(t);
   const trustedRun = executeWorkflow(planWorkflow(trusted, 'start', startOptions), { apply: true });
