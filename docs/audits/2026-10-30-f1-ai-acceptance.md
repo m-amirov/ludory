@@ -40,11 +40,12 @@ All commands below run against a newly created test game with the same relative 
 | --- | --- | --- |
 | Web DEV v2 authorization | `CONTRACT_PASS` | New table-driven regression: `{preflight:{}}`, unauthenticated, reused chat, unobserved Sol entitlement, missing URL and accessor-based authentication are all rejected. The empty-preflight case **failed before the patch**, then passed after `3019559`; its previous `READY` was a real defect. |
 | Legacy model-route / entitlement / pin selection | `CONTRACT_PASS` | Existing routing tests reject wrong model, missing verified transport/entitlement, inherited getters and revoked proxies; pinned Terra never silently falls back to Sol. |
+| Vendored v2 text turns | `BLOCKED` | The v2 helper's `browser_observation_v2` is image-attached-only; preflight does **not** establish the selected model for text. The earlier code could report `READY` but its actual text turn would fail. F1b now returns `AI_ROUTING_WEB_TEXT_V2_UNSUPPORTED`, `DEV_TEXT_V2_UNSUPPORTED` or `REVIEW_WEB_TEXT_V2_UNSUPPORTED` without making a host request. Legacy text-route compatibility is preserved. Enabling v2 text requires a separately approved host protocol/implementation with genuinely witnessed model selection. |
 | Web DEV helper/visual observation | `CONTRACT_PASS` | Mock-helper tests require submitted prompt, observed selected model, binary attachment bytes, trace ID, and successful processing observation. **Mocked frame protocols do not equal a real browser session**. |
 | Image/source change between plan and execute | `CONTRACT_PASS` | Existing art/narrative tests recheck bound brief, image, sources and run head, fail closed on stale bytes and altered host result. |
 | Narrative + art verdict | `CONTRACT_PASS` | Existing parser/ledger tests require exact draft/image SHA, grounded findings and observed host response; unknown evidence remains `BLOCKED`, no automatic stage advance or Release PASS. |
 
-Command: `node --test packages/ai/test/task-routing.test.mjs packages/ai/test/dev-host.test.mjs packages/ai/test/art-review.test.mjs packages/ai/test/narrative-review.test.mjs` — **60/60 PASS**, process-capable local test runner. Restricted filesystem sandbox alone cannot spawn the DEV helper fixtures and produces environmental false negatives; the process-capable rerun was green.
+Command: `node --test --test-isolation=none packages/ai/test/task-routing.test.mjs packages/ai/test/dev-host.test.mjs packages/ai/test/art-review.test.mjs packages/ai/test/narrative-review.test.mjs packages/ai/test/draft-tasks.test.mjs` — **82/82 PASS**, process-capable local test runner after the v2 fail-closed changes. Restricted filesystem sandbox alone cannot spawn the DEV helper fixtures and produces environmental false negatives; the process-capable rerun was green.
 
 ## Native interruption, replay and file safety
 
@@ -64,12 +65,16 @@ Command: `node --test packages/ai/test/workflows.test.mjs packages/ai/test/store
 | --- | --- | --- |
 | Authenticated isolated DEV Web session with actual selected `chatgpt-web/gpt-6-sol`, reasoning high | `BLOCKED` | Owner-authorized real session, successful helper probe and source-bound browser receipt. Not attempted from the fixture. |
 | Actual narrative-generation and independent review turns | `BLOCKED` | Two independent observed Web DEV turns for a fresh game; preserve individual request/result SHA receipts. |
+| Vendored v2 text-only observed model evidence | `BLOCKED` | New helper support for *text-only* browser-observed turns; current v2 implementation can witness image inputs only. Do not work around the protocol with fabricated model fields. |
 | Actual Codex-native image agent calling session-only `$imagegen` | `BLOCKED` | A separate authorized Codex subagent plus actual image bytes and declared import receipt. The CLI alone cannot invoke it. |
 | Independent visual review with real binary browser upload evidence | `BLOCKED` | Authenticated v2 helper `image_attached`/processing trace, matching SHA, model, reasoning and source context. |
+| Visual-review timeout/idempotency | `BLOCKED` | **Known P1:** `executeArtReview` writes the final witnessed receipt *after* the external host turn, with no durable pre-turn intent. On a crash/timeout a second `art-review --apply` can repeat a possibly charged review. A source/run-bound append-only request+recovery mechanism with explicit stopped-host confirmation is required before unattended retries or real-host sign-off. Existing draft/narrative recovery checks do not cover this path. |
 | Real Windows/NTFS host interrupted-process and browser/audio tests | `BLOCKED` | Exact candidate SHA on Windows with helper and physical/device browser acceptance. Linux local fixtures do not certify this. |
 | Complete Release/Connect/Runtime gates | `BLOCKED` | Downstream F2–F6 plan gates; F1b neither exercises SDKs nor authorizes publication. |
 
 No live host call was launched to force a green cell. Host-response fixtures are **test doubles**, not `HOST_OBSERVED_PASS`. There are currently **zero** real-host PASS receipts for this phase.
+
+**Existing compatibility risk (not fixed in F1b):** manual `workflow start --apply` can still create a native run in a non-Studio project. `hasStudioCreationReceipt` checks local marker structure, not cryptographically proven project origin. Direct executor/image/review calls enforce their Studio receipt checks, but users must **not** run manual workflow mutation on frozen legacy games. Tightening creation provenance while preserving legitimate dirty/unversioned Studio games needs a separately scoped migration-safe design.
 
 ## Old Draft PR comparison (no mutation)
 
@@ -80,4 +85,4 @@ No live host call was launched to force a green cell. Host-response fixtures are
 
 Initial branch-wide verification: `npm test` **exit 0** (including Quality integration 17/17), `npm run check` **exit 0**, `node examples/core-session.mjs` **exit 0**, `git diff --check` **exit 0**. These checks will be rerun/linked to the **exact published candidate commit** for the merge gate.
 
-F1b local capability and recovery contracts: **verified in Linux fixtures**; root-cause Web DEV preflight fix included. **F1 combined acceptance / real-host validation / platform release: BLOCKED**, pending the exact-head Linux+Windows CI and owner-authorized host receipts. PR must remain unmerged until separate owner instruction and recorded gates.
+F1b local capability and core recovery contracts: **partially verified in Linux fixtures**; root-cause Web DEV preflight fix and explicit v2 text blockers included. **F1b final acceptance / F1 combined acceptance / real-host validation / platform release: BLOCKED** by visual-review timeout replay safety and missing observed text-host support, in addition to exact-head Linux+Windows CI and owner-authorized host receipts. PR must remain unmerged until these blockers are resolved and the owner separately authorizes merge.

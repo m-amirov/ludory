@@ -89,7 +89,12 @@ export function planArtReview(projectDir, options = {}, { discover = () => null 
     return fail(project, run, drafted.reasonCode ?? 'ART_CONTEXT_INSUFFICIENT');
   }
   if (!equals(drafted.brief, imported.brief)) return fail(project, run, 'ART_BRIEF_CHANGED');
-  const verified = drafted.status === 'READY' && validArtPreflight(cap);
+  // A v2 helper cannot author text-only drafts, but it CAN independently
+  // inspect a real attached image. Reuse the source/context packet from the
+  // draft planner without making its text-turn capability an art-review gate.
+  const verified = (drafted.status === 'READY' ||
+    (drafted.status === 'NEEDS_USER_ACTION' && drafted.reasonCode === 'DEV_TEXT_V2_UNSUPPORTED')) &&
+    validArtPreflight(cap);
   const referenceFiles = drafted.manualPacket.sources.map((file, index) => ({
     role: drafted.sourceRoles[index], path: file.path, sha256: file.sha256,
     size: file.size, text: file.text,

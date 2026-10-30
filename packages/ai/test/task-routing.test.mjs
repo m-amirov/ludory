@@ -73,16 +73,19 @@ const verifiedTerra = { available: true, transportVerified: true,
 const verifiedSol = { available: true, transportVerified: true,
   entitlementVerified: true, modelObserved: 'gpt-6-sol', imageGenCallable: true };
 
-test('Web DEV v2 route requires witnessed authentication, fresh chat and Sol entitlement', t => {
+test('Web DEV v2 route verifies browser preflight but never promises unsupported text-only turns', t => {
   const project = freshStudioGame(t);
   const v2 = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
     modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
     reasoningRequired: 'high', preflight: { authenticated: true, newChat: true,
       url: 'https://chatgpt.com/', solAvailable: true } };
-  const ready = planTaskRoute(project, { taskKind: 'episode-script' }, {
-    discover: () => ({ webDev: v2 }),
-  });
-  assert.equal(ready.status, 'READY');
+  for (const taskKind of ['episode-script', 'art-concept']) {
+    const preview = planTaskRoute(project, { taskKind }, {
+      discover: () => ({ webDev: v2 }),
+    });
+    assert.equal(preview.status, 'NEEDS_USER_ACTION');
+    assert.equal(preview.reasonCode, 'AI_ROUTING_WEB_TEXT_V2_UNSUPPORTED');
+  }
   for (const [label, preflight] of [
     ['no browser preflight', {}],
     ['unauthenticated', { ...v2.preflight, authenticated: false }],
