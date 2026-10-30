@@ -27,6 +27,44 @@ const ARCHIVED_IMAGE_REQUEST_MODELS = new Map([
   ['flare', 'gpt-image-2.5-flare'],
 ]);
 const IMAGE_CODES = new Set(['HOST_OBSERVED', 'IMAGE_EXECUTOR_UNVERIFIED', 'IMAGE_EXECUTOR_INTERRUPTED']);
+const ART_REVIEW_CODES = new Set(['ART_REVIEW_OBSERVED', 'ART_REVIEW_INTERRUPTED']);
+
+function validateArtRequest(request, current) {
+  const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED')?.manual;
+  if (!imported || !request || typeof request !== 'object' || Array.isArray(request) ||
+      Object.keys(request).sort().join(',') !== 'brief,image,modelObserved,sources' ||
+      request.modelObserved !== 'gpt-6-sol' ||
+      request.image?.path !== imported.output.outputPath ||
+      request.image?.sha256 !== imported.output.outputSha256 ||
+      request.image?.size !== imported.output.outputSize ||
+      request.image?.mediaType !== imported.output.mediaType ||
+      request.image?.ref !== `candidate-${imported.output.outputSha256.slice(0, 20)}` ||
+      JSON.stringify(request.brief) !== JSON.stringify(imported.brief) ||
+      !Array.isArray(request.sources) || request.sources.length !== 4 ||
+      request.sources.map(x => x?.role).join(',') !== 'scene,characters,location,style' ||
+      request.sources.some(x => typeof x.path !== 'string' || !x.path ||
+        !/^[a-f0-9]{64}$/.test(x.sha256 ?? '') || !Number.isSafeInteger(x.size) || x.size < 1)) {
+    throw new Error('NATIVE_ART_REVIEW_REQUEST_INVALID');
+  }
+  return request;
+}
+
+function validateArtResult(result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result) ||
+      Object.keys(result).sort().join(',') !== 'code,receiptSha256' ||
+      !ART_REVIEW_CODES.has(result.code) ||
+      (result.code === 'ART_REVIEW_OBSERVED'
+        ? !/^[a-f0-9]{64}$/.test(result.receiptSha256 ?? '')
+        : result.receiptSha256 !== null)) throw new Error('NATIVE_ART_REVIEW_RESULT_INVALID');
+  return result;
+}
+
+function verifyArtResultReceipt(project, runId, requestSha256, result) {
+  if (result.code !== 'ART_REVIEW_OBSERVED') return;
+  const matching = readNativeArtReviews(project, runId).filter(item =>
+    item.artRequestSha256 === requestSha256 && sha256(serial(item)) === result.receiptSha256);
+  if (matching.length !== 1) throw new Error('NATIVE_ART_REVIEW_RECEIPT_NOT_FOUND');
+}
 
 function validateImageRequest(request, { allowArchived = false } = {}) {
   const archived = allowArchived && request?.route === 'gpt-image' &&
@@ -538,6 +576,9 @@ export function readNativeRun(projectDir, runRef = 'latest') {
   let pendingNarrativeRequest = null;
   let priorNarrativeStatus = null;
   let narrativeReview = null;
+  let pendingArtReview = null;
+  let pendingArtRequest = null;
+  let priorArtStatus = null;
   let manualImageImported = false;
   const events = [];
   for (let index = 0; index < files.length / 2; index++) {
@@ -556,6 +597,9 @@ export function readNativeRun(projectDir, runRef = 'latest') {
     }
     if (pendingNarrativeReview && event.kind !== 'NARRATIVE_REVIEW_RESULT') {
       throw new Error('NATIVE_INTEGRITY_REVIEW_PENDING');
+    }
+    if (pendingArtReview && event.kind !== 'ART_REVIEW_RESULT') {
+      throw new Error('NATIVE_INTEGRITY_ART_REVIEW_PENDING');
     }
     if (event.kind === 'CHECKPOINT') {
       if (pendingExecutor) throw new Error('NATIVE_INTEGRITY_EXECUTOR_PENDING_RESULT');
@@ -686,6 +730,29 @@ export function readNativeRun(projectDir, runRef = 'latest') {
       priorNarrativeStatus = null;
       narrativeDraftPending = narrativeReview.verdict !== 'ACCEPT';
       reviewPending = otherReviewPending || narrativeDraftPending;
+    } else if (event.kind === 'ART_REVIEW_REQUESTED') {
+      if (pendingExecutor || pendingArtReview || pendingNarrativeReview ||
+          !['ACTIVE', 'EXECUTION_FAILED'].includes(status) ||
+          event.outcome !== null || event.artifacts?.length) {
+        throw new Error('NATIVE_INTEGRITY_ART_REVIEW_REQUEST');
+      }
+      try { validateArtRequest(event.artReview, { events }); }
+      catch { throw new Error('NATIVE_INTEGRITY_ART_REVIEW_REQUEST'); }
+      pendingArtReview = sha256(bytes);
+      pendingArtRequest = event.artReview;
+      priorArtStatus = status;
+      status = 'ART_REVIEW_PENDING';
+    } else if (event.kind === 'ART_REVIEW_RESULT') {
+      if (!pendingArtReview || event.artRequestSha256 !== pendingArtReview ||
+          event.outcome !== null || event.artifacts?.length) {
+        throw new Error('NATIVE_INTEGRITY_ART_REVIEW_RESULT');
+      }
+      try { validateArtResult(event.artReviewResult); }
+      catch { throw new Error('NATIVE_INTEGRITY_ART_REVIEW_RESULT'); }
+      pendingArtReview = null;
+      pendingArtRequest = null;
+      status = priorArtStatus;
+      priorArtStatus = null;
     } else throw new Error('NATIVE_INTEGRITY_EVENT_KIND');
     precedingHash = sha256(bytes);
     events.push(event);
@@ -693,6 +760,7 @@ export function readNativeRun(projectDir, runRef = 'latest') {
   return { run, events, status, nextStage: next, terminal, headSha256: precedingHash,
     pendingExecutor, pendingRequestSha256, reviewPending, narrativeDraftPending, otherReviewPending,
     pendingNarrativeReview, pendingNarrativeRequest, narrativeReview,
+    pendingArtReview, pendingArtRequest,
     integrity: { ok: true, issues: [] } };
 }
 
@@ -729,6 +797,9 @@ export function readNativeArtReviews(projectDir, runRef) {
         receipt.prevSha256 !== (previous ?? receipt.runHeadSha256) ||
         receipt.provenance !== 'HOST_OBSERVED' || receipt.modelObserved !== 'gpt-6-sol' ||
         receipt.visualInputObserved !== true ||
+        (receipt.artRequestSha256 !== undefined &&
+          (receipt.artRequestSha256 !== receipt.runHeadSha256 ||
+            history.some(item => item.artRequestSha256 === receipt.artRequestSha256))) ||
         receipt.hostObservation?.protocolVersion !== 2 || receipt.hostObservation?.source !== 'browser-ui' ||
         receipt.hostObservation?.traceId !== `art-${runId}` ||
         receipt.hostObservation?.selectedModel !== 'gpt-6-sol' || receipt.hostObservation?.reasoning !== 'high' ||
@@ -779,11 +850,17 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
       typeof report.summary !== 'string' || report.summary.length > 3000 ||
       !Array.isArray(report.findings) || report.findings.length > 12 ||
       !report.image || !report.brief || !Array.isArray(report.sources) ||
-      report.sources.length !== 4) throw new Error('ART_REVIEW_INVALID');
+      report.sources.length !== 4 ||
+      !/^[a-f0-9]{64}$/.test(report.artRequestSha256 ?? '')) throw new Error('ART_REVIEW_INVALID');
   return withLock(source.project, source, () => {
     const current = readNativeRun(source.project, runRef);
     if (current.headSha256 !== expectedHeadSha256 || current.pendingExecutor || current.terminal ||
-        !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status)) throw new Error('ART_REVIEW_STALE');
+        current.status !== 'ART_REVIEW_PENDING' ||
+        current.pendingArtReview !== report.artRequestSha256 ||
+        JSON.stringify(current.pendingArtRequest) !== JSON.stringify({
+          image: report.image, brief: report.brief, sources: report.sources,
+          modelObserved: 'gpt-6-sol',
+        })) throw new Error('ART_REVIEW_STALE');
     const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED')?.manual;
     if (!imported || imported.output.outputPath !== report.image.path ||
         imported.output.outputSha256 !== report.image.sha256 ||
@@ -793,6 +870,9 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
     verifyStoredImage(source.project, current.run.runId, imported.output);
     verifyDraftInputs(source.project, [report.brief, ...report.sources]);
     const history = readNativeArtReviews(source.project, current.run.runId);
+    if (history.some(item => item.artRequestSha256 === report.artRequestSha256)) {
+      throw new Error('ART_REVIEW_REQUEST_ALREADY_RECORDED');
+    }
     if (history.some(item => item.verdict === 'PASS_ART')) throw new Error('ART_ALREADY_ACCEPTED');
     if (history.filter(item => item.verdict === 'REWORK').length >= 2) throw new Error('ART_REWORK_LIMIT');
     if (history.some(item => JSON.stringify(item.image) !== JSON.stringify(report.image) ||
@@ -805,7 +885,8 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
       runId: current.run.runId, runHeadSha256: expectedHeadSha256,
       prevSha256: history.length ? sha256(serial(history.at(-1))) : expectedHeadSha256,
       at: new Date().toISOString(), provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
-      visualInputObserved: true, hostObservation: report.hostObservation, image: report.image, brief: report.brief,
+      visualInputObserved: true, artRequestSha256: report.artRequestSha256,
+      hostObservation: report.hostObservation, image: report.image, brief: report.brief,
       sources: report.sources, verdict: report.verdict, reasonCode: report.reasonCode,
       summary: report.summary, findings: report.findings };
     checkedRunDir(source.project, current.run.runId);
@@ -833,7 +914,8 @@ export function planNativeEvent(projectDir, runRef, input) {
   const source = inspectNativeProject(project);
   if (current.terminal) throw new Error('NATIVE_TERMINAL_RUN');
   if (!input || !['CHECKPOINT', 'ACTION_REQUESTED', 'EXECUTION_RESULT', 'DRAFT_IMPORTED',
-    'IMAGE_IMPORTED', 'NARRATIVE_REVIEW_REQUESTED', 'NARRATIVE_REVIEW_RESULT'].includes(input.kind)) {
+    'IMAGE_IMPORTED', 'NARRATIVE_REVIEW_REQUESTED', 'NARRATIVE_REVIEW_RESULT',
+    'ART_REVIEW_REQUESTED', 'ART_REVIEW_RESULT'].includes(input.kind)) {
     throw new Error('NATIVE_EVENT_KIND_INVALID');
   }
   if (input.stage !== current.nextStage) throw new Error(`NATIVE_INVALID_STAGE: expected ${current.nextStage}`);
@@ -843,6 +925,9 @@ export function planNativeEvent(projectDir, runRef, input) {
   let manual = null;
   if (current.pendingNarrativeReview && input.kind !== 'NARRATIVE_REVIEW_RESULT') {
     throw new Error('NATIVE_NARRATIVE_REVIEW_PENDING');
+  }
+  if (current.pendingArtReview && input.kind !== 'ART_REVIEW_RESULT') {
+    throw new Error('NATIVE_ART_REVIEW_PENDING');
   }
   if (input.kind === 'CHECKPOINT') {
     if (current.pendingExecutor || current.pendingNarrativeReview) throw new Error('NATIVE_EXECUTOR_PENDING_RESULT');
@@ -884,6 +969,21 @@ export function planNativeEvent(projectDir, runRef, input) {
     }
     validateNarrativeResult(input.reviewResult, current.pendingNarrativeRequest,
       readBoundText(project, current.pendingNarrativeRequest.draft));
+  } else if (input.kind === 'ART_REVIEW_REQUESTED') {
+    if (current.pendingExecutor || current.pendingNarrativeReview ||
+        !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status)) {
+      throw new Error('NATIVE_ART_REVIEW_ALREADY_PENDING');
+    }
+    validateArtRequest(input.artReview, current);
+    const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED').manual;
+    verifyStoredImage(project, current.run.runId, imported.output);
+    verifyDraftInputs(project, [input.artReview.brief, ...input.artReview.sources]);
+  } else if (input.kind === 'ART_REVIEW_RESULT') {
+    if (!current.pendingArtReview || input.artRequestSha256 !== current.pendingArtReview) {
+      throw new Error('NATIVE_ART_REVIEW_RESULT_WITHOUT_REQUEST');
+    }
+    validateArtResult(input.artReviewResult);
+    verifyArtResultReceipt(project, current.run.runId, current.pendingArtReview, input.artReviewResult);
   } else if (input.kind === 'IMAGE_IMPORTED') {
     if (current.pendingExecutor || !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status) ||
         current.events.some(event => event.kind === 'IMAGE_IMPORTED')) throw new Error('NATIVE_IMAGE_IMPORT_DUPLICATE');
@@ -927,6 +1027,11 @@ export function planNativeEvent(projectDir, runRef, input) {
     event.reviewResult = input.reviewResult;
     event.reviewRequestSha256 = current.pendingNarrativeReview;
   }
+  if (input.kind === 'ART_REVIEW_REQUESTED') event.artReview = input.artReview;
+  if (input.kind === 'ART_REVIEW_RESULT') {
+    event.artReviewResult = input.artReviewResult;
+    event.artRequestSha256 = current.pendingArtReview;
+  }
   return { status: 'READY', kind: 'NATIVE_EVENT', project, runId: current.run.runId,
     source, expectedHeadSha256: current.headSha256, event,
     fingerprint: sha256(serial(event)), writes: [
@@ -954,6 +1059,7 @@ export function commitNativeEvent(plan) {
     if (current.headSha256 !== plan.expectedHeadSha256 ||
         current.nextStage !== plan.event.stage || plan.event.index !== current.events.length + 1 ||
         (current.pendingNarrativeReview && plan.event.kind !== 'NARRATIVE_REVIEW_RESULT') ||
+        (current.pendingArtReview && plan.event.kind !== 'ART_REVIEW_RESULT') ||
         (plan.event.kind === 'ACTION_REQUESTED' && ['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(current.status)) ||
         (plan.event.kind === 'ACTION_REQUESTED' && plan.event.executor === 'web-dev' &&
           plan.event.request?.taskKind === 'episode-script' && !!episodeDraftOfRun(current)) ||
@@ -965,7 +1071,9 @@ export function commitNativeEvent(plan) {
           !['codex', 'web-dev', 'image-gen'].includes(current.pendingExecutor) ||
           plan.event.requestSha256 !== current.pendingRequestSha256)) ||
         (plan.event.kind === 'NARRATIVE_REVIEW_RESULT' &&
-          plan.event.reviewRequestSha256 !== current.pendingNarrativeReview)) {
+          plan.event.reviewRequestSha256 !== current.pendingNarrativeReview) ||
+        (plan.event.kind === 'ART_REVIEW_RESULT' &&
+          plan.event.artRequestSha256 !== current.pendingArtReview)) {
       throw new Error('NATIVE_STALE_EVENT_CONFLICT');
     }
     const fresh = verifyNativeSource(plan.source);
@@ -1025,6 +1133,22 @@ export function commitNativeEvent(plan) {
       if (!current.pendingNarrativeReview) throw new Error('NATIVE_REVIEW_RESULT_WITHOUT_REQUEST');
       validateNarrativeResult(plan.event.reviewResult, current.pendingNarrativeRequest,
         readBoundText(plan.project, current.pendingNarrativeRequest.draft));
+    }
+    if (plan.event.kind === 'ART_REVIEW_REQUESTED') {
+      if (current.pendingExecutor || current.pendingNarrativeReview || current.pendingArtReview ||
+          !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status)) {
+        throw new Error('NATIVE_ART_REVIEW_ALREADY_PENDING');
+      }
+      validateArtRequest(plan.event.artReview, current);
+      const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED').manual;
+      verifyStoredImage(plan.project, current.run.runId, imported.output);
+      verifyDraftInputs(plan.project, [plan.event.artReview.brief, ...plan.event.artReview.sources]);
+    }
+    if (plan.event.kind === 'ART_REVIEW_RESULT') {
+      if (!current.pendingArtReview) throw new Error('NATIVE_ART_REVIEW_RESULT_WITHOUT_REQUEST');
+      validateArtResult(plan.event.artReviewResult);
+      verifyArtResultReceipt(plan.project, current.run.runId, current.pendingArtReview,
+        plan.event.artReviewResult);
     }
     for (const artifact of plan.event.artifacts) {
       const snapshot = snapshotArtifact(plan.project, artifact.path);

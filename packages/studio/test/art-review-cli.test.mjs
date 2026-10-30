@@ -7,7 +7,7 @@ import { runCli } from '../src/cli.mjs';
 import { game } from '../../ai/test/helpers/image-game.mjs';
 import { png } from '../../ai/test/helpers/images.mjs';
 import { planImageTask, planImageImport, executeImageImport } from '../../ai/src/image-tasks.mjs';
-import { readNativeArtReviews } from '../../ai/src/store.mjs';
+import { readNativeArtReviews, readNativeRun } from '../../ai/src/store.mjs';
 
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const capability = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
@@ -61,6 +61,22 @@ function host(verdict = 'PASS_ART', findings = [], mutate = () => {}) {
     } };
   return { instance, get calls() { return calls; } };
 }
+
+test('CLI reports uncertain visual timeout as pending recovery and never starts a second host turn', async t => {
+  const item = await setup(t);
+  let calls = 0;
+  const broken = { probe: async () => capability, close: async () => {},
+    turn: async () => { calls++; throw new Error('BROWSER_TIMED_OUT'); } };
+  const first = await cli([...item.args, '--apply'], { devHost: () => broken });
+  assert.equal(first.code, 3);
+  assert.equal(first.result.status, 'PENDING_RECOVERY');
+  assert.equal(first.result.reasonCode, 'ART_REVIEW_OUTCOME_UNKNOWN');
+  assert.match(readNativeRun(item.project, item.run).pendingArtReview, /^[a-f0-9]{64}$/);
+  const second = await cli([...item.args, '--apply'], { devHost: () => broken });
+  assert.equal(second.code, 2);
+  assert.equal(second.result.reasonCode, 'ART_REVIEW_PENDING');
+  assert.equal(calls, 1);
+});
 
 test('art-review dry-run does not launch Web host or mutate candidate/run', async t => {
   const item = await setup(t);

@@ -7,6 +7,9 @@ import { game } from './helpers/image-game.mjs';
 import { png } from './helpers/images.mjs';
 import { planImageTask, planImageImport, executeImageImport } from '../src/image-tasks.mjs';
 import { planArtReview, verifyArtReviewPlan, interpretArtReview, executeArtReview } from '../src/art-review.mjs';
+import { readNativeRun, readNativeArtReviews, planNativeEvent, commitNativeEvent,
+  recordNativeArtReview } from '../src/store.mjs';
+import { planWorkflow, executeWorkflow } from '../src/workflows.mjs';
 
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const observedWeb = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
@@ -38,6 +41,135 @@ async function imported(t) {
 const options = input => ({ run: input.run, image: input.output.outputPath,
   sources: input.source, contextReviewed: true });
 const discovered = { discover: () => observedWeb };
+
+function witnessedArt(plan) {
+  const traceId = `art-${plan.runId}`;
+  const hostObservation = { protocolVersion: 2, source: 'browser-ui', traceId,
+    selectedModel: 'gpt-6-sol', reasoning: 'high',
+    image: { ref: plan.image.ref, sha256: plan.image.sha256, bytes: plan.image.size },
+    upload: { creationRequestObserved: true, processingRequestObserved: true,
+      processingRequestKind: 'process_upload_stream', processingEvent: 'file.processing.completed',
+      processingCompleted: true, visibleAttachmentChip: true } };
+  return { status: 'HOST_OBSERVED', routeObserved: 'web-dev', modelObserved: 'gpt-6-sol',
+    imageInputObserved: true, traceId, imageRef: plan.image.ref, imageSha256: plan.image.sha256,
+    imageBytes: plan.image.size, hostObservation,
+    text: JSON.stringify({ schemaVersion: 1, imageVisible: true, imageSha256: plan.image.sha256,
+      verdict: 'PASS_ART', summary: 'Scene matches source.', findings: [] }) };
+}
+
+test('a timed-out art host leaves durable intent and never silently resubmits a paid review', async t => {
+  const item = await imported(t);
+  const plan = planArtReview(item.project, options(item), discovered);
+  let calls = 0;
+  const host = { probe: async () => observedWeb, turn: async () => {
+    calls++;
+    throw new Error('SIMULATED_HOST_TIMEOUT_AFTER_SUBMIT');
+  } };
+  await assert.rejects(executeArtReview(plan, { apply: true, host }), /SIMULATED_HOST_TIMEOUT_AFTER_SUBMIT/);
+  const pending = readNativeRun(item.project, item.run);
+  assert.match(pending.pendingArtReview ?? '', /^[a-f0-9]{64}$/);
+  assert.equal(pending.events.at(-1).kind, 'ART_REVIEW_REQUESTED');
+  assert.equal(pending.status, 'ART_REVIEW_PENDING');
+  assert.equal(readNativeArtReviews(item.project, item.run).length, 0);
+  const repeated = planArtReview(item.project, options(item), discovered);
+  assert.equal(repeated.status, 'BLOCKED');
+  assert.equal(repeated.reasonCode, 'ART_REVIEW_PENDING');
+  await executeArtReview(repeated, { apply: true, host });
+  assert.equal(calls, 1, 'no implicit second paid browser submission');
+});
+
+test('owner-confirmed recovery closes pending visual intent without touching partial owner edits', async t => {
+  const item = await imported(t);
+  const original = planArtReview(item.project, options(item), discovered);
+  await assert.rejects(executeArtReview(original, { apply: true, host: {
+    probe: async () => observedWeb, turn: async () => { throw new Error('HELPER_TIMED_OUT'); },
+  } }), /HELPER_TIMED_OUT/);
+  fs.writeFileSync(path.join(item.project, 'owner-note.txt'), 'preserve this untracked note');
+  fs.writeFileSync(path.join(item.project, 'scene.md'), 'Owner edited while review may be running');
+  const preview = planWorkflow(item.project, 'recover', { run: item.run });
+  assert.equal(preview.status, 'READY');
+  assert.equal(preview.nativePlan.event.kind, 'ART_REVIEW_RESULT');
+  assert.equal(preview.nativePlan.event.artReviewResult.code, 'ART_REVIEW_INTERRUPTED');
+  const noConfirm = executeWorkflow(preview, { apply: true });
+  assert.equal(noConfirm.status, 'BLOCKED');
+  assert.match(noConfirm.conflicts.join(' '), /NATIVE_RECOVERY_CONFIRMATION_REQUIRED/);
+  assert.match(readNativeRun(item.project, item.run).pendingArtReview, /^[a-f0-9]{64}$/);
+  const confirmed = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
+  const recovered = executeWorkflow(confirmed, { apply: true });
+  assert.equal(recovered.status, 'APPLIED');
+  assert.equal(readNativeRun(item.project, item.run).pendingArtReview, null);
+  assert.equal(readNativeArtReviews(item.project, item.run).length, 0);
+  assert.equal(fs.readFileSync(path.join(item.project, 'owner-note.txt'), 'utf8'), 'preserve this untracked note');
+  assert.equal(fs.readFileSync(path.join(item.project, 'scene.md'), 'utf8'),
+    'Owner edited while review may be running');
+});
+
+test('recover preserves a witnessed art receipt when the final native event was lost', async t => {
+  const item = await imported(t);
+  const original = planArtReview(item.project, options(item), discovered);
+  const requested = commitNativeEvent(planNativeEvent(item.project, item.run, {
+    kind: 'ART_REVIEW_REQUESTED', stage: original.stage,
+    artReview: { image: original.image, brief: original.brief, sources: original.sources,
+      modelObserved: 'gpt-6-sol' },
+  }));
+  const report = witnessedArt(original);
+  const receipt = recordNativeArtReview(item.project, item.run, requested.headSha256, {
+    provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', visualInputObserved: true,
+    artRequestSha256: requested.pendingArtReview, verdict: 'PASS_ART',
+    reasonCode: 'ART_REPORT_STRUCTURED', summary: 'Scene matches source.', findings: [],
+    hostObservation: report.hostObservation, image: original.image,
+    brief: original.brief, sources: original.sources,
+  });
+  const candidate = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
+  assert.equal(candidate.status, 'READY');
+  assert.equal(candidate.nativePlan.event.artReviewResult.code, 'ART_REVIEW_OBSERVED');
+  assert.equal(candidate.nativePlan.event.artReviewResult.receiptSha256, receipt.receiptSha256);
+  assert.equal(executeWorkflow(candidate, { apply: true }).status, 'APPLIED');
+  assert.equal(readNativeRun(item.project, item.run).pendingArtReview, null);
+  assert.equal(readNativeArtReviews(item.project, item.run)[0].verdict, 'PASS_ART');
+  assert.equal(planArtReview(item.project, options(item), discovered).reasonCode, 'ART_ALREADY_ACCEPTED');
+});
+
+test('the same pending visual request cannot produce two REWORK receipts', async t => {
+  const item = await imported(t);
+  const original = planArtReview(item.project, options(item), discovered);
+  const requested = commitNativeEvent(planNativeEvent(item.project, item.run, {
+    kind: 'ART_REVIEW_REQUESTED', stage: original.stage,
+    artReview: { image: original.image, brief: original.brief, sources: original.sources,
+      modelObserved: 'gpt-6-sol' },
+  }));
+  const report = { provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
+    visualInputObserved: true, artRequestSha256: requested.pendingArtReview,
+    verdict: 'REWORK', reasonCode: 'ART_REPORT_STRUCTURED',
+    summary: 'Wrong location.', findings: [{ severity: 'P1', category: 'location',
+      description: 'Wrong coast.', evidence: 'Cliff is missing.' }],
+    hostObservation: witnessedArt(original).hostObservation,
+    image: original.image, brief: original.brief, sources: original.sources };
+  recordNativeArtReview(item.project, item.run, requested.headSha256, report);
+  assert.throws(() => recordNativeArtReview(item.project, item.run, requested.headSha256, report),
+    /ART_REVIEW_REQUEST_ALREADY_RECORDED/);
+  assert.equal(readNativeArtReviews(item.project, item.run).length, 1);
+});
+
+test('old art host response cannot commit a review after owner has recovered the request', async t => {
+  const item = await imported(t);
+  const original = planArtReview(item.project, options(item), discovered);
+  let started, finish;
+  const entered = new Promise(resolve => { started = resolve; });
+  const held = new Promise(resolve => { finish = resolve; });
+  const execution = executeArtReview(original, { apply: true, host: {
+    probe: async () => observedWeb,
+    turn: async () => { started(); await held; return witnessedArt(original); },
+  } });
+  await entered;
+  assert.match(readNativeRun(item.project, item.run).pendingArtReview, /^[a-f0-9]{64}$/);
+  const recovery = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
+  assert.equal(executeWorkflow(recovery, { apply: true }).status, 'APPLIED');
+  finish();
+  await assert.rejects(execution, /ART_REVIEW_STALE/);
+  assert.equal(readNativeRun(item.project, item.run).pendingArtReview, null);
+  assert.equal(readNativeArtReviews(item.project, item.run).length, 0);
+});
 
 test('art review preview only accepts a recorded original and carries exact image/source hashes without writes', async t => {
   const item = await imported(t);
@@ -158,6 +290,8 @@ test('art review blocks declared host fields without a matching browser observat
       imageSha256: sha(png), imageBytes: images[0].bytes.length, text: JSON.stringify({ schemaVersion: 1, imageSha256: sha(png),
         imageVisible: true, verdict: 'PASS_ART', summary: 'Declared only.', findings: [] }) }),
   } });
-  assert.equal(result.status, 'BLOCKED');
+  assert.equal(result.status, 'PENDING_RECOVERY');
   assert.equal(result.reasonCode, 'ART_VISUAL_ATTESTATION_MISSING');
+  assert.match(readNativeRun(item.project, item.run).pendingArtReview, /^[a-f0-9]{64}$/);
+  assert.equal(readNativeArtReviews(item.project, item.run).length, 0);
 });

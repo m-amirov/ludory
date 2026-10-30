@@ -1,14 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { inspectNativeProject, verifyNativeSource } from './source.mjs';
 import { getPipeline } from './pipelines.mjs';
-import { planNewRun, commitNewRun, readNativeRun, listNativeRuns, planNativeEvent, commitNativeEvent } from './store.mjs';
+import { planNewRun, commitNewRun, readNativeRun, listNativeRuns, readNativeArtReviews,
+  planNativeEvent, commitNativeEvent } from './store.mjs';
 import { prepareCodexExecution, checkCodexAvailable, runCodexExecution, hasStudioCreationReceipt,
   EMPTY_TRANSCRIPT_SHA256 } from './executor.mjs';
 import { blockedNarrativeVerdict } from './narrative-review-contract.mjs';
 
 const OPERATIONS = new Set(['doctor', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover']);
 const READ_ONLY = new Set(['doctor', 'status', 'next']);
+const cryptoHashArtReceipt = receipt => crypto.createHash('sha256')
+  .update(`${JSON.stringify(receipt, null, 2)}\n`).digest('hex');
 const OPTS = {
   doctor: [], status: ['run'], next: ['run'], continue: ['run', 'executor'],
   cycle: ['run', 'test', 'repairs'],
@@ -69,6 +73,8 @@ function fromRun(project, operation, current) {
       ? { kind: 'AWAIT_EXECUTOR_RESULT', stage: current.nextStage, executable: false }
     : current.pendingNarrativeReview
       ? { kind: 'CONFIRM_REVIEWER_STOPPED', stage: current.nextStage, executable: false }
+    : current.pendingArtReview
+      ? { kind: 'CONFIRM_REVIEWER_STOPPED', stage: current.nextStage, executable: false }
     : current.otherReviewPending
       ? { kind: current.events.some(event => event.kind === 'IMAGE_IMPORTED' ||
         (event.kind === 'EXECUTION_RESULT' && Array.isArray(event.result?.images) && event.result.ok))
@@ -91,7 +97,8 @@ function fromRun(project, operation, current) {
     runId: current.run.runId, nextStage: current.nextStage, nativeStatus: current.status,
     nextAction, terminal: current.terminal, reviewPending: current.reviewPending,
     narrativeReview: current.narrativeReview, otherReviewPending: current.otherReviewPending,
-    pendingNarrativeReview: !!current.pendingNarrativeReview };
+    pendingNarrativeReview: !!current.pendingNarrativeReview,
+    pendingArtReview: !!current.pendingArtReview };
 }
 
 /** Plan a native operation without executing any CEOS process. */
@@ -141,6 +148,9 @@ export function planWorkflow(projectDir, operation, options = {}) {
   if (current.pendingNarrativeReview && operation !== 'recover') {
     return blocked(project, operation, 'NATIVE_NARRATIVE_REVIEW_PENDING');
   }
+  if (current.pendingArtReview && operation !== 'recover') {
+    return blocked(project, operation, 'NATIVE_ART_REVIEW_PENDING');
+  }
   if (operation === 'continue' && ['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(current.status)) {
     return blocked(project, operation, 'NATIVE_ACTION_ALREADY_REQUESTED');
   }
@@ -170,7 +180,7 @@ export function planWorkflow(projectDir, operation, options = {}) {
       test: options.test, requiredCommand, repairs, executor: 'codex',
       warning: 'Test execution is observed only via Codex sandbox JSONL, not independently verified. No automatic checkpoint, stage advancement or Release PASS.' };
   }
-  if (operation === 'recover' && !current.pendingNarrativeReview &&
+  if (operation === 'recover' && !current.pendingArtReview && !current.pendingNarrativeReview &&
       !['codex', 'web-dev', 'image-gen'].includes(current.pendingExecutor)) {
     return blocked(project, operation, 'NATIVE_RECOVERY_NO_PENDING_EXECUTOR');
   }
@@ -180,6 +190,17 @@ export function planWorkflow(projectDir, operation, options = {}) {
       kind: 'ACTION_REQUESTED', stage: current.nextStage,
       ...(options.executor === 'codex' && { executor: 'codex' }),
     });
+    else if (operation === 'recover' && current.pendingArtReview) {
+      const witnessed = readNativeArtReviews(project, current.run.runId).find(item =>
+        item.artRequestSha256 === current.pendingArtReview);
+      nativePlan = planNativeEvent(project, current.run.runId, {
+        kind: 'ART_REVIEW_RESULT', stage: current.nextStage,
+        artRequestSha256: current.pendingArtReview,
+        artReviewResult: witnessed
+          ? { code: 'ART_REVIEW_OBSERVED', receiptSha256: cryptoHashArtReceipt(witnessed) }
+          : { code: 'ART_REVIEW_INTERRUPTED', receiptSha256: null },
+      });
+    }
     else if (operation === 'recover' && current.pendingNarrativeReview) {
       nativePlan = planNativeEvent(project, current.run.runId, {
         kind: 'NARRATIVE_REVIEW_RESULT', stage: current.nextStage,
@@ -214,7 +235,9 @@ export function planWorkflow(projectDir, operation, options = {}) {
   const executorPlan = operation === 'continue' && options.executor === 'codex'
     ? prepareCodexExecution(project, current.run.scope, current.nextStage, { gitRoot: source.gitRoot }) : null;
   const recoveryWarning = operation === 'recover'
-    ? current.pendingNarrativeReview
+    ? current.pendingArtReview
+      ? 'The independent art reviewer may still be processing the image or billing the account. Confirm the old helper is stopped and no response is in flight before recovery. Any witnessed receipt is preserved, not re-submitted.'
+      : current.pendingNarrativeReview
       ? 'The independent narrative reviewer may still be running. Confirm the old helper has stopped before recovery; no verdict may be inferred from an interrupted turn.'
       : current.pendingExecutor === 'image-gen'
       ? 'Recovery cannot prove whether the old image-generation host finished or charged for this request. Confirm the image host is stopped and no output is in flight before --apply; unjournaled originals remain unapproved.'
@@ -227,7 +250,7 @@ export function planWorkflow(projectDir, operation, options = {}) {
     ...(executorPlan && { executor: 'codex', mutationScope: executorPlan.sandbox, executorPlan,
       warning: 'Codex workspace-write may edit game files; in-scope paths are instructions, not enforced allowlists.' }),
     ...(recoveryWarning && { requiresConfirmation: true, warning: recoveryWarning,
-      nextAction: { kind: current.pendingNarrativeReview ? 'CONFIRM_REVIEWER_STOPPED'
+      nextAction: { kind: current.pendingNarrativeReview || current.pendingArtReview ? 'CONFIRM_REVIEWER_STOPPED'
         : 'CONFIRM_EXECUTOR_STOPPED', stage: current.nextStage, executable: false } }),
     ...(operation === 'recover' && { confirmNoExecutor: options.confirmNoExecutor === true }) };
 }

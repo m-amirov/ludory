@@ -341,7 +341,7 @@ async function runArtReviewCommand(flags, { out, devHost }) {
     }
   }
   displayWorkflow(result, flags.has('--json'), out);
-  return result.status === 'ESCALATE' ? 3
+  return result.status === 'ESCALATE' || result.status === 'PENDING_RECOVERY' ? 3
     : result.status === 'BLOCKED' || (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
 }
 
@@ -501,11 +501,20 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       }
       if (operation === 'art-review') {
         return runArtReviewCommand(flags, { out, devHost }).catch(error => {
-          const result = { engine: 'ludory-ai', operation, status: 'FAILED',
-            project: flags.get('--project'), writes: [], conflicts: [error.message] };
-          if (flags.has('--json')) displayWorkflow(result, true, out);
+          let pending = false;
+          try { pending = flags.has('--apply') &&
+            !!readNativeRun(flags.get('--project'), flags.get('--run')).pendingArtReview; }
+          catch { /* An absent valid request is an ordinary failure. */ }
+          const result = pending ? { engine: 'ludory-ai', operation, status: 'PENDING_RECOVERY',
+            project: flags.get('--project'), nativeStatus: 'ART_REVIEW_PENDING',
+            reasonCode: 'ART_REVIEW_OUTCOME_UNKNOWN', writes: [], conflicts: [],
+            warning: 'The browser may still be reviewing or billing. Verify that the old helper is stopped before workflow recover --confirm-no-executor --apply.',
+            nextAction: { kind: 'CONFIRM_REVIEWER_STOPPED', executable: false } }
+            : { engine: 'ludory-ai', operation, status: 'FAILED',
+              project: flags.get('--project'), writes: [], conflicts: [error.message] };
+          if (flags.has('--json') || pending) displayWorkflow(result, flags.has('--json'), out);
           else err(`Ludory: ${error.message}\n`);
-          return 1;
+          return pending ? 3 : 1;
         });
       }
       if (operation === 'route') {
