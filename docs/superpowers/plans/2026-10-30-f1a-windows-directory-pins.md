@@ -4,16 +4,16 @@
 
 **Goal:** Prevent Windows NTFS directory substitution during Studio component updates without an unverified third-party dependency.
 
-**Architecture:** A small OS-specific protected-directory opener wraps native libuv exclusive directory handles and verifies inode identity. `applyComponentPlan` retains handles for the project root, archive and every relevant managed parent until transaction completion; on unavailability it fails closed. Existing Linux descriptor paths remain unchanged.
+**Architecture:** A small N-API Win32 `CreateFileW` wrapper denies `FILE_SHARE_DELETE` while allowing read/write sharing and verifies inode identity. `applyComponentPlan` retains handles for the project root, archive and every relevant managed parent until transaction completion; on unavailability it fails closed. Existing Linux descriptor paths remain unchanged.
 
-**Tech Stack:** Node.js 22+ ESM, built-in `node:fs`, libuv `UV_FS_O_EXLOCK` on Windows, `node:test`, GitHub Actions Windows/Ubuntu.
+**Tech Stack:** Node.js 22+ ESM, Win32 N-API C, node-gyp 11.5.0 at build time, `node:test`, GitHub Actions Windows/Ubuntu.
 
 **Spec:** `docs/superpowers/specs/2026-10-30-f1a-windows-directory-pins-design.md`.
 
 ## Global Constraints
 
 - Keep PR #46 Draft, never merge or publish; preserve user dirty files, games, existing archives.
-- If libuv exclusive opening interferes with required operations, stop the experiment and implement an independently validated native alternative or explicitly block Windows; never quietly remove the security test.
+- Native CI already rejected libuv `UV_FS_O_EXLOCK` due to child file rename EBUSY. Never restore that shortcut or remove the security test.
 - No broad refactor; retain current ownership, trust, rollback and evidence rules.
 
 ## Review Focus
@@ -30,7 +30,7 @@
 
 **Files:** Create `packages/studio/src/windows-directory-pin.mjs`; modify `packages/studio/test/component-updates.test.mjs`.
 
-**Interfaces:** `openProtectedDirectory(path: string): number` (Windows only) returns live fd or throws; `assert` test checks rename failure with the fd held, then success after closing it.
+**Interfaces:** `openProtectedDirectory(path: string): {dev:bigint,ino:bigint,close:()=>void}` (Windows only) wraps a live native handle or throws; test checks rename failure while held, success after closing, and ordinary child file operations.
 
 - [ ] Write Windows-only regression assertions for project and archive rename while protected; assert Linux rejects Windows-only opener.
 - [ ] Run focused tests before implementation for RED (local unsupported-host branch; Windows runner for native branch).

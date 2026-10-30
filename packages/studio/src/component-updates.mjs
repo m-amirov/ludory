@@ -6,6 +6,7 @@ import { loadCatalog, isStudioComponentPath } from './catalog.mjs';
 import { projectRoot, directoryIdentity, isOriginalDirectory } from './projects.mjs';
 import { assertComponentTrust, advanceComponentTrust, registerComponentTrust,
   hostTrustDigest, isMissingHostTrust } from './component-trust.mjs';
+import { openProtectedDirectory } from './windows-directory-pin.mjs';
 
 const stateName = 'ludory.components.json';
 const lockName = '.ludory-components.lock';
@@ -446,13 +447,20 @@ function withPinnedProjectCwd(project, identity, operation) {
 }
 
 function heldDirectory(directory, visibleAnchor = directory) {
+  if (process.platform === 'win32') {
+    const pin = openProtectedDirectory(directory);
+    return { fd: null, anchor: visibleAnchor,
+      stat: () => ({ dev: pin.dev, ino: pin.ino, isDirectory: () => true }),
+      close: () => pin.close() };
+  }
   const fd = fs.openSync(directory, fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0) |
     (fs.constants.O_NOFOLLOW || 0));
   const st = fs.fstatSync(fd);
   if (!st.isDirectory()) { fs.closeSync(fd); throw new Error(`Unsafe transaction directory: ${directory}`); }
   // Node lacks an openat API. Linux gives a race-resistant equivalent through
   // the open directory descriptor; other hosts must retain identity checks.
-  return { fd, anchor: process.platform === 'linux' ? `/proc/self/fd/${fd}` : visibleAnchor };
+  return { fd, anchor: process.platform === 'linux' ? `/proc/self/fd/${fd}` : visibleAnchor,
+    stat: () => fs.fstatSync(fd, { bigint: true }), close: () => fs.closeSync(fd) };
 }
 
 function assertManifestUnchanged(project, expectedSha256) {
@@ -521,8 +529,8 @@ export function applyComponentPlan(plan) {
 
   const project = fresh.project;
   const rootHandle = heldDirectory(project);
-  if (`${fs.fstatSync(rootHandle.fd, { bigint: true }).dev}:${fs.fstatSync(rootHandle.fd, { bigint: true }).ino}` !== plan.rootIdentity) {
-    fs.closeSync(rootHandle.fd);
+  if (`${rootHandle.stat().dev}:${rootHandle.stat().ino}` !== plan.rootIdentity) {
+    rootHandle.close();
     throw new Error('Project root identity changed before lock creation');
   }
   const lockPath = path.join(rootHandle.anchor, lockName);
@@ -565,6 +573,25 @@ export function applyComponentPlan(plan) {
     // did not change their catalog bytes.
     for (const [name, expected] of Object.entries(installed.state.files)) {
       if (hash(checkedFile(project, name)) !== expected) throw new Error(`Managed file changed after preview: ${name}`);
+    }
+    // Root pinning alone does not establish the identity of intermediate
+    // managed directories across separate publication operations. Retain a
+    // no-FILE_SHARE_DELETE native handle to each existing parent until exit.
+    if (process.platform === 'win32') {
+      const managedParents = new Set();
+      for (const name of [...Object.keys(installed.state.files), ...changes]) {
+        const parts = name.split('/').slice(0, -1);
+        for (let i = 1; i <= parts.length; i++) managedParents.add(path.join(project, ...parts.slice(0, i)));
+      }
+      for (const parent of [...managedParents].sort((a, b) => a.length - b.length)) {
+        const expected = fs.lstatSync(parent, { bigint: true });
+        if (!expected.isDirectory() || expected.isSymbolicLink()) throw new Error(`Unsafe managed parent: ${parent}`);
+        const pinned = heldDirectory(parent);
+        held.push(pinned);
+        if (pinned.stat().dev !== expected.dev || pinned.stat().ino !== expected.ino) {
+          throw new Error(`Changed managed parent while pinning: ${parent}`);
+        }
+      }
     }
     const staged = [];
     // On Windows a held stage root cannot be renamed, but a held *child*
@@ -655,7 +682,7 @@ export function applyComponentPlan(plan) {
       }
       for (const [name, handle] of Object.entries(directories)) {
         const disk = fs.lstatSync(flatArchive ? stage : path.join(stage, name), { bigint: true });
-        const open = fs.fstatSync(handle.fd, { bigint: true });
+        const open = handle.stat();
         if (!disk.isDirectory() || disk.isSymbolicLink() || disk.dev !== open.dev || disk.ino !== open.ino) {
           throw new Error(`Component transaction ${name} directory changed during apply`);
         }
@@ -705,7 +732,7 @@ export function applyComponentPlan(plan) {
         syncFile(basename);
       });
       const disk = fs.lstatSync(flatArchive ? stage : path.join(stage, 'new'), { bigint: true });
-      const handleStat = fs.fstatSync(directories.new.fd, { bigint: true });
+      const handleStat = directories.new.stat();
       if (!disk.isDirectory() || disk.isSymbolicLink() || disk.dev !== handleStat.dev || disk.ino !== handleStat.ino) {
         throw new Error('Component transaction new directory changed during apply');
       }
@@ -814,6 +841,6 @@ export function applyComponentPlan(plan) {
         } else throw finalizationError;
       }
     } }
-    finally { for (const handle of held.reverse()) fs.closeSync(handle.fd); }
+    finally { for (const handle of held.reverse()) handle.close(); }
   }
 }

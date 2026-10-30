@@ -71,9 +71,9 @@ test('the host registry is created with Studio ownership, outside the game', t =
 });
 
 test('Windows-style directory and read-only descriptor fsync errors do not prevent a managed update', t => {
+  if (process.platform !== 'win32') return t.skip('Requires actual Windows-native directory pin');
   const f = fixture(t);
   version2(f);
-  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
   const originalOpen = fs.openSync;
   const originalFsync = fs.fsyncSync;
   const opened = new Map();
@@ -91,7 +91,6 @@ test('Windows-style directory and read-only descriptor fsync errors do not preve
     }
     return originalFsync.apply(this, arguments);
   };
-  Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' });
   try {
     const applied = applyComponentPlan(planComponentUpdate(f.project, { catalog: f.catalog }));
     assert.equal(applied.status, 'APPLIED');
@@ -102,7 +101,6 @@ test('Windows-style directory and read-only descriptor fsync errors do not preve
     const index = JSON.parse(fs.readFileSync(path.join(archive, 'backup-index.json'), 'utf8'));
     assert.ok(index.entries.some(entry => /^backup-[0-9]+$/.test(entry.backup ?? '')));
   } finally {
-    Object.defineProperty(process, 'platform', originalPlatform);
     fs.openSync = originalOpen;
     fs.fsyncSync = originalFsync;
   }
@@ -826,7 +824,6 @@ test('Windows-style root substitution during lock acquisition never writes a loc
   version2(f);
   const plan = planComponentUpdate(f.project, { catalog: f.catalog });
   const moved = path.join(f.root, 'moved-game');
-  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
   const originalOpen = fs.openSync;
   let swapped = false;
   let replacementEverLocked = false;
@@ -840,10 +837,8 @@ test('Windows-style root substitution during lock acquisition never writes a loc
     if (swapped && fs.existsSync(path.join(f.project, '.ludory-components.lock'))) replacementEverLocked = true;
     return fd;
   };
-  Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' });
   try { assert.throws(() => applyComponentPlan(plan), /changed|root|stale|identity|ENOENT/i); }
   finally {
-    Object.defineProperty(process, 'platform', originalPlatform);
     fs.openSync = originalOpen;
   }
   assert.equal(swapped, true);
@@ -858,7 +853,6 @@ test('Windows-style root substitution before staging cannot create an archive in
   version2(f);
   const plan = planComponentUpdate(f.project, { catalog: f.catalog });
   const moved = path.join(f.root, 'original-stage-root');
-  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
   const originalMkdtemp = fs.mkdtempSync;
   let swapped = false;
   let replacementEverStaged = false;
@@ -874,10 +868,8 @@ test('Windows-style root substitution before staging cannot create an archive in
     }
     return result;
   };
-  Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' });
   try { assert.throws(() => applyComponentPlan(plan), /changed|root|stale|identity|ENOENT/i); }
   finally {
-    Object.defineProperty(process, 'platform', originalPlatform);
     fs.mkdtempSync = originalMkdtemp;
   }
   assert.equal(swapped, true);
@@ -891,7 +883,6 @@ test('Windows-style replacement after creating the stage cannot receive archive 
   version2(f);
   const plan = planComponentUpdate(f.project, { catalog: f.catalog });
   const moved = path.join(f.root, 'moved-staged-game');
-  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
   const originalLstat = fs.lstatSync;
   let swapped = false;
   let stagedName;
@@ -906,10 +897,8 @@ test('Windows-style replacement after creating the stage cannot receive archive 
     }
     return originalLstat.call(this, filename, ...args);
   };
-  Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' });
   try { assert.throws(() => applyComponentPlan(plan), /changed|root|stale|identity|ENOENT/i); }
   finally {
-    Object.defineProperty(process, 'platform', originalPlatform);
     fs.lstatSync = originalLstat;
   }
   assert.equal(swapped, true);
@@ -922,8 +911,8 @@ test('Windows-held flat archive and project root must prevent rename while publi
   if (process.platform !== 'win32') return t.skip('Windows filesystem semantics only');
   const f = fixture(t);
   const archive = fs.mkdtempSync(path.join(f.project, '.ludory-components-backup-'));
-  const heldFd = openProtectedDirectory(archive);
-  const rootFd = openProtectedDirectory(f.project);
+  const held = openProtectedDirectory(archive);
+  const root = openProtectedDirectory(f.project);
   try {
     for (const target of [archive, f.project]) {
       const renamed = `${target}-renamed`;
@@ -937,8 +926,8 @@ test('Windows-held flat archive and project root must prevent rename while publi
         `Unexpected filesystem error while checking Windows pin: ${target}`);
     }
   } finally {
-    fs.closeSync(rootFd);
-    fs.closeSync(heldFd);
+    root.close();
+    held.close();
   }
 });
 
@@ -953,8 +942,8 @@ test('Windows-native pinned parents must permit ordinary child reads, metadata a
   if (process.platform !== 'win32') return t.skip('Windows filesystem semantics only');
   const f = fixture(t);
   const archive = fs.mkdtempSync(path.join(f.project, '.ludory-components-backup-'));
-  const rootFd = openProtectedDirectory(f.project);
-  const archiveFd = openProtectedDirectory(archive);
+  const root = openProtectedDirectory(f.project);
+  const held = openProtectedDirectory(archive);
   try {
     assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 1;\n');
     assert.equal(fs.lstatSync(f.project).isDirectory(), true);
@@ -964,12 +953,13 @@ test('Windows-native pinned parents must permit ordinary child reads, metadata a
     assert.equal(fs.readFileSync(staged, 'utf8'), 'test');
     fs.renameSync(staged, path.join(archive, 'backup-0'));
   } finally {
-    fs.closeSync(archiveFd);
-    fs.closeSync(rootFd);
+    held.close();
+    root.close();
   }
 });
 
 test('Windows-style flat staged file swap with identical bytes cannot publish an external hardlink', t => {
+  if (process.platform !== 'win32') return t.skip('Requires Windows-native flat archive pin');
   const f = fixture(t);
   version2(f);
   const plan = planComponentUpdate(f.project, { catalog: f.catalog });
@@ -999,6 +989,7 @@ test('Windows-style flat staged file swap with identical bytes cannot publish an
 });
 
 test('Windows-style swapped backup slot cannot restore unrelated bytes during rollback', t => {
+  if (process.platform !== 'win32') return t.skip('Requires Windows-native flat archive pin');
   const f = fixture(t);
   version2(f);
   const plan = planComponentUpdate(f.project, { catalog: f.catalog });
@@ -1032,6 +1023,7 @@ test('Windows-style swapped backup slot cannot restore unrelated bytes during ro
 });
 
 test('Windows-style swapped quarantine slot cannot relink an external inode into the game', t => {
+  if (process.platform !== 'win32') return t.skip('Requires Windows-native flat archive pin');
   const f = fixture(t);
   version2(f);
   const plan = planComponentUpdate(f.project, { catalog: f.catalog });

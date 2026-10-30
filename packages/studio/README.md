@@ -122,8 +122,15 @@ block future updates until inspected. On an incomplete rollback
 the lock and archive remain for human recovery; inspect `backup-index.json`,
 affected paths and any quarantine entries before correcting state. On Windows,
 all archive slots are flat files (`new-0`, `backup-0`, `quarantine-0`, etc.)
-under the held archive directory because NTFS permits moving some open child
-directories; on POSIX, use the `new/`, `backup/`, `quarantine/` directories.
+under a Win32-native protected archive directory because NTFS permits moving
+some normally-open child directories; on POSIX, use the `new/`, `backup/`,
+`quarantine/` directories. Windows apply requires a native N-API module built
+with `npm run build:windows-pin` (Node 22+, node-gyp, MSVC build tools). The
+module opens physical directories with read/write sharing but denies delete
+sharing. Without a successfully loaded and identity-checked module, Windows
+apply must refuse the operation; ordinary Node directory descriptors do not
+pin NTFS pathnames. The Windows native build is an explicit prerequisite and
+is run in GitHub CI, not automatically installed on unverified hosts.
 Never force-remove a lock while another update may still be running. Disk-full,
 file-sharing, unsupported hardlink/rename and other filesystem failures are
 visible blockers, not successful updates. On Windows, inspect the actual CI

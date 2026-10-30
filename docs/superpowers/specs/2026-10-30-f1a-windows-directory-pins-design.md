@@ -12,14 +12,15 @@ scope. PR #46 remains Draft; `main` is unchanged.
 
 ## Options and selected approach
 
-- **Preferred:** Use the Windows-exclusive `UV_FS_O_EXLOCK` flag supplied by
-  libuv's native `CreateFileW` implementation (Node's `fs.openSync` numeric
-  flags). Hold verified OS handles from before the first project-local write
-  until all publication, rollback and finalization operations are complete.
-  This avoids a native addon or a new binary dependency. If the exclusive
-  mode also blocks legitimate file operations, do not weaken the guarantee:
-  move to a native implementation exposing `FILE_SHARE_READ|FILE_SHARE_WRITE`
-  without `FILE_SHARE_DELETE`, and keep the unsafe path disabled meanwhile.
+- **Selected after native experiment:** A small Win32 N-API module uses
+  `CreateFileW` with `FILE_READ_ATTRIBUTES`, `FILE_FLAG_BACKUP_SEMANTICS`,
+  `FILE_SHARE_READ | FILE_SHARE_WRITE` and **without `FILE_SHARE_DELETE`**.
+  Returned handles stay in the same Node process for the whole transaction.
+  Build the addon explicitly; if absent, refuse Windows apply before writes.
+- **Rejected by native CI:** `UV_FS_O_EXLOCK` disallows all sharing: rename
+  of the target directory is denied, but even the legitimate `new-0` to
+  `backup-0` file move beneath it returns `EBUSY` on NTFS (both Node 22/24).
+  Therefore a generic exclusive `fs.openSync` handle is not usable.
 - A PowerShell/.NET `CreateFileW` sidecar can request precise share flags,
   but adds process startup, authentication, lifetime and IPC failure modes.
 - Fail-closing **all** Windows component updates is safe but does not provide
@@ -43,8 +44,8 @@ scope. PR #46 remains Draft; `main` is unchanged.
 
 ## Anti-goals and review focus
 
-No native build required at install time, no broadened ownership, no silent
-recovery/deletion, no pretending `fs.openSync` without an exclusive flag pins
-a directory. Review sharing conflicts with running editors, failure while
+Build is required on Windows during verification and before first native apply;
+no broadened ownership, no silent recovery/deletion, and no pretending ordinary
+`fs.openSync` pins a directory. Review sharing conflicts with running editors, failure while
 creating the archive, post-lock rename attempts, parent junction swaps and
 rollback under filesystem errors.
