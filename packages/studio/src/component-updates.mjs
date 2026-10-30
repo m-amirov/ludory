@@ -398,9 +398,18 @@ function stagedFile(newDirectory, relative, bytes, mode = 0o600) {
   return filename;
 }
 function syncFile(filename) {
-  const fd = fs.openSync(filename, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  // FlushFileBuffers requires a writable Windows file handle; an O_RDONLY
+  // descriptor can fail with EPERM even for an otherwise writable file.
+  const access = process.platform === 'win32' ? fs.constants.O_RDWR : fs.constants.O_RDONLY;
+  const fd = fs.openSync(filename, access | (fs.constants.O_NOFOLLOW || 0));
   try { fs.fsyncSync(fd); }
   finally { fs.closeSync(fd); }
+}
+
+function syncDirectory(fd) {
+  // Windows directory handles cannot be fsynced through Node reliably. Keep
+  // synchronous file flushes, but retain fail-closed fsync on POSIX hosts.
+  if (process.platform !== 'win32') fs.fsyncSync(fd);
 }
 
 function heldDirectory(directory) {
@@ -448,10 +457,11 @@ function withAnchoredParent(project, name, rootIdentity, operation) {
     }
     const anchoredName = parentFd === null ? basename : `/proc/self/fd/${parentFd}/${basename}`;
     const output = operation(anchoredName);
-    // A successful publication or rollback must persist the directory entry
-    // as well as its file contents, not merely flush the JavaScript buffer.
+    // POSIX flushes directory entries after publication/rollback. Windows
+    // cannot expose a reliable directory fsync through Node; file data is
+    // still flushed separately and transaction recovery remains mandatory.
     const syncFd = parentFd === null ? fs.openSync('.', fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0)) : parentFd;
-    try { fs.fsyncSync(syncFd); }
+    try { syncDirectory(syncFd); }
     finally { if (syncFd !== parentFd) fs.closeSync(syncFd); }
     // The anchored old directory remains safe, but a new link replacing its
     // pathname makes the published game path unsafe and must block success.
@@ -568,9 +578,9 @@ export function applyComponentPlan(plan) {
     }), { flag: 'wx', mode: 0o600 });
     syncFile(path.join(stageHandle.anchor, 'backup-index.json'));
     syncFile(path.join(stageHandle.anchor, transitionName));
-    for (const item of Object.values(directories)) fs.fsyncSync(item.fd);
-    fs.fsyncSync(stageHandle.fd);
-    fs.fsyncSync(rootHandle.fd);
+    for (const item of Object.values(directories)) syncDirectory(item.fd);
+    syncDirectory(stageHandle.fd);
+    syncDirectory(rootHandle.fd);
 
     for (const [index, item] of staged.entries()) {
       if (!isOriginalDirectory(project, plan.rootIdentity) || directoryIdentity(stage) !== stageIdentity) {
@@ -599,7 +609,7 @@ export function applyComponentPlan(plan) {
           quarantine: path.join(directoryPaths.quarantine, String(index)) };
         operations.push(operation);
         if (!item.newFile) {
-          fs.fsyncSync(directories.backup.fd);
+          syncDirectory(directories.backup.fd);
           syncFile(item.backup);
         }
         if (!item.newFile && hash(fs.readFileSync(item.backup)) !== item.oldExpected) {
@@ -639,7 +649,7 @@ export function applyComponentPlan(plan) {
           throw new Error(`Published component changed before commit: ${item.name}`);
         }
         fs.unlinkSync(item.staged);
-        fs.fsyncSync(directories.new.fd);
+        syncDirectory(directories.new.fd);
       });
     }
     advanceComponentTrust(project, {
@@ -662,7 +672,7 @@ export function applyComponentPlan(plan) {
             // check is preserved, never silently unlinked. The quarantine
             // and original backup remain on disk for owner inspection.
             fs.renameSync(basename, op.quarantine);
-            fs.fsyncSync(directories.quarantine.fd);
+            syncDirectory(directories.quarantine.fd);
             const moved = fs.lstatSync(op.quarantine, { bigint: true });
             if (!moved.isFile() || moved.isSymbolicLink() || moved.dev !== op.publishedIdentity.dev || moved.ino !== op.publishedIdentity.ino ||
                 hash(fs.readFileSync(op.quarantine)) !== hash(op.bytes)) {
@@ -704,7 +714,7 @@ export function applyComponentPlan(plan) {
         const currentLock = fs.lstatSync(lockPath, { bigint: true });
         if (currentLock.dev === lockStat.dev && currentLock.ino === lockStat.ino) {
           fs.unlinkSync(lockPath);
-          fs.fsyncSync(rootHandle.fd);
+          syncDirectory(rootHandle.fd);
         }
       } catch (finalizationError) {
         // A finalization failure must keep the lock for recovery. If the

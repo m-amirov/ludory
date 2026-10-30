@@ -112,9 +112,13 @@ physical-path checks. Original file inodes are retained under
 `.ludory-components-backup-*` **even after a successful update**, because an
 editor may still hold an open file descriptor. Do not delete these archives
 until edits through old handles have been reconciled; newer component status
-also depends on the archived ownership chain. Stage files, receipts and
-directory entries are flushed with filesystem `fsync`; unsupported filesystem
-durability behavior is an explicit error, not a successful apply. On an incomplete rollback
+also depends on the archived ownership chain. Stage files and receipts are
+flushed with `fsync` on writable file descriptors. On POSIX, affected directory
+entries are also `fsync`ed, and errors block apply. Node does not reliably
+support directory `fsync` on Windows, so this additional directory flush is
+not attempted there; NTFS power-loss durability of directory entry changes is
+not independently established. State/pin mismatch after interruption must
+block future updates until inspected. On an incomplete rollback
 the lock and archive remain for human recovery; inspect `backup-index.json`,
 affected paths and any `quarantine/` entries before correcting state. Never
 force-remove a lock while another update may still be running. Disk-full,

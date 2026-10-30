@@ -64,7 +64,43 @@ test('the host registry is created with Studio ownership, outside the game', t =
   assert.equal(pins.length, 1);
   const pin = JSON.parse(fs.readFileSync(path.join(f.trustRoot, pins[0]), 'utf8'));
   assert.equal(pin.stateSha256, crypto.createHash('sha256').update(fs.readFileSync(f.state)).digest('hex'));
-  assert.equal(pin.project, f.project);
+  // Windows resolves short 8.3 temp paths (RUNNER~1) to their physical long spelling.
+  assert.equal(pin.project, fs.realpathSync.native(f.project));
+  assert.equal(previewComponentTrust(f.project).status, 'IN_SYNC');
+});
+
+test('Windows-style directory and read-only descriptor fsync errors do not prevent a managed update', t => {
+  const f = fixture(t);
+  version2(f);
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const originalOpen = fs.openSync;
+  const originalFsync = fs.fsyncSync;
+  const opened = new Map();
+  fs.openSync = function (filename, flags) {
+    const fd = originalOpen.apply(this, arguments);
+    opened.set(fd, flags);
+    return fd;
+  };
+  fs.fsyncSync = function (fd) {
+    if (fs.fstatSync(fd).isDirectory() ||
+        (opened.has(fd) && (opened.get(fd) & (fs.constants.O_WRONLY | fs.constants.O_RDWR)) === 0)) {
+      const error = new Error('simulated Windows unsupported fsync descriptor');
+      error.code = 'EPERM';
+      throw error;
+    }
+    return originalFsync.apply(this, arguments);
+  };
+  Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' });
+  try {
+    const applied = applyComponentPlan(planComponentUpdate(f.project, { catalog: f.catalog }));
+    assert.equal(applied.status, 'APPLIED');
+    assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 2;\n');
+    assert.equal(previewComponentTrust(f.project).status, 'IN_SYNC');
+  } finally {
+    Object.defineProperty(process, 'platform', originalPlatform);
+    fs.openSync = originalOpen;
+    fs.fsyncSync = originalFsync;
+  }
 });
 
 test('a forged additional archive and ownership state cannot authorize overwriting an author file', t => {
