@@ -49,10 +49,11 @@ static napi_value open_directory(napi_env env, napi_callback_info info) {
 
   // FILE_READ_ATTRIBUTES alone is a metadata-only open: Windows can bypass
   // its sharing restrictions and rename the directory. Request actual
-  // directory read access, while allowing child reads/writes and denying
-  // DELETE access to this specific directory pathname.
+  // directory read access. Deny both WRITE and DELETE sharing so an attacker
+  // cannot add a reparse point to this *same inode* while temporarily empty.
+  // CI must separately establish whether normal managed child writes work.
   HANDLE handle = CreateFileW(filename, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
-      FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+      FILE_SHARE_READ, NULL, OPEN_EXISTING,
       FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
   free(filename);
   if (handle == INVALID_HANDLE_VALUE) return throw_native(env, "Opening protected directory", GetLastError());
@@ -111,11 +112,11 @@ static napi_value close_directory(napi_env env, napi_callback_info info) {
 }
 
 NAPI_MODULE_INIT() {
-  // Security protocol v2 specifically means the handle requests
-  // FILE_LIST_DIRECTORY (share-enforced) and does NOT grant FILE_SHARE_DELETE.
+  // Security protocol v3 requests FILE_LIST_DIRECTORY with READ-only sharing:
+  // neither FILE_SHARE_WRITE (in-place reparse) nor FILE_SHARE_DELETE (rename).
   // The JavaScript loader rejects old metadata-only binaries before apply.
   napi_value version;
-  if (napi_create_uint32(env, 2, &version) != napi_ok ||
+  if (napi_create_uint32(env, 3, &version) != napi_ok ||
       napi_set_named_property(env, exports, "pinContractVersion", version) != napi_ok) {
     napi_throw_error(env, NULL, "Creating native pin security contract failed");
     return NULL;

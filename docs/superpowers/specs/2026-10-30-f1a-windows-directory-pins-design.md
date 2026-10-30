@@ -12,13 +12,20 @@ scope. PR #46 remains Draft; `main` is unchanged.
 
 ## Options and selected approach
 
-- **Selected after native experiment:** A small Win32 N-API module uses
+- **Previous rename-tested candidate (superseded by in-place junction test):** A small Win32 N-API module uses
   `CreateFileW` with `FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES`, `FILE_FLAG_BACKUP_SEMANTICS`,
   `FILE_SHARE_READ | FILE_SHARE_WRITE` and **without `FILE_SHARE_DELETE`**.
   Returned handles stay in the same Node process for the whole transaction.
   Build the addon explicitly; if absent, refuse Windows apply before writes.
   `FILE_READ_ATTRIBUTES` alone was insufficient: metadata-only opens did not
   enforce the expected rename sharing restriction on Windows CI.
+- **Current candidate, awaiting Windows CI:** Deny `FILE_SHARE_WRITE` as well
+  (leave only `FILE_SHARE_READ`) to prevent `FSCTL_SET_REPARSE_POINT` on an
+  existing temporarily empty managed directory. The actual Windows Node 22/24
+  injection proved the former candidate *did* allow a junction and transient
+  publication into an outside author directory; this is a confirmed blocker,
+  not a hypothetical threat. The stronger pin must also pass legitimate child
+  creation, rename, hardlink and rollback checks before acceptance.
 - **Rejected by native CI:** `UV_FS_O_EXLOCK` disallows all sharing: rename
   of the target directory is denied, but even the legitimate `new-0` to
   `backup-0` file move beneath it returns `EBUSY` on NTFS (both Node 22/24).

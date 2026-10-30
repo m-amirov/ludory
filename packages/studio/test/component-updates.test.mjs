@@ -975,12 +975,14 @@ test('Windows NTFS cannot redirect an existing empty managed parent to an outsid
   const originalLink = fs.linkSync;
   let attempted = false;
   let attack;
+  let emptyAtAttack = false;
   let outsideEverPublished = false;
   fs.renameSync = function (source, destination, ...args) {
     const result = originalRename.call(this, source, destination, ...args);
     if (!attempted && anchoredBasename(source, 'main.js') &&
         /[\\/]backup-0$/.test(String(destination))) {
       attempted = true;
+      emptyAtAttack = fs.readdirSync(path.join(f.project, 'src')).length === 0;
       attack = setInPlaceJunction(path.join(f.project, 'src'));
     }
     return result;
@@ -998,6 +1000,8 @@ test('Windows NTFS cannot redirect an existing empty managed parent to an outsid
 
   try {
     assert.equal(attempted, true, 'Did not reach the actual empty-directory publication window');
+    assert.equal(emptyAtAttack, true,
+      'The junction probe must target a temporarily empty managed parent, not a nonempty-directory rejection');
     assert.ok(attack, 'Missing native junction injection result');
     console.log(`Windows in-place NTFS junction injection with managed-parent pin: ${attack.output}`);
     assert.equal(fs.readFileSync(sentinel, 'utf8'), 'EXTERNAL AUTHOR BYTES\n');
@@ -1038,9 +1042,9 @@ test('Windows native pinning must not be silently emulated on an unsupported hos
 test('stale Windows native pins cannot claim the share-enforced security contract', () => {
   const validShape = { open() {}, close() {} };
   assert.throws(() => assertWindowsDirectoryPinContract(validShape), /stale|contract|version/i);
-  assert.throws(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 1 }),
+  assert.throws(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 2 }),
     /stale|contract|version/i);
-  assert.doesNotThrow(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 2 }));
+  assert.doesNotThrow(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 3 }));
 });
 
 test('Windows-native pinned parents must permit ordinary child reads, metadata and writes', t => {

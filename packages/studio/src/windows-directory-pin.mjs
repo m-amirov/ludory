@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const nativePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../native/build/Release/directory_pin.node');
-const requiredPinContractVersion = 2;
+const requiredPinContractVersion = 3;
 let native;
 
 export function assertWindowsDirectoryPinContract(candidate) {

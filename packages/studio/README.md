@@ -128,8 +128,10 @@ some normally-open child directories; on POSIX, use the `new/`, `backup/`,
 with `npm run build:windows-pin` (Node 22.9+ for node-gyp 12.4, MSVC build
 tools including Visual Studio 2026). The general Ludory runtime permits older
 Node 22 releases, but Windows native component apply does not. The
-module opens physical directories with read/write sharing but denies delete
-sharing. Without a successfully loaded and identity-checked module, Windows
+module now requests read-only sharing, denying both directory writes (including
+in-place reparse-point creation) and delete sharing. This stricter setting is
+under native CI verification for legitimate child operations. Without a
+successfully loaded and identity-checked module, Windows
 apply must refuse the operation; ordinary Node directory descriptors do not
 pin NTFS pathnames. The Windows native build is an explicit prerequisite and
 is run in GitHub CI, not automatically installed on unverified hosts.
@@ -138,7 +140,7 @@ code: `ludory components native --json` returns `READY` only after acquiring
 and releasing a real native directory handle, `BLOCKED` with a precise build
 command if Windows setup is missing, or `NOT_REQUIRED` off Windows. Build
 once from the trusted Ludory checkout using `npm run build:windows-pin`, then
-repeat the doctor. The loader requires `pinContractVersion=2` on every use;
+repeat the doctor. The loader requires `pinContractVersion=3` on every use;
 stale `.node` files from earlier metadata-only builds fail closed even if
 they still load and expose the same functions. Rebuild after updating the
 native source. Do not use a downloaded or unverified `.node` binary;
