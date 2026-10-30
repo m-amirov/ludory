@@ -88,6 +88,32 @@ export function inspectNativeStorageRecovery(projectDir, runId) {
       throw new Error('NATIVE_RECOVERY_COMMITTED_EVENT_INVALID');
     }
   }
+  const reviewsDir = path.join(runDir, 'reviews');
+  if (fs.existsSync(reviewsDir)) {
+    safeDir(reviewsDir);
+    const reviewPairs = new Map();
+    for (const name of fs.readdirSync(reviewsDir)) {
+      if (!/^\d{6}(?:\.commit)?\.json$/.test(name)) throw new Error('NATIVE_RECOVERY_UNKNOWN_REVIEW_ENTRY');
+      const index = Number(name.slice(0, 6));
+      if (!reviewPairs.has(index)) reviewPairs.set(index, {});
+      reviewPairs.get(index)[name.endsWith('.commit.json') ? 'marker' : 'receipt'] = name;
+    }
+    const rows = [...reviewPairs].sort((a, b) => a[0] - b[0]);
+    for (let offset = 0; offset < rows.length; offset++) {
+      const [index, pair] = rows[offset];
+      if (index !== offset + 1) throw new Error('NATIVE_RECOVERY_REVIEW_SEQUENCE');
+      if (!pair.receipt || !pair.marker) {
+        if (offset !== rows.length - 1) throw new Error('NATIVE_RECOVERY_REVIEW_SEQUENCE');
+        collect(path.join(reviewsDir, pair.receipt ?? pair.marker), `review-${pair.receipt ?? pair.marker}`);
+        continue;
+      }
+      const { data: marker } = readJsonBounded(path.join(reviewsDir, pair.marker));
+      const { bytes } = readJsonBounded(path.join(reviewsDir, pair.receipt));
+      if (marker.index !== index || marker.sha256 !== sha256(bytes)) {
+        throw new Error('NATIVE_RECOVERY_COMMITTED_REVIEW_INVALID');
+      }
+    }
+  }
   return { kind: 'NATIVE_STORAGE_RECOVERY', status: entries.length ? 'NEEDS_CONFIRMATION' : 'CLEAN',
     project, runId, entries };
 }
@@ -102,11 +128,47 @@ export function applyNativeStorageRecovery(preview, { confirmNoExecutor = false 
   if (!fresh.entries.length) return { status: 'CLEAN', quarantine: null };
   const quarantine = path.join(preview.project, '.ludory', `recovery-${crypto.randomBytes(12).toString('hex')}`);
   fs.mkdirSync(quarantine, { mode: 0o700 });
-  for (const entry of fresh.entries) {
-    const target = path.join(quarantine, entry.label);
-    fs.renameSync(entry.file, target);
+  const ai = path.join(preview.project, '.ludory', 'ai');
+  const lock = path.join(ai, '.lock');
+  const originalCwd = process.cwd();
+  let fd, ourLockIdentity;
+  try {
+    // A dead writer's lock must be preserved before acquiring our own lock.
+    // If another writer acquires it first, stop without moving journal files.
+    const stale = fresh.entries.find(x => x.label === 'lock');
+    if (stale) {
+      const now = fs.lstatSync(lock);
+      if (now.dev !== stale.dev || now.ino !== stale.ino) throw new Error('NATIVE_RECOVERY_STALE_PLAN');
+      fs.renameSync(lock, path.join(quarantine, 'lock'));
+    }
+    fd = fs.openSync(lock, EXCLUSIVE, 0o600);
+    ourLockIdentity = (() => { const st = fs.fstatSync(fd); return `${st.dev}:${st.ino}`; })();
+    fs.writeSync(fd, `${process.pid}\n`);
+    for (const entry of fresh.entries.filter(x => x.label !== 'lock')) {
+      const parent = path.dirname(entry.file);
+      const identity = directoryIdentity(parent);
+      const stat = fs.lstatSync(entry.file);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.dev !== entry.dev || stat.ino !== entry.ino ||
+          stat.size !== entry.size || sha256(fs.readFileSync(entry.file)) !== entry.sha256) {
+        throw new Error('NATIVE_RECOVERY_STALE_PLAN');
+      }
+      process.chdir(parent);
+      if (directoryIdentity('.') !== identity) throw new Error('NATIVE_RECOVERY_DIRECTORY_CHANGED');
+      fs.renameSync(path.basename(entry.file), path.join(quarantine, entry.label));
+      if (directoryIdentity(parent) !== identity) throw new Error('NATIVE_RECOVERY_DIRECTORY_CHANGED');
+      process.chdir(originalCwd);
+    }
+    return { status: 'RECOVERED', quarantine, moved: fresh.entries.length };
+  } finally {
+    process.chdir(originalCwd);
+    if (fd !== undefined) fs.closeSync(fd);
+    if (ourLockIdentity) {
+      try {
+        const stat = fs.lstatSync(lock);
+        if (stat.isFile() && !stat.isSymbolicLink() && `${stat.dev}:${stat.ino}` === ourLockIdentity) fs.unlinkSync(lock);
+      } catch { /* Leave any displaced lock for manual inspection. */ }
+    }
   }
-  return { status: 'RECOVERED', quarantine, moved: fresh.entries.length };
 }
 
 function validateArtRequest(request, current) {

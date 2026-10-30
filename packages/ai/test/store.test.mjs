@@ -67,6 +67,47 @@ test('recovery refuses a live lock, changed evidence and foreign journal entries
   assert.throws(() => inspectNativeStorageRecovery(project, run.run.runId), /UNKNOWN_EVENT_ENTRY/);
 });
 
+test('orphaned artistic review receipt is quarantined without discarding committed journal', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const reviews = path.join(project, '.ludory', 'ai', 'runs', run.run.runId, 'reviews');
+  fs.mkdirSync(reviews);
+  fs.writeFileSync(path.join(reviews, '000001.json'), 'interrupted observed receipt');
+  const preview = inspectNativeStorageRecovery(project, run.run.runId);
+  assert.deepEqual(preview.entries.map(x => x.label), ['review-000001.json']);
+  const output = applyNativeStorageRecovery(preview, { confirmNoExecutor: true });
+  assert.equal(fs.readFileSync(path.join(output.quarantine, 'review-000001.json'), 'utf8'),
+    'interrupted observed receipt');
+  assert.equal(fs.readdirSync(reviews).length, 0);
+  assert.equal(readNativeRun(project, run.run.runId).integrity.ok, true);
+});
+
+test('recovery never follows a substituted event directory outside its pinned source', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const dir = path.join(project, '.ludory', 'ai', 'runs', run.run.runId, 'events');
+  fs.writeFileSync(path.join(dir, '.pending-1234567890abcdef12345678'), 'owned');
+  const preview = inspectNativeStorageRecovery(project, run.run.runId);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-recovery-outside-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(outside, '.pending-1234567890abcdef12345678'), 'outside-user');
+  const originalRename = fs.renameSync;
+  let swapped = false;
+  fs.renameSync = function (from, to) {
+    if (!swapped && String(to).includes('recovery-') && String(from).includes('.pending-')) {
+      swapped = true;
+      originalRename.call(fs, dir, `${dir}-original`);
+      fs.symlinkSync(outside, dir, 'dir');
+    }
+    return originalRename.call(fs, from, to);
+  };
+  try { assert.throws(() => applyNativeStorageRecovery(preview, { confirmNoExecutor: true })); }
+  finally { fs.renameSync = originalRename; }
+  assert.equal(swapped, true);
+  assert.equal(fs.readFileSync(path.join(outside, '.pending-1234567890abcdef12345678'), 'utf8'),
+    'outside-user');
+});
+
 test('SIGKILL between event link and commit marker leaves a recoverable uncommitted tail', t => {
   const project = nativeProject(t);
   const run = commitNewRun(newRun(project));

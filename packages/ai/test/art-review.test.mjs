@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { game } from './helpers/image-game.mjs';
 import { png } from './helpers/images.mjs';
 import { planImageTask, planImageImport, executeImageImport } from '../src/image-tasks.mjs';
@@ -76,6 +77,46 @@ test('a timed-out art host leaves durable intent and never silently resubmits a 
   assert.equal(repeated.reasonCode, 'ART_REVIEW_PENDING');
   await executeArtReview(repeated, { apply: true, host });
   assert.equal(calls, 1, 'no implicit second paid browser submission');
+});
+
+test('SIGKILL while publishing witnessed review receipt requires storage recovery before workflow recovery', async t => {
+  const item = await imported(t);
+  const plan = planArtReview(item.project, options(item), discovered);
+  const moduleUrl = new URL('../src/art-review.mjs', import.meta.url).href;
+  const child = `
+    import fs from 'node:fs';
+    import { executeArtReview } from ${JSON.stringify(moduleUrl)};
+    const plan = JSON.parse(process.argv[1]);
+    const capability = JSON.parse(process.argv[2]);
+    const original = fs.openSync;
+    fs.openSync = function(file, ...args) {
+      if (String(file) === '000001.commit.json' && process.cwd().endsWith('reviews')) {
+        process.kill(process.pid, 'SIGKILL');
+      }
+      return original.call(fs, file, ...args);
+    };
+    const observed = ${witnessedArt.toString()}(plan);
+    await executeArtReview(plan, { apply: true, host: {
+      probe: async () => capability, turn: async () => observed,
+    } });
+  `;
+  const childResult = spawnSync(process.execPath,
+    ['--input-type=module', '-e', child, JSON.stringify(plan), JSON.stringify(observedWeb)],
+    { encoding: 'utf8', timeout: 15000 });
+  assert.ok(childResult.signal === 'SIGKILL' || (process.platform === 'win32' && childResult.status !== 0),
+    childResult.stderr);
+  const reviewDir = path.join(item.project, '.ludory', 'ai', 'runs', item.run, 'reviews');
+  assert.equal(fs.existsSync(path.join(reviewDir, '000001.json')), true);
+  assert.equal(fs.existsSync(path.join(reviewDir, '000001.commit.json')), false);
+  assert.throws(() => readNativeArtReviews(item.project, item.run), /ART_REVIEW_INTEGRITY_SEQUENCE/);
+  const recovery = planWorkflow(item.project, 'recover-storage', { run: item.run, confirmNoExecutor: true });
+  assert.equal(recovery.status, 'NEEDS_CONFIRMATION');
+  assert.ok(recovery.inventory.entries.some(x => x.label === 'review-000001.json'));
+  const restored = executeWorkflow(recovery, { apply: true });
+  assert.equal(restored.status, 'RECOVERED');
+  const interrupted = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
+  assert.equal(interrupted.status, 'READY');
+  assert.equal(executeWorkflow(interrupted, { apply: true }).status, 'APPLIED');
 });
 
 test('intent publication requires flushed event and marker without a directory fsync dependency', async t => {
