@@ -10,8 +10,10 @@ import * as hostTrust from '../src/component-trust.mjs';
 function newGame(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-origin-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const project = path.join(root, 'game');
-  fs.mkdirSync(project);
+  const location = path.join(root, 'game');
+  fs.mkdirSync(location);
+  // Studio returns physical canonical roots, expanding Windows 8.3 aliases.
+  const project = fs.realpathSync.native(location);
   const plan = planCreate(project, { id: 'origin-game', title: 'Origin Game', lang: 'en',
     profile: 'web-game', template: 'web-basic', targets: ['yandex-games'] });
   assert.equal(plan.status, 'READY');

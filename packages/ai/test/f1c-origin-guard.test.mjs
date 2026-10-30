@@ -65,8 +65,10 @@ function forgeReceipt(project) {
 function newStudioGame(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-ai-origin-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const project = path.join(root, 'game');
-  fs.mkdirSync(project);
+  const location = path.join(root, 'game');
+  fs.mkdirSync(location);
+  // Windows 8.3 aliases in os.tmpdir() must not become host trust record keys.
+  const project = fs.realpathSync.native(location);
   const planned = planCreate(project, { id: 'trusted-ai-game', title: 'Trusted AI Game', lang: 'en',
     profile: 'web-game', template: 'web-basic', targets: ['yandex-games'] });
   assert.equal(applyCreatePlan(planned).status, 'APPLIED');
@@ -76,7 +78,8 @@ function newStudioGame(t) {
 function removeHostPin(project) {
   const registry = process.env.LUDORY_STUDIO_TRUST_DIR;
   assert.ok(registry);
-  const record = path.join(registry, `${crypto.createHash('sha256').update(Buffer.from(project)).digest('hex')}.json`);
+  const physical = fs.realpathSync.native(project);
+  const record = path.join(registry, `${crypto.createHash('sha256').update(Buffer.from(physical)).digest('hex')}.json`);
   assert.equal(fs.existsSync(record), true);
   fs.unlinkSync(record);
 }
