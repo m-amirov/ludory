@@ -92,7 +92,7 @@ test('CLI storage recovery requires explicit stop confirmation and preserves orp
   const fixed = await cli([...args, '--confirm-no-executor', '--apply']);
   assert.equal(fixed.result.status, 'RECOVERED');
   assert.equal(fs.existsSync(orphan), false);
-  assert.equal(fs.readFileSync(path.join(fixed.result.quarantine, 'event-pending-1234567890abcdef12345678'), 'utf8'), 'crash bytes');
+  assert.equal(fs.readFileSync(fixed.result.quarantinedFiles.find(x => x.endsWith('event-pending-1234567890abcdef12345678')), 'utf8'), 'crash bytes');
 });
 
 test('art-review dry-run does not launch Web host or mutate candidate/run', async t => {

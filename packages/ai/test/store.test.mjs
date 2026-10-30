@@ -25,7 +25,7 @@ test('interrupted journal remnants require confirmation and are quarantined with
   assert.equal(recovered.status, 'RECOVERED');
   assert.equal(fs.existsSync(pending), false);
   assert.equal(fs.existsSync(lock), false);
-  assert.deepEqual(fs.readFileSync(path.join(recovered.quarantine, 'event-pending-1234567890abcdef12345678')), bytes);
+  assert.deepEqual(fs.readFileSync(recovered.quarantinedFiles.find(x => x.endsWith('event-pending-1234567890abcdef12345678'))), bytes);
   assert.equal(readNativeRun(project, run.run.runId).integrity.ok, true);
 });
 
@@ -76,9 +76,9 @@ test('orphaned artistic review receipt is quarantined without discarding committ
   const preview = inspectNativeStorageRecovery(project, run.run.runId);
   assert.deepEqual(preview.entries.map(x => x.label), ['review-000001.json']);
   const output = applyNativeStorageRecovery(preview, { confirmNoExecutor: true });
-  assert.equal(fs.readFileSync(path.join(output.quarantine, 'review-000001.json'), 'utf8'),
+  assert.equal(fs.readFileSync(output.quarantinedFiles.find(x => x.endsWith('review-000001.json')), 'utf8'),
     'interrupted observed receipt');
-  assert.equal(fs.readdirSync(reviews).length, 0);
+  assert.equal(fs.readdirSync(reviews).filter(name => !name.startsWith('.recovered-')).length, 0);
   assert.equal(readNativeRun(project, run.run.runId).integrity.ok, true);
 });
 
@@ -94,7 +94,7 @@ test('recovery never follows a substituted event directory outside its pinned so
   const originalRename = fs.renameSync;
   let swapped = false;
   fs.renameSync = function (from, to) {
-    if (!swapped && String(to).includes('recovery-') && String(from).includes('.pending-')) {
+    if (!swapped && String(to).includes('.recovered-') && String(from).includes('.pending-')) {
       swapped = true;
       originalRename.call(fs, dir, `${dir}-original`);
       fs.symlinkSync(outside, dir, 'dir');
@@ -106,6 +106,32 @@ test('recovery never follows a substituted event directory outside its pinned so
   assert.equal(swapped, true);
   assert.equal(fs.readFileSync(path.join(outside, '.pending-1234567890abcdef12345678'), 'utf8'),
     'outside-user');
+});
+
+test('recovery never uses a replaceable quarantine directory as a rename destination', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const events = path.join(project, '.ludory', 'ai', 'runs', run.run.runId, 'events');
+  fs.writeFileSync(path.join(events, '.pending-1234567890abcdef12345678'), 'owned');
+  const preview = inspectNativeStorageRecovery(project, run.run.runId);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-recovery-destination-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(outside, 'event-pending-1234567890abcdef12345678'), 'user-owned');
+  const original = fs.renameSync;
+  let unsafeDestination = false;
+  fs.renameSync = function (from, to) {
+    if (String(from).includes('.pending-') && path.isAbsolute(String(to))) {
+      unsafeDestination = true;
+      const recoveryDir = path.dirname(to);
+      original.call(fs, recoveryDir, `${recoveryDir}-original`);
+      fs.symlinkSync(outside, recoveryDir, 'dir');
+    }
+    return original.call(fs, from, to);
+  };
+  try { applyNativeStorageRecovery(preview, { confirmNoExecutor: true }); }
+  finally { fs.renameSync = original; }
+  assert.equal(unsafeDestination, false, 'destination must stay relative to the pinned source directory');
+  assert.equal(fs.readFileSync(path.join(outside, 'event-pending-1234567890abcdef12345678'), 'utf8'), 'user-owned');
 });
 
 test('SIGKILL between event link and commit marker leaves a recoverable uncommitted tail', t => {
@@ -140,7 +166,7 @@ test('SIGKILL between event link and commit marker leaves a recoverable uncommit
   const restored = applyNativeStorageRecovery(preview, { confirmNoExecutor: true });
   assert.equal(restored.status, 'RECOVERED');
   assert.equal(readNativeRun(project, run.run.runId).events.length, 0);
-  assert.equal(fs.existsSync(path.join(restored.quarantine, 'event-000001.json')), true);
+  assert.equal(fs.existsSync(restored.quarantinedFiles.find(x => x.endsWith('event-000001.json'))), true);
 });
 
 const scope = { target: 'EP3 QA', inScope: ['src/main.js'], outOfScope: [],
