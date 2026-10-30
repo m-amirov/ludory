@@ -91,24 +91,25 @@ test('recovery never follows a substituted event directory outside its pinned so
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-recovery-outside-'));
   t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
   fs.writeFileSync(path.join(outside, '.pending-1234567890abcdef12345678'), 'outside-user');
+  const originalLink = fs.linkSync;
   const originalRename = fs.renameSync;
   let swapped = false;
-  fs.renameSync = function (from, to) {
+  fs.linkSync = function (from, to) {
     if (!swapped && String(to).includes('.recovered-') && String(from).includes('.pending-')) {
       swapped = true;
       originalRename.call(fs, dir, `${dir}-original`);
       fs.symlinkSync(outside, dir, 'dir');
     }
-    return originalRename.call(fs, from, to);
+    return originalLink.call(fs, from, to);
   };
   try { assert.throws(() => applyNativeStorageRecovery(preview, { confirmNoExecutor: true })); }
-  finally { fs.renameSync = originalRename; }
+  finally { fs.linkSync = originalLink; }
   assert.equal(swapped, true);
   assert.equal(fs.readFileSync(path.join(outside, '.pending-1234567890abcdef12345678'), 'utf8'),
     'outside-user');
 });
 
-test('recovery never uses a replaceable quarantine directory as a rename destination', t => {
+test('recovery uses a relative parent hardlink instead of an unsafe destination path', t => {
   const project = nativeProject(t);
   const run = commitNewRun(newRun(project));
   const events = path.join(project, '.ludory', 'ai', 'runs', run.run.runId, 'events');
@@ -117,21 +118,34 @@ test('recovery never uses a replaceable quarantine directory as a rename destina
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-recovery-destination-'));
   t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
   fs.writeFileSync(path.join(outside, 'event-pending-1234567890abcdef12345678'), 'user-owned');
-  const original = fs.renameSync;
-  let unsafeDestination = false;
-  fs.renameSync = function (from, to) {
-    if (String(from).includes('.pending-') && path.isAbsolute(String(to))) {
-      unsafeDestination = true;
-      const recoveryDir = path.dirname(to);
-      original.call(fs, recoveryDir, `${recoveryDir}-original`);
-      fs.symlinkSync(outside, recoveryDir, 'dir');
+  const original = fs.linkSync;
+  let unsafeDestination = false, witnessed = false;
+  fs.linkSync = function (from, to) {
+    if (String(from).includes('.pending-')) {
+      witnessed = true;
+      if (!/^\.\.\/\.recovered-[a-f0-9]{24}-event-pending-/.test(String(to))) unsafeDestination = true;
     }
     return original.call(fs, from, to);
   };
   try { applyNativeStorageRecovery(preview, { confirmNoExecutor: true }); }
-  finally { fs.renameSync = original; }
+  finally { fs.linkSync = original; }
+  assert.equal(witnessed, true);
   assert.equal(unsafeDestination, false, 'destination must stay relative to the pinned source directory');
   assert.equal(fs.readFileSync(path.join(outside, 'event-pending-1234567890abcdef12345678'), 'utf8'), 'user-owned');
+});
+
+test('a forged recovered filename cannot hide a previously committed event pair', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  commitNativeEvent(planNativeEvent(project, run.run.runId, {
+    kind: 'CHECKPOINT', stage: 'EVIDENCE_COLLECTED', outcome: 'CONTINUE', artifacts: ['src/main.js'],
+  }));
+  const events = path.join(project, '.ludory', 'ai', 'runs', run.run.runId, 'events');
+  for (const name of ['000001.json', '000001.commit.json']) {
+    fs.renameSync(path.join(events, name), path.join(events,
+      `.recovered-aaaaaaaaaaaaaaaaaaaaaaaa-event-${name}`));
+  }
+  assert.throws(() => readNativeRun(project, run.run.runId), /INTEGRITY|FOREIGN|RECOVERY/);
 });
 
 test('SIGKILL between event link and commit marker leaves a recoverable uncommitted tail', t => {

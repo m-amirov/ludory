@@ -28,7 +28,6 @@ const ARCHIVED_IMAGE_REQUEST_MODELS = new Map([
 ]);
 const IMAGE_CODES = new Set(['HOST_OBSERVED', 'IMAGE_EXECUTOR_UNVERIFIED', 'IMAGE_EXECUTOR_INTERRUPTED']);
 const ART_REVIEW_CODES = new Set(['ART_REVIEW_OBSERVED', 'ART_REVIEW_INTERRUPTED']);
-const RECOVERED_NAME = /^\.recovered-[a-f0-9]{24}-(?:lock|(?:event|review)-(?:pending-[a-f0-9]{24}|\d{6}(?:\.commit)?\.json))$/;
 
 /** Flush journal file contents and commit marker before host submission.
  * Directory-entry persistence across sudden power loss is not guaranteed. */
@@ -66,7 +65,6 @@ export function inspectNativeStorageRecovery(projectDir, runId) {
   }
   const indexed = new Map();
   for (const name of fs.readdirSync(eventsDir)) {
-    if (RECOVERED_NAME.test(name)) continue;
     if (/^\.pending-[a-f0-9]{24}$/.test(name)) collect(path.join(eventsDir, name), `event-${name.slice(1)}`);
     else if (!/^\d{6}(?:\.commit)?\.json$/.test(name)) throw new Error('NATIVE_RECOVERY_UNKNOWN_EVENT_ENTRY');
     else {
@@ -95,7 +93,6 @@ export function inspectNativeStorageRecovery(projectDir, runId) {
     safeDir(reviewsDir);
     const reviewPairs = new Map();
     for (const name of fs.readdirSync(reviewsDir)) {
-      if (RECOVERED_NAME.test(name)) continue;
       if (!/^\d{6}(?:\.commit)?\.json$/.test(name)) throw new Error('NATIVE_RECOVERY_UNKNOWN_REVIEW_ENTRY');
       const index = Number(name.slice(0, 6));
       if (!reviewPairs.has(index)) reviewPairs.set(index, {});
@@ -145,9 +142,10 @@ export function applyNativeStorageRecovery(preview, { confirmNoExecutor = false 
       if (now.dev !== stale.dev || now.ino !== stale.ino) throw new Error('NATIVE_RECOVERY_STALE_PLAN');
       process.chdir(ai);
       const aiIdentity = directoryIdentity('.');
-      fs.renameSync('.lock', quarantineName('lock'));
+      fs.linkSync('.lock', `../${quarantineName('lock')}`);
+      fs.unlinkSync('.lock');
       if (directoryIdentity(ai) !== aiIdentity) throw new Error('NATIVE_RECOVERY_DIRECTORY_CHANGED');
-      quarantinedFiles.push(path.join(ai, quarantineName('lock')));
+      quarantinedFiles.push(path.join(path.dirname(ai), quarantineName('lock')));
       process.chdir(originalCwd);
     }
     fd = fs.openSync(lock, EXCLUSIVE, 0o600);
@@ -164,8 +162,9 @@ export function applyNativeStorageRecovery(preview, { confirmNoExecutor = false 
       process.chdir(parent);
       if (directoryIdentity('.') !== identity) throw new Error('NATIVE_RECOVERY_DIRECTORY_CHANGED');
       const destination = quarantineName(entry.label);
-      fs.renameSync(path.basename(entry.file), destination);
-      quarantinedFiles.push(path.join(parent, destination));
+      fs.linkSync(path.basename(entry.file), `../${destination}`);
+      fs.unlinkSync(path.basename(entry.file));
+      quarantinedFiles.push(path.join(path.dirname(parent), destination));
       if (directoryIdentity(parent) !== identity) throw new Error('NATIVE_RECOVERY_DIRECTORY_CHANGED');
       process.chdir(originalCwd);
     }
@@ -506,8 +505,7 @@ function storage(project, create = false) {
   const runs = path.join(ai, 'runs');
   safeDir(root, { create });
   safeDir(ai, { create });
-  if (fs.readdirSync(ai).some(name => !['runs', '.lock'].includes(name) &&
-      !/^\.recovered-[a-f0-9]{24}-lock$/.test(name))) {
+  if (fs.readdirSync(ai).some(name => !['runs', '.lock'].includes(name))) {
     throw new Error('NATIVE_STORAGE_FOREIGN_PATH');
   }
   safeDir(runs, { create });
@@ -526,8 +524,7 @@ function withLock(project, expectedSource, fn) {
     if (directoryIdentity('.') !== expectedSource.rootIdentity) throw new Error('NATIVE_SOURCE_ROOT_CHANGED');
     enterDirectory('.ludory', true);
     aiIdentity = enterDirectory('ai', true);
-    if (fs.readdirSync('.').some(name => !['runs', '.lock'].includes(name) &&
-        !/^\.recovered-[a-f0-9]{24}-lock$/.test(name))) {
+    if (fs.readdirSync('.').some(name => !['runs', '.lock'].includes(name))) {
       throw new Error('NATIVE_STORAGE_FOREIGN_PATH');
     }
     try { fd = fs.openSync('.lock', EXCLUSIVE, 0o600); }
@@ -714,7 +711,7 @@ export function readNativeRun(projectDir, runRef = 'latest') {
   if (run.projectId !== currentProject.manifest.id) throw new Error('NATIVE_INTEGRITY_PROJECT_BINDING');
   const eventsDir = path.join(dir, 'events');
   safeDir(eventsDir);
-  const files = fs.readdirSync(eventsDir).filter(name => !RECOVERED_NAME.test(name)).sort();
+  const files = fs.readdirSync(eventsDir).sort();
   if (files.length % 2 !== 0) throw new Error('NATIVE_INTEGRITY_EVENT_RECEIPT_MISSING');
   let precedingHash = marker.runSha256;
   let next = getPipeline(run.pipeline).stages[0].id;
@@ -938,7 +935,7 @@ function readArtReceiptEntries(project, runId, projectId) {
     throw new Error('ART_REVIEW_INTEGRITY_DIRECTORY');
   }
   safeDir(directory);
-  const files = fs.readdirSync(directory).filter(name => !RECOVERED_NAME.test(name)).sort();
+  const files = fs.readdirSync(directory).sort();
   if (files.length % 2) throw new Error('ART_REVIEW_INTEGRITY_SEQUENCE');
   const history = [];
   let previous = null;
@@ -1059,7 +1056,7 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
       summary: report.summary, findings: report.findings };
     checkedRunDir(source.project, current.run.runId);
     withinDirectory(current.run.runId, false, () => withinDirectory('reviews', true, () => {
-      if (fs.readdirSync('.').filter(name => !RECOVERED_NAME.test(name)).length !== index * 2 - 2) {
+      if (fs.readdirSync('.').length !== index * 2 - 2) {
         throw new Error('ART_REVIEW_INTEGRITY_SEQUENCE');
       }
       const prefix = String(index).padStart(6, '0');
