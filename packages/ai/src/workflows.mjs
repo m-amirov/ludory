@@ -279,6 +279,11 @@ export function executeWorkflow(plan, { apply = false, executor } = {}) {
       (plan.status === 'READY' || plan.operation === 'recover-storage')) {
     const origin = verifyStudioOrigin(plan.project);
     if (!origin.ok) throw new Error(`NATIVE_${origin.code}`);
+    // The exported preview can be edited by its caller. Bind every write plan
+    // to the same origin that was verified, not merely to the outer preview.
+    const mutationProject = plan.operation === 'recover-storage' ? plan.inventory?.project
+      : plan.operation === 'cycle' ? plan.project : plan.nativePlan?.project;
+    if (mutationProject !== plan.project) throw new Error('NATIVE_WORKFLOW_TARGET_MISMATCH');
   }
   if (plan.operation === 'recover-storage') {
     if (!apply || plan.status === 'CLEAN') return plan;

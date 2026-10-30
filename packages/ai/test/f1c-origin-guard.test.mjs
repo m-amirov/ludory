@@ -7,7 +7,8 @@ import crypto from 'node:crypto';
 import { nativeProject, newStudioAiProject } from './helpers/project.mjs';
 import { hasStudioCreationReceipt } from '../src/executor.mjs';
 import { planWorkflow, executeWorkflow } from '../src/workflows.mjs';
-import { planNewRun, commitNewRun, planNativeEvent, commitNativeEvent, readNativeRun } from '../src/store.mjs';
+import { planNewRun, commitNewRun, planNativeEvent, commitNativeEvent, readNativeRun,
+  inspectNativeStorageRecovery } from '../src/store.mjs';
 import { planCreate, applyCreatePlan } from '../../studio/src/scaffold.mjs';
 import { planTaskRoute } from '../src/task-routing.mjs';
 import { planDevDraft } from '../src/draft-tasks.mjs';
@@ -168,6 +169,68 @@ test('an already approved Studio start plan cannot apply after its host pin is r
   assert.throws(() => executeWorkflow(preview, { apply: true }), /NATIVE_STUDIO_ORIGIN_TRUST_MISSING/);
   assert.equal(treeFingerprint(project), before);
   assert.equal(fs.existsSync(path.join(project, '.ludory')), false);
+});
+
+test('a trusted start preview cannot commit a substituted foreign native run', t => {
+  const { project: trusted } = newStudioGame(t);
+  const foreign = nativeProject(t);
+  const preview = planWorkflow(trusted, 'start', startOptions);
+  assert.equal(preview.status, 'READY');
+  const foreignPlan = planNewRun(foreign, { pipeline: 'audit-repair-loop', scope: {
+    target: startOptions.target, inScope: [startOptions.inScope], outOfScope: [],
+    acceptanceContract: startOptions.acceptance, mutationBoundary: startOptions.mutationBoundary,
+  } });
+  const before = treeFingerprint(foreign);
+  assert.throws(() => executeWorkflow({ ...preview, nativePlan: foreignPlan }, { apply: true }),
+    /NATIVE_WORKFLOW_TARGET_MISMATCH/);
+  assert.equal(treeFingerprint(foreign), before);
+  assert.equal(fs.existsSync(path.join(foreign, '.ludory')), false);
+});
+
+test('a trusted manual continue preview cannot commit a foreign event', t => {
+  const { project: trusted } = newStudioGame(t);
+  const trustedRun = executeWorkflow(planWorkflow(trusted, 'start', startOptions), { apply: true });
+  const foreign = nativeProject(t);
+  const foreignRun = commitNewRun(planNewRun(foreign, { pipeline: 'audit-repair-loop', scope: {
+    target: startOptions.target, inScope: [startOptions.inScope], outOfScope: [],
+    acceptanceContract: startOptions.acceptance, mutationBoundary: startOptions.mutationBoundary,
+  } }));
+  const foreignPlan = planNativeEvent(foreign, foreignRun.run.runId, {
+    kind: 'ACTION_REQUESTED', stage: foreignRun.nextStage,
+  });
+  const preview = planWorkflow(trusted, 'continue', { run: trustedRun.runId });
+  assert.equal(preview.status, 'READY');
+  const before = treeFingerprint(foreign);
+  assert.throws(() => executeWorkflow({ ...preview, nativePlan: foreignPlan }, { apply: true }),
+    /NATIVE_WORKFLOW_TARGET_MISMATCH/);
+  assert.equal(treeFingerprint(foreign), before);
+  assert.equal(readNativeRun(foreign, foreignRun.run.runId).events.length, 0);
+});
+
+test('a trusted storage-recovery preview cannot quarantine a foreign run inventory', t => {
+  const { project: trusted } = newStudioGame(t);
+  const trustedRun = executeWorkflow(planWorkflow(trusted, 'start', startOptions), { apply: true });
+  const foreign = nativeProject(t);
+  const foreignRun = commitNewRun(planNewRun(foreign, { pipeline: 'audit-repair-loop', scope: {
+    target: startOptions.target, inScope: [startOptions.inScope], outOfScope: [],
+    acceptanceContract: startOptions.acceptance, mutationBoundary: startOptions.mutationBoundary,
+  } }));
+  const orphanName = '.pending-1234567890abcdef12345678';
+  for (const [project, runId] of [[trusted, trustedRun.runId], [foreign, foreignRun.run.runId]]) {
+    fs.writeFileSync(path.join(project, '.ludory', 'ai', 'runs', runId, 'events', orphanName),
+      'pending bytes\n');
+  }
+  const inventory = inspectNativeStorageRecovery(foreign, foreignRun.run.runId);
+  const preview = planWorkflow(trusted, 'recover-storage', {
+    run: trustedRun.runId, confirmNoExecutor: true,
+  });
+  assert.equal(preview.status, 'NEEDS_CONFIRMATION');
+  const before = treeFingerprint(foreign);
+  assert.throws(() => executeWorkflow({ ...preview, inventory }, { apply: true }),
+    /NATIVE_WORKFLOW_TARGET_MISMATCH/);
+  assert.equal(treeFingerprint(foreign), before);
+  assert.equal(fs.existsSync(path.join(foreign, '.ludory', 'ai', 'runs',
+    foreignRun.run.runId, 'events', orphanName)), true);
 });
 
 test('an already approved Studio start plan cannot apply after pinned state changes', t => {
