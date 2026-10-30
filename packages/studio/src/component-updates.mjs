@@ -142,7 +142,7 @@ function verifyOwnershipHistory(project, installed, receipt) {
     const proof = JSON.parse(bytes.toString('utf8'));
     exact(proof, ['schemaVersion', 'beforeSha256', 'afterSha256', 'backupSlot'], 'component transition');
     if (proof.schemaVersion !== 1 || !hashPattern.test(proof.beforeSha256) ||
-        !hashPattern.test(proof.afterSha256) || !/^backup\/[0-9]{1,4}$/.test(proof.backupSlot) ||
+        !hashPattern.test(proof.afterSha256) || !/^(?:backup\/|backup-)[0-9]{1,4}$/.test(proof.backupSlot) ||
         !encode(proof).equals(bytes)) throw new Error('Invalid component transition proof');
     if (!steps.has(proof.afterSha256)) steps.set(proof.afterSha256, []);
     steps.get(proof.afterSha256).push({ archive, proof });
@@ -154,8 +154,10 @@ function verifyOwnershipHistory(project, installed, receipt) {
     const valid = [];
     for (const { proof, archive } of candidates) {
       try {
-        const backupStat = fs.lstatSync(path.join(archive, 'backup'));
-        if (!backupStat.isDirectory() || backupStat.isSymbolicLink()) continue;
+        if (proof.backupSlot.includes('/')) {
+          const backupStat = fs.lstatSync(path.join(archive, 'backup'));
+          if (!backupStat.isDirectory() || backupStat.isSymbolicLink()) continue;
+        }
         const prior = parseState(secureFile(path.join(archive, ...proof.backupSlot.split('/')), 'prior component state'));
         if (prior.sha256 === proof.beforeSha256) valid.push(prior);
       } catch { /* An aborted transaction may not yet have backed up its state. */ }
@@ -390,12 +392,29 @@ export function acceptComponentTrust(preview, confirmedSha256) {
   return { ...fresh, status: 'TRUSTED' };
 }
 function stagedFile(newDirectory, relative, bytes, mode = 0o600) {
-  const filename = path.join(newDirectory, relative);
+  const filename = path.isAbsolute(relative) ? relative : path.join(newDirectory, relative);
   const fd = fs.openSync(filename, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL |
     (fs.constants.O_NOFOLLOW || 0), mode);
   try { fs.writeFileSync(fd, bytes); fs.fsyncSync(fd); }
   finally { fs.closeSync(fd); }
   return filename;
+}
+function sameInode(stat, expected) {
+  return Boolean(expected) && stat.dev === expected.dev && stat.ino === expected.ino;
+}
+
+function verifiedBackupBytes(backup, expectedIdentity) {
+  const fd = fs.openSync(backup, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+  try {
+    const stat = fs.fstatSync(fd, { bigint: true });
+    if (!stat.isFile() || !sameInode(stat, expectedIdentity) || stat.nlink !== 1n) {
+      throw new Error(`Changed component backup identity: ${backup}`);
+    }
+    // The original inode can receive legitimate writes through a preexisting
+    // editor handle after it was moved to backup. Preserve those bytes during
+    // rollback; ownership hashes will independently block the next update.
+    return fs.readFileSync(fd);
+  } finally { fs.closeSync(fd); }
 }
 function syncFile(filename) {
   // FlushFileBuffers requires a writable Windows file handle; an O_RDONLY
@@ -548,7 +567,12 @@ export function applyComponentPlan(plan) {
       if (hash(checkedFile(project, name)) !== expected) throw new Error(`Managed file changed after preview: ${name}`);
     }
     const staged = [];
+    // On Windows a held stage root cannot be renamed, but a held *child*
+    // directory can be (observed in native NTFS CI). Store all transaction
+    // files directly under that held root, never under swappable children.
+    const flatArchive = process.platform === 'win32';
     let directoryPaths;
+    let stageSlot;
     // All initial archive writes must be anchored to the original project
     // CWD on Windows. Creating the directory under that CWD and then using
     // its absolute path leaves a post-mkdtemp pathname-swap window.
@@ -558,23 +582,35 @@ export function applyComponentPlan(plan) {
       retainedBackup = stage;
       const stageHandle = heldDirectory(stageWithinCwd, anchoredStage);
       held.push(stageHandle);
-      for (const dirname of ['new', 'backup', 'quarantine']) fs.mkdirSync(path.join(stageWithinCwd, dirname));
+      if (!flatArchive) {
+        for (const dirname of ['new', 'backup', 'quarantine']) fs.mkdirSync(path.join(stageWithinCwd, dirname));
+      }
       directories = Object.fromEntries(['new', 'backup', 'quarantine'].map(dirname => {
-        const handle = heldDirectory(path.join(stageWithinCwd, dirname), path.join(anchoredStage, dirname));
+        const handle = flatArchive
+          ? heldDirectory(stageWithinCwd, anchoredStage)
+          : heldDirectory(path.join(stageWithinCwd, dirname), path.join(anchoredStage, dirname));
         held.push(handle);
         return [dirname, handle];
       }));
       directoryPaths = Object.fromEntries(Object.entries(directories).map(([key, item]) => [key, item.anchor]));
+      stageSlot = (kind, index, pinned = false) => flatArchive
+        ? path.join(pinned ? stageWithinCwd : anchoredStage, `${kind}-${index}`)
+        : path.join(pinned ? path.join(stageWithinCwd, kind) : directoryPaths[kind], String(index));
       for (const [i, name] of [...changes, stateName].entries()) {
         const isState = name === stateName;
         const bytes = isState ? fresh._snapshot.nextStateBytes : fresh._snapshot.assets.get(name);
         const newFile = fresh._snapshot.newFiles.has(name);
         const dest = isState ? path.join(project, stateName) : checkedParent(project, name);
         const stat = newFile ? null : fs.lstatSync(dest);
-        stagedFile(path.join(stageWithinCwd, 'new'), String(i), bytes,
+        const stagedName = stagedFile(path.dirname(stageSlot('new', i, true)), path.basename(stageSlot('new', i, true)), bytes,
           stat ? Number(stat.mode & 0o777) : 0o600);
-        staged.push({ name, isState, newFile, dest, bytes, staged: path.join(directoryPaths.new, String(i)),
-          backup: path.join(directoryPaths.backup, String(i)), oldExpected: isState ? installed.sha256 : installed.state.files[name] });
+        const stagedStat = fs.lstatSync(stagedName, { bigint: true });
+        if (!stagedStat.isFile() || stagedStat.isSymbolicLink() || stagedStat.nlink !== 1n) {
+          throw new Error(`Unsafe staged component: ${name}`);
+        }
+        staged.push({ name, isState, newFile, dest, bytes, staged: stageSlot('new', i),
+          stagedIdentity: { dev: stagedStat.dev, ino: stagedStat.ino },
+          backup: stageSlot('backup', i), oldExpected: isState ? installed.sha256 : installed.state.files[name] });
       }
 
       // Record recovery metadata before any game publication, in the same
@@ -583,7 +619,7 @@ export function applyComponentPlan(plan) {
         schemaVersion: 1,
         entries: staged.map((item, index) => ({
           path: item.name,
-          backup: item.newFile ? null : `backup/${index}`,
+          backup: item.newFile ? null : flatArchive ? `backup-${index}` : `backup/${index}`,
           previousSha256: item.newFile ? null : item.oldExpected,
         })),
       }, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
@@ -592,7 +628,7 @@ export function applyComponentPlan(plan) {
         schemaVersion: 1,
         beforeSha256: installed.sha256,
         afterSha256: hash(fresh._snapshot.nextStateBytes),
-        backupSlot: `backup/${stateSlot}`,
+        backupSlot: flatArchive ? `backup-${stateSlot}` : `backup/${stateSlot}`,
       }), { flag: 'wx', mode: 0o600 });
       syncFile(path.join(stageWithinCwd, 'backup-index.json'));
       syncFile(path.join(stageWithinCwd, transitionName));
@@ -618,7 +654,7 @@ export function applyComponentPlan(plan) {
         throw new Error('Component transaction directory changed during apply');
       }
       for (const [name, handle] of Object.entries(directories)) {
-        const disk = fs.lstatSync(path.join(stage, name), { bigint: true });
+        const disk = fs.lstatSync(flatArchive ? stage : path.join(stage, name), { bigint: true });
         const open = fs.fstatSync(handle.fd, { bigint: true });
         if (!disk.isDirectory() || disk.isSymbolicLink() || disk.dev !== open.dev || disk.ino !== open.ino) {
           throw new Error(`Component transaction ${name} directory changed during apply`);
@@ -635,24 +671,40 @@ export function applyComponentPlan(plan) {
         // Move original bytes to same-filesystem backup before publishing.
         // This path is anchored to the validated parent, not re-resolved
         // through an attacker-swapped project-relative directory.
+        const originalStat = item.newFile ? null : fs.lstatSync(basename, { bigint: true });
         if (!item.newFile) fs.renameSync(basename, item.backup);
         const operation = { ...item, exposed: false,
-          quarantine: path.join(directoryPaths.quarantine, String(index)) };
+          quarantine: stageSlot('quarantine', index) };
         operations.push(operation);
         if (!item.newFile) {
+          const backupStat = fs.lstatSync(item.backup, { bigint: true });
+          if (!backupStat.isFile() || backupStat.isSymbolicLink() || backupStat.nlink !== 1n ||
+              !sameInode(backupStat, originalStat)) {
+            throw new Error(`Component backup inode changed after move: ${item.name}`);
+          }
+          operation.backupIdentity = { dev: backupStat.dev, ino: backupStat.ino };
+          operation.backupMode = Number(backupStat.mode & 0o777n);
           syncDirectory(directories.backup.fd);
           syncFile(item.backup);
         }
         if (!item.newFile && hash(fs.readFileSync(item.backup)) !== item.oldExpected) {
           throw new Error(`Managed file changed during replace: ${item.name}`);
         }
+        const stagedStat = fs.lstatSync(item.staged, { bigint: true });
+        if (!stagedStat.isFile() || stagedStat.isSymbolicLink() || stagedStat.nlink !== 1n ||
+            !sameInode(stagedStat, item.stagedIdentity) || hash(fs.readFileSync(item.staged)) !== hash(item.bytes)) {
+          throw new Error(`Changed staged component identity before publish: ${item.name}`);
+        }
         fs.linkSync(item.staged, basename);
-        syncFile(basename);
         const published = fs.lstatSync(basename, { bigint: true });
         operation.publishedIdentity = { dev: published.dev, ino: published.ino };
         operation.exposed = true;
+        if (!published.isFile() || published.isSymbolicLink() || !sameInode(published, item.stagedIdentity)) {
+          throw new Error(`Changed staged component identity during publish: ${item.name}`);
+        }
+        syncFile(basename);
       });
-      const disk = fs.lstatSync(path.join(stage, 'new'), { bigint: true });
+      const disk = fs.lstatSync(flatArchive ? stage : path.join(stage, 'new'), { bigint: true });
       const handleStat = fs.fstatSync(directories.new.fd, { bigint: true });
       if (!disk.isDirectory() || disk.isSymbolicLink() || disk.dev !== handleStat.dev || disk.ino !== handleStat.ino) {
         throw new Error('Component transaction new directory changed during apply');
@@ -680,6 +732,11 @@ export function applyComponentPlan(plan) {
           throw new Error(`Published component changed before commit: ${item.name}`);
         }
         fs.unlinkSync(item.staged);
+        const soleLink = fs.lstatSync(basename, { bigint: true });
+        if (!soleLink.isFile() || soleLink.isSymbolicLink() || soleLink.nlink !== 1n ||
+            !sameInode(soleLink, item.publishedIdentity)) {
+          throw new Error(`Published component retained an external hardlink: ${item.name}`);
+        }
         syncDirectory(directories.new.fd);
       });
     }
@@ -707,8 +764,9 @@ export function applyComponentPlan(plan) {
             const moved = fs.lstatSync(op.quarantine, { bigint: true });
             if (!moved.isFile() || moved.isSymbolicLink() || moved.dev !== op.publishedIdentity.dev || moved.ino !== op.publishedIdentity.ino ||
                 hash(fs.readFileSync(op.quarantine)) !== hash(op.bytes)) {
-              try { fs.linkSync(op.quarantine, basename); }
-              catch { /* Retained in quarantine even when a new entry collides. */ }
+              // Never re-link by the quarantine pathname after detecting a
+              // conflict. Even a matching inode check has a race before
+              // linkSync; preserve the archived edit and lock for recovery.
               throw new Error(`Modified replacement retained for recovery: ${op.name}`);
             }
           } else if (fs.existsSync(basename)) {
@@ -718,8 +776,8 @@ export function applyComponentPlan(plan) {
             // Restore exclusively into a DIFFERENT inode. Keep the original
             // backup forever: a concurrent editor may keep writing through
             // its old handle even after a successful rollback.
-            fs.copyFileSync(op.backup, basename, fs.constants.COPYFILE_EXCL);
-            syncFile(basename);
+            const originalBytes = verifiedBackupBytes(op.backup, op.backupIdentity);
+            stagedFile('.', basename, originalBytes, op.backupMode);
           }
         });
       } catch (restoreError) { problems.push(`${op.name}: ${restoreError.message}`); }

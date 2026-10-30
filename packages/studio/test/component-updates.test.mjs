@@ -96,6 +96,10 @@ test('Windows-style directory and read-only descriptor fsync errors do not preve
     assert.equal(applied.status, 'APPLIED');
     assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 2;\n');
     assert.equal(previewComponentTrust(f.project).status, 'IN_SYNC');
+    const archive = applied.backupDirectory;
+    assert.equal(fs.readdirSync(archive).some(name => ['new', 'backup', 'quarantine'].includes(name)), false);
+    const index = JSON.parse(fs.readFileSync(path.join(archive, 'backup-index.json'), 'utf8'));
+    assert.ok(index.entries.some(entry => /^backup-[0-9]+$/.test(entry.backup ?? '')));
   } finally {
     Object.defineProperty(process, 'platform', originalPlatform);
     fs.openSync = originalOpen;
@@ -697,21 +701,22 @@ test('restore failure retains the original backup and lock for manual recovery',
   fs.writeFileSync(path.join(f.project, 'user.txt'), 'owner data');
   const plan = planComponentUpdate(f.project, { catalog: f.catalog });
   const originalLink = fs.linkSync;
-  const originalCopy = fs.copyFileSync;
+  const originalOpen = fs.openSync;
   fs.linkSync = function (src, dst, ...args) {
     if (transactionPath(src) && anchoredBasename(dst, 'ludory.components.json')) {
       throw new Error('simulated state publish failure');
     }
     return originalLink.call(this, src, dst, ...args);
   };
-  fs.copyFileSync = function (source, destination, ...args) {
-    if (physicalPath(source).includes(`${path.sep}backup${path.sep}`) && anchoredBasename(destination, 'main.js')) {
+  fs.openSync = function (filename, flags, ...args) {
+    if (anchoredBasename(filename, 'main.js') && (flags & fs.constants.O_CREAT) &&
+        (flags & fs.constants.O_EXCL)) {
       throw new Error('simulated restore failure');
     }
-    return originalCopy.call(this, source, destination, ...args);
+    return originalOpen.call(this, filename, flags, ...args);
   };
   try { assert.throws(() => applyComponentPlan(plan), /simulated state publish failure; incomplete component rollback:.*simulated restore failure/i); }
-  finally { fs.linkSync = originalLink; fs.copyFileSync = originalCopy; }
+  finally { fs.linkSync = originalLink; fs.openSync = originalOpen; }
   const archive = fs.readdirSync(f.project).find(name => name.startsWith('.ludory-components-backup-'));
   assert.ok(archive);
   const index = JSON.parse(fs.readFileSync(path.join(f.project, archive, 'backup-index.json'), 'utf8'));
@@ -766,9 +771,12 @@ test('swapped backup archive cannot move an original into an external directory'
   const originalRename = fs.renameSync;
   let swapped = false;
   fs.renameSync = function (source, destination, ...args) {
-    if (!swapped && physicalPath(destination).includes(`${path.sep}backup${path.sep}0`)) {
+    if (!swapped && (physicalPath(destination).includes(`${path.sep}backup${path.sep}0`) ||
+        /[\\/]backup-0$/.test(physicalPath(destination)))) {
       swapped = true;
-      const stage = path.dirname(path.dirname(physicalPath(destination)));
+      const destinationPath = physicalPath(destination);
+      const stage = /[\\/]backup-0$/.test(destinationPath)
+        ? path.dirname(destinationPath) : path.dirname(path.dirname(destinationPath));
       originalRename.call(this, stage, `${stage}-held`);
       fs.symlinkSync(outside, stage, 'dir');
     }
@@ -800,7 +808,7 @@ test('swapped project root during lock creation never creates a lock in the repl
     return descriptor;
   };
   try { assert.throws(() => applyComponentPlan(plan), process.platform === 'win32'
-    ? /changed|stale|identity|root|ENOENT|EPERM/i : /changed|stale|identity|root|ENOENT/i); }
+    ? /changed|stale|identity|root|ENOENT|EPERM|EBUSY/i : /changed|stale|identity|root|ENOENT/i); }
   finally { fs.openSync = originalOpen; }
   assert.equal(replaced, true);
   assert.equal(replacementEverLocked, false);
@@ -909,26 +917,126 @@ test('Windows-style replacement after creating the stage cannot receive archive 
   assert.equal(fs.readFileSync(path.join(moved, 'src', 'main.js'), 'utf8'), 'export const version = 1;\n');
 });
 
-test('Windows-held archive directories must prevent rename while publication paths rely on them', t => {
+test('Windows-held flat archive and project root must prevent rename while publication paths rely on them', t => {
   if (process.platform !== 'win32') return t.skip('Windows filesystem semantics only');
   const f = fixture(t);
   const archive = fs.mkdtempSync(path.join(f.project, '.ludory-components-backup-'));
-  const childNames = ['new', 'backup', 'quarantine'];
-  for (const name of childNames) fs.mkdirSync(path.join(archive, name));
-  const openDirectory = name => fs.openSync(name, fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0));
-  const heldFds = [openDirectory(archive), ...childNames.map(name => openDirectory(path.join(archive, name)))];
+  const heldFd = fs.openSync(archive, fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0));
   try {
-    for (const target of [archive, ...childNames.map(name => path.join(archive, name)), f.project]) {
-      assert.throws(() => fs.renameSync(target, `${target}-renamed`), /EPERM|EACCES|EBUSY/i,
-        `A held transaction directory must reject Windows rename: ${target}`);
-    }
-    for (const target of childNames.map(name => path.join(archive, name))) {
-      assert.throws(() => fs.rmdirSync(target), /EPERM|EACCES|EBUSY/i,
-        `A held transaction directory must reject Windows removal: ${target}`);
+    for (const target of [archive, f.project]) {
+      const renamed = `${target}-renamed`;
+      let moved = false;
+      let error;
+      try { fs.renameSync(target, renamed); moved = true; }
+      catch (cause) { error = cause; }
+      finally { if (moved) fs.renameSync(renamed, target); }
+      assert.equal(moved, false, `A held flat archive must reject Windows rename: ${target}`);
+      assert.match(error?.code ?? '', /^(?:EPERM|EACCES|EBUSY)$/,
+        `Unexpected filesystem error while checking Windows pin: ${target}`);
     }
   } finally {
-    for (const fd of heldFds.reverse()) fs.closeSync(fd);
+    fs.closeSync(heldFd);
   }
+});
+
+test('Windows-style flat staged file swap with identical bytes cannot publish an external hardlink', t => {
+  const f = fixture(t);
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const outside = path.join(f.root, 'outside-identical.js');
+  fs.writeFileSync(outside, 'export const version = 2;\n');
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const simulateWindows = process.platform !== 'win32';
+  const originalLink = fs.linkSync;
+  let swapped = false;
+  fs.linkSync = function (source, destination, ...args) {
+    if (!swapped && /[\\/]new-0$/.test(String(source))) {
+      swapped = true;
+      fs.renameSync(source, `${source}-held`);
+      originalLink.call(this, outside, source);
+    }
+    return originalLink.call(this, source, destination, ...args);
+  };
+  if (simulateWindows) Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' });
+  try { assert.throws(() => applyComponentPlan(plan), /staged|identity|hardlink|rollback|changed|EPERM|EBUSY/i); }
+  finally {
+    if (simulateWindows) Object.defineProperty(process, 'platform', originalPlatform);
+    fs.linkSync = originalLink;
+  }
+  assert.equal(swapped, true);
+  assert.equal(fs.readFileSync(outside, 'utf8'), 'export const version = 2;\n');
+  assert.equal(fs.existsSync(f.gameApp) && fs.statSync(f.gameApp).ino === fs.statSync(outside).ino, false);
+});
+
+test('Windows-style swapped backup slot cannot restore unrelated bytes during rollback', t => {
+  const f = fixture(t);
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const outside = path.join(f.root, 'external-backup.js');
+  fs.writeFileSync(outside, 'EXTERNAL USER CONTENT\n');
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const simulateWindows = process.platform !== 'win32';
+  const originalLink = fs.linkSync;
+  let swapped = false;
+  fs.linkSync = function (source, destination, ...args) {
+    if (!swapped && transactionPath(source) && anchoredBasename(destination, 'ludory.components.json')) {
+      swapped = true;
+      const archive = fs.readdirSync(f.project).find(name => name.startsWith('.ludory-components-backup-'));
+      const backupFile = path.join(f.project, archive, 'backup-0');
+      fs.renameSync(backupFile, `${backupFile}-original`);
+      originalLink.call(this, outside, backupFile);
+      throw new Error('forced state publish failure');
+    }
+    return originalLink.call(this, source, destination, ...args);
+  };
+  if (simulateWindows) Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' });
+  try { assert.throws(() => applyComponentPlan(plan), /forced state publish failure|EPERM|EBUSY/i); }
+  finally {
+    if (simulateWindows) Object.defineProperty(process, 'platform', originalPlatform);
+    fs.linkSync = originalLink;
+  }
+  assert.equal(swapped, true);
+  assert.equal(fs.existsSync(f.gameApp) && fs.readFileSync(f.gameApp, 'utf8') === 'EXTERNAL USER CONTENT\n', false);
+  assert.equal(fs.readFileSync(outside, 'utf8'), 'EXTERNAL USER CONTENT\n');
+  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true);
+});
+
+test('Windows-style swapped quarantine slot cannot relink an external inode into the game', t => {
+  const f = fixture(t);
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const outside = path.join(f.root, 'external-quarantine.js');
+  fs.writeFileSync(outside, 'export const version = 2;\n');
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const simulateWindows = process.platform !== 'win32';
+  const originalLink = fs.linkSync;
+  const originalRename = fs.renameSync;
+  let swapped = false;
+  fs.linkSync = function (source, destination, ...args) {
+    if (transactionPath(source) && anchoredBasename(destination, 'ludory.components.json')) {
+      throw new Error('forced rollback after first component publish');
+    }
+    return originalLink.call(this, source, destination, ...args);
+  };
+  fs.renameSync = function (source, destination, ...args) {
+    const result = originalRename.call(this, source, destination, ...args);
+    if (!swapped && /[\\/]quarantine-0$/.test(String(destination))) {
+      swapped = true;
+      originalRename.call(this, destination, `${destination}-original`);
+      originalLink.call(this, outside, destination);
+    }
+    return result;
+  };
+  if (simulateWindows) Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' });
+  try { assert.throws(() => applyComponentPlan(plan), /rollback|quarantine|modified|recovery|EPERM|EBUSY/i); }
+  finally {
+    if (simulateWindows) Object.defineProperty(process, 'platform', originalPlatform);
+    fs.linkSync = originalLink;
+    fs.renameSync = originalRename;
+  }
+  assert.equal(swapped, true);
+  assert.equal(fs.existsSync(f.gameApp) && fs.statSync(f.gameApp).ino === fs.statSync(outside).ino, false);
+  assert.equal(fs.readFileSync(outside, 'utf8'), 'export const version = 2;\n');
 });
 
 test('replacing a staged new-directory during publish blocks the transaction without external reads', t => {
@@ -941,15 +1049,22 @@ test('replacing a staged new-directory during publish blocks the transaction wit
   const originalLink = fs.linkSync;
   let swapped = false;
   fs.linkSync = function (source, destination, ...args) {
-    if (!swapped && transactionPath(source) && physicalPath(source).includes(`${path.sep}new${path.sep}`)) {
+    if (!swapped && transactionPath(source) && (physicalPath(source).includes(`${path.sep}new${path.sep}`) ||
+        /[\\/]new-[0-9]+$/.test(physicalPath(source)))) {
       swapped = true;
-      const newDir = path.dirname(physicalPath(source));
-      fs.renameSync(newDir, `${newDir}-held`);
-      fs.symlinkSync(outside, newDir, 'dir');
+      if (/[\\/]new-[0-9]+$/.test(physicalPath(source))) {
+        const originalSource = physicalPath(source);
+        fs.renameSync(originalSource, `${originalSource}-held`);
+        fs.symlinkSync(path.join(outside, '0'), originalSource, 'file');
+      } else {
+        const newDir = path.dirname(physicalPath(source));
+        fs.renameSync(newDir, `${newDir}-held`);
+        fs.symlinkSync(outside, newDir, 'dir');
+      }
     }
     return originalLink.call(this, source, destination, ...args);
   };
-  try { assert.throws(() => applyComponentPlan(plan), /changed|unsafe|rollback|conflict|symbolic/i); }
+  try { assert.throws(() => applyComponentPlan(plan), /changed|unsafe|rollback|conflict|symbolic|EPERM|EACCES|EINVAL/i); }
   finally { fs.linkSync = originalLink; }
   assert.equal(swapped, true);
   assert.equal(fs.readFileSync(path.join(outside, '0'), 'utf8'), 'outside author bytes\n');
@@ -1050,7 +1165,12 @@ test('rollback must not delete user changes arriving between verification and re
   try { assert.throws(() => applyComponentPlan(plan), /incomplete.*rollback|user edit|modified/i); }
   finally { fs.linkSync = originalLink; fs.readFileSync = originalRead; }
   assert.equal(userEdit, true);
-  assert.match(fs.readFileSync(f.gameApp, 'utf8'), /USER EDIT DURING ROLLBACK/);
+  const archive = fs.readdirSync(f.project).find(name => name.startsWith('.ludory-components-backup-'));
+  assert.ok(archive);
+  // On a post-rename race, a safe rollback retains the modified inode in
+  // quarantine instead of re-linking an untrusted pathname into the game.
+  assert.match(fs.readFileSync(path.join(f.project, archive, 'quarantine', '0'), 'utf8'), /USER EDIT DURING ROLLBACK/);
+  assert.equal(fs.existsSync(f.gameApp), false);
   assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true);
   assert.equal(planComponentUpdate(f.project, { catalog: f.catalog }).status, 'CONFLICT');
 });

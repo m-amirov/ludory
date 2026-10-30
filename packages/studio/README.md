@@ -120,8 +120,11 @@ not attempted there; NTFS power-loss durability of directory entry changes is
 not independently established. State/pin mismatch after interruption must
 block future updates until inspected. On an incomplete rollback
 the lock and archive remain for human recovery; inspect `backup-index.json`,
-affected paths and any `quarantine/` entries before correcting state. Never
-force-remove a lock while another update may still be running. Disk-full,
+affected paths and any quarantine entries before correcting state. On Windows,
+all archive slots are flat files (`new-0`, `backup-0`, `quarantine-0`, etc.)
+under the held archive directory because NTFS permits moving some open child
+directories; on POSIX, use the `new/`, `backup/`, `quarantine/` directories.
+Never force-remove a lock while another update may still be running. Disk-full,
 file-sharing, unsupported hardlink/rename and other filesystem failures are
 visible blockers, not successful updates. On Windows, inspect the actual CI
 result before relying on NTFS behavior; Linux-only checks do not certify it.
