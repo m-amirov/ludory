@@ -238,7 +238,7 @@ test('components status and update preview are read-only, apply is explicit and 
   assert.equal(result.status, 'APPLIED');
   assert.equal(fs.readFileSync(path.join(f.project, 'src/main.js'), 'utf8'), 'export const v = 2;\n');
   assert.equal(fs.readFileSync(path.join(f.project, 'my-assets.txt'), 'utf8'), 'author data');
-  assert.ok(result.backupDirectory?.startsWith(f.project));
+  assert.ok(result.backupDirectory?.startsWith(fs.realpathSync.native(f.project)));
   assert.equal(JSON.parse(cli(...args).stdout).status, 'IN_SYNC');
 });
 

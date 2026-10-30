@@ -503,7 +503,7 @@ test('manifest mutation immediately after locking aborts before any managed writ
   let injected = false;
   fs.openSync = function (filename, flags, ...args) {
     const fd = originalOpen.call(this, filename, flags, ...args);
-    if (!injected && physicalPath(filename) === path.join(f.project, '.ludory-components.lock')) {
+    if (!injected && anchoredBasename(filename, '.ludory-components.lock')) {
       injected = true;
       const modified = JSON.parse(fs.readFileSync(manifest));
       modified.version = '9.9.9';
@@ -675,7 +675,7 @@ test('secondary finalization failure retains the original publish error and lock
     return originalLink.call(this, src, dst, ...args);
   };
   fs.unlinkSync = function (filename, ...args) {
-    if (physicalPath(filename) === path.join(f.project, '.ludory-components.lock')) {
+    if (anchoredBasename(filename, '.ludory-components.lock')) {
       throw new Error('simulated final lock release failure');
     }
     return originalUnlink.call(this, filename, ...args);
@@ -774,7 +774,7 @@ test('swapped backup archive cannot move an original into an external directory'
     }
     return originalRename.call(this, source, destination, ...args);
   };
-  try { assert.throws(() => applyComponentPlan(plan), /changed|unsafe|rollback|conflict|exists|EEXIST|ELOOP|ENOENT|finalization/i); }
+  try { assert.throws(() => applyComponentPlan(plan), /changed|unsafe|rollback|conflict|exists|EEXIST|ELOOP|ENOENT|EPERM|finalization/i); }
   finally { fs.renameSync = originalRename; }
   assert.equal(swapped, true);
   assert.equal(fs.readFileSync(path.join(outside, 'backup', '0'), 'utf8'), 'external owner content\n');
@@ -799,12 +799,136 @@ test('swapped project root during lock creation never creates a lock in the repl
     if (replaced && fs.existsSync(path.join(f.project, '.ludory-components.lock'))) replacementEverLocked = true;
     return descriptor;
   };
-  try { assert.throws(() => applyComponentPlan(plan), /changed|stale|identity|root|ENOENT/i); }
+  try { assert.throws(() => applyComponentPlan(plan), process.platform === 'win32'
+    ? /changed|stale|identity|root|ENOENT|EPERM/i : /changed|stale|identity|root|ENOENT/i); }
   finally { fs.openSync = originalOpen; }
   assert.equal(replaced, true);
   assert.equal(replacementEverLocked, false);
   assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), false);
+  // Windows may refuse to rename the CWD-held original rather than allow a
+  // substitution; both a refusal and an aborted changed-root operation are safe.
+  const originalLocation = fs.existsSync(moved) ? moved : f.project;
+  assert.equal(fs.readFileSync(path.join(originalLocation, 'src', 'main.js'), 'utf8'), 'export const version = 1;\n');
+});
+
+test('Windows-style root substitution during lock acquisition never writes a lock into the replacement', t => {
+  if (process.platform === 'win32') return t.skip('Linux-only simulation of Windows pathname anchoring');
+  const f = fixture(t);
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const moved = path.join(f.root, 'moved-game');
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const originalOpen = fs.openSync;
+  let swapped = false;
+  let replacementEverLocked = false;
+  fs.openSync = function (filename, flags, ...args) {
+    if (!swapped && anchoredBasename(filename, '.ludory-components.lock')) {
+      swapped = true;
+      fs.renameSync(f.project, moved);
+      fs.mkdirSync(f.project);
+    }
+    const fd = originalOpen.call(this, filename, flags, ...args);
+    if (swapped && fs.existsSync(path.join(f.project, '.ludory-components.lock'))) replacementEverLocked = true;
+    return fd;
+  };
+  Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' });
+  try { assert.throws(() => applyComponentPlan(plan), /changed|root|stale|identity|ENOENT/i); }
+  finally {
+    Object.defineProperty(process, 'platform', originalPlatform);
+    fs.openSync = originalOpen;
+  }
+  assert.equal(swapped, true);
+  assert.equal(replacementEverLocked, false);
+  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), false);
   assert.equal(fs.readFileSync(path.join(moved, 'src', 'main.js'), 'utf8'), 'export const version = 1;\n');
+});
+
+test('Windows-style root substitution before staging cannot create an archive in the replacement', t => {
+  if (process.platform === 'win32') return t.skip('Linux-only simulation of Windows pathname anchoring');
+  const f = fixture(t);
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const moved = path.join(f.root, 'original-stage-root');
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const originalMkdtemp = fs.mkdtempSync;
+  let swapped = false;
+  let replacementEverStaged = false;
+  fs.mkdtempSync = function (prefix, ...args) {
+    if (!swapped && String(prefix).includes('.ludory-components-backup-')) {
+      swapped = true;
+      fs.renameSync(f.project, moved);
+      fs.mkdirSync(f.project);
+    }
+    const result = originalMkdtemp.call(this, prefix, ...args);
+    if (swapped && fs.readdirSync(f.project).some(name => name.startsWith('.ludory-components-backup-'))) {
+      replacementEverStaged = true;
+    }
+    return result;
+  };
+  Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' });
+  try { assert.throws(() => applyComponentPlan(plan), /changed|root|stale|identity|ENOENT/i); }
+  finally {
+    Object.defineProperty(process, 'platform', originalPlatform);
+    fs.mkdtempSync = originalMkdtemp;
+  }
+  assert.equal(swapped, true);
+  assert.equal(replacementEverStaged, false);
+  assert.equal(fs.readFileSync(path.join(moved, 'src', 'main.js'), 'utf8'), 'export const version = 1;\n');
+});
+
+test('Windows-style replacement after creating the stage cannot receive archive bytes', t => {
+  if (process.platform === 'win32') return t.skip('Linux-only simulation of Windows pathname anchoring');
+  const f = fixture(t);
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const moved = path.join(f.root, 'moved-staged-game');
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const originalLstat = fs.lstatSync;
+  let swapped = false;
+  let stagedName;
+  fs.lstatSync = function (filename, ...args) {
+    const pathValue = String(filename);
+    if (!swapped && /(?:^|[\\/])\.ludory-components-backup-[^\\/]+$/.test(pathValue)) {
+      swapped = true;
+      stagedName = path.basename(pathValue);
+      fs.renameSync(f.project, moved);
+      fs.mkdirSync(f.project);
+      fs.mkdirSync(path.join(f.project, stagedName));
+    }
+    return originalLstat.call(this, filename, ...args);
+  };
+  Object.defineProperty(process, 'platform', { ...originalPlatform, value: 'win32' });
+  try { assert.throws(() => applyComponentPlan(plan), /changed|root|stale|identity|ENOENT/i); }
+  finally {
+    Object.defineProperty(process, 'platform', originalPlatform);
+    fs.lstatSync = originalLstat;
+  }
+  assert.equal(swapped, true);
+  const replacementArchive = path.join(f.project, stagedName);
+  assert.deepEqual(fs.readdirSync(replacementArchive), []);
+  assert.equal(fs.readFileSync(path.join(moved, 'src', 'main.js'), 'utf8'), 'export const version = 1;\n');
+});
+
+test('Windows-held archive directories must prevent rename while publication paths rely on them', t => {
+  if (process.platform !== 'win32') return t.skip('Windows filesystem semantics only');
+  const f = fixture(t);
+  const archive = fs.mkdtempSync(path.join(f.project, '.ludory-components-backup-'));
+  const childNames = ['new', 'backup', 'quarantine'];
+  for (const name of childNames) fs.mkdirSync(path.join(archive, name));
+  const openDirectory = name => fs.openSync(name, fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0));
+  const heldFds = [openDirectory(archive), ...childNames.map(name => openDirectory(path.join(archive, name)))];
+  try {
+    for (const target of [archive, ...childNames.map(name => path.join(archive, name)), f.project]) {
+      assert.throws(() => fs.renameSync(target, `${target}-renamed`), /EPERM|EACCES|EBUSY/i,
+        `A held transaction directory must reject Windows rename: ${target}`);
+    }
+    for (const target of childNames.map(name => path.join(archive, name))) {
+      assert.throws(() => fs.rmdirSync(target), /EPERM|EACCES|EBUSY/i,
+        `A held transaction directory must reject Windows removal: ${target}`);
+    }
+  } finally {
+    for (const fd of heldFds.reverse()) fs.closeSync(fd);
+  }
 });
 
 test('replacing a staged new-directory during publish blocks the transaction without external reads', t => {

@@ -412,14 +412,28 @@ function syncDirectory(fd) {
   if (process.platform !== 'win32') fs.fsyncSync(fd);
 }
 
-function heldDirectory(directory) {
+// On Windows Node does not expose openat or a /proc descriptor path. A
+// basename opened relative to a verified CWD stays with the directory inode
+// when its visible pathname is swapped between validation and open.
+function withPinnedProjectCwd(project, identity, operation) {
+  const previous = process.cwd();
+  try {
+    process.chdir(project);
+    if (directoryIdentity('.') !== identity) throw new Error('Project root changed before anchored write');
+    const result = operation();
+    if (!isOriginalDirectory(project, identity)) throw new Error('Project root changed during anchored write');
+    return result;
+  } finally { process.chdir(previous); }
+}
+
+function heldDirectory(directory, visibleAnchor = directory) {
   const fd = fs.openSync(directory, fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0) |
     (fs.constants.O_NOFOLLOW || 0));
   const st = fs.fstatSync(fd);
   if (!st.isDirectory()) { fs.closeSync(fd); throw new Error(`Unsafe transaction directory: ${directory}`); }
   // Node lacks an openat API. Linux gives a race-resistant equivalent through
   // the open directory descriptor; other hosts must retain identity checks.
-  return { fd, anchor: process.platform === 'linux' ? `/proc/self/fd/${fd}` : directory };
+  return { fd, anchor: process.platform === 'linux' ? `/proc/self/fd/${fd}` : visibleAnchor };
 }
 
 function assertManifestUnchanged(project, expectedSha256) {
@@ -503,10 +517,15 @@ export function applyComponentPlan(plan) {
   let outcomeError = null;
   const operations = [];
   try {
-    const lockFd = fs.openSync(lockPath, fs.constants.O_WRONLY | fs.constants.O_CREAT |
-      fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
-    try { lockStat = fs.fstatSync(lockFd, { bigint: true }); fs.fsyncSync(lockFd); }
-    finally { fs.closeSync(lockFd); }
+    const createLock = filename => {
+      const fd = fs.openSync(filename, fs.constants.O_WRONLY | fs.constants.O_CREAT |
+        fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
+      try { const stat = fs.fstatSync(fd, { bigint: true }); fs.fsyncSync(fd); return stat; }
+      finally { fs.closeSync(fd); }
+    };
+    lockStat = process.platform === 'win32'
+      ? withPinnedProjectCwd(project, plan.rootIdentity, () => createLock(lockName))
+      : createLock(lockPath);
     // Revalidate every game byte after the exclusive transaction lock is held.
     if (!isOriginalDirectory(project, plan.rootIdentity)) throw new Error('Project directory changed before locked apply');
     assertManifestUnchanged(project, plan.manifestSha256);
@@ -528,59 +547,71 @@ export function applyComponentPlan(plan) {
     for (const [name, expected] of Object.entries(installed.state.files)) {
       if (hash(checkedFile(project, name)) !== expected) throw new Error(`Managed file changed after preview: ${name}`);
     }
-    // The archive must already have its final name. Windows may reject
-    // renaming a directory that contains a moved original still referenced
-    // by an editor handle, even though the file itself was safely moved.
-    const anchoredStage = fs.mkdtempSync(path.join(rootHandle.anchor, backupPrefix));
-    stage = path.join(project, path.basename(anchoredStage));
-    stageIdentity = directoryIdentity(stage);
-    retainedBackup = stage;
-    const stageHandle = heldDirectory(anchoredStage);
-    held.push(stageHandle);
-    for (const dirname of ['new', 'backup', 'quarantine']) fs.mkdirSync(path.join(stageHandle.anchor, dirname));
-    directories = Object.fromEntries(['new', 'backup', 'quarantine'].map(dirname => {
-      const handle = heldDirectory(path.join(stageHandle.anchor, dirname));
-      held.push(handle);
-      return [dirname, handle];
-    }));
-    const directoryPaths = Object.fromEntries(Object.entries(directories).map(([key, item]) => [key, item.anchor]));
     const staged = [];
-    for (const [i, name] of [...changes, stateName].entries()) {
-      const isState = name === stateName;
-      const bytes = isState ? fresh._snapshot.nextStateBytes : fresh._snapshot.assets.get(name);
-      const newFile = fresh._snapshot.newFiles.has(name);
-      const old = !newFile;
-      const dest = isState ? path.join(project, stateName) : checkedParent(project, name);
-      const stat = old ? fs.lstatSync(dest) : null;
-      const filename = stagedFile(directoryPaths.new, String(i), bytes, stat ? Number(stat.mode & 0o777) : 0o600);
-      staged.push({ name, isState, newFile, dest, bytes, staged: filename,
-        backup: path.join(directoryPaths.backup, String(i)), oldExpected: isState ? installed.sha256 : installed.state.files[name] });
-    }
+    let directoryPaths;
+    // All initial archive writes must be anchored to the original project
+    // CWD on Windows. Creating the directory under that CWD and then using
+    // its absolute path leaves a post-mkdtemp pathname-swap window.
+    const prepareArchive = (anchoredStage, stageWithinCwd) => {
+      stage = path.join(project, path.basename(anchoredStage));
+      stageIdentity = directoryIdentity(stageWithinCwd);
+      retainedBackup = stage;
+      const stageHandle = heldDirectory(stageWithinCwd, anchoredStage);
+      held.push(stageHandle);
+      for (const dirname of ['new', 'backup', 'quarantine']) fs.mkdirSync(path.join(stageWithinCwd, dirname));
+      directories = Object.fromEntries(['new', 'backup', 'quarantine'].map(dirname => {
+        const handle = heldDirectory(path.join(stageWithinCwd, dirname), path.join(anchoredStage, dirname));
+        held.push(handle);
+        return [dirname, handle];
+      }));
+      directoryPaths = Object.fromEntries(Object.entries(directories).map(([key, item]) => [key, item.anchor]));
+      for (const [i, name] of [...changes, stateName].entries()) {
+        const isState = name === stateName;
+        const bytes = isState ? fresh._snapshot.nextStateBytes : fresh._snapshot.assets.get(name);
+        const newFile = fresh._snapshot.newFiles.has(name);
+        const dest = isState ? path.join(project, stateName) : checkedParent(project, name);
+        const stat = newFile ? null : fs.lstatSync(dest);
+        stagedFile(path.join(stageWithinCwd, 'new'), String(i), bytes,
+          stat ? Number(stat.mode & 0o777) : 0o600);
+        staged.push({ name, isState, newFile, dest, bytes, staged: path.join(directoryPaths.new, String(i)),
+          backup: path.join(directoryPaths.backup, String(i)), oldExpected: isState ? installed.sha256 : installed.state.files[name] });
+      }
 
-    // Keep a human-readable map before publishing anything, so an interrupted
-    // operation can be inspected without guessing which numeric slot is which.
-    fs.writeFileSync(path.join(stageHandle.anchor, 'backup-index.json'), `${JSON.stringify({
-      schemaVersion: 1,
-      entries: staged.map((item, index) => ({
-        path: item.name,
-        backup: item.newFile ? null : `backup/${index}`,
-        previousSha256: item.newFile ? null : item.oldExpected,
-      })),
-    }, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
-    // Created before publication; if interrupted, no later manifest can be
-    // treated as Studio-owned without its exact prior state in this archive.
-    const stateSlot = staged.findIndex(item => item.isState);
-    fs.writeFileSync(path.join(stageHandle.anchor, transitionName), encode({
-      schemaVersion: 1,
-      beforeSha256: installed.sha256,
-      afterSha256: hash(fresh._snapshot.nextStateBytes),
-      backupSlot: `backup/${stateSlot}`,
-    }), { flag: 'wx', mode: 0o600 });
-    syncFile(path.join(stageHandle.anchor, 'backup-index.json'));
-    syncFile(path.join(stageHandle.anchor, transitionName));
-    for (const item of Object.values(directories)) syncDirectory(item.fd);
-    syncDirectory(stageHandle.fd);
-    syncDirectory(rootHandle.fd);
+      // Record recovery metadata before any game publication, in the same
+      // original archive inode as the newly staged asset bytes.
+      fs.writeFileSync(path.join(stageWithinCwd, 'backup-index.json'), `${JSON.stringify({
+        schemaVersion: 1,
+        entries: staged.map((item, index) => ({
+          path: item.name,
+          backup: item.newFile ? null : `backup/${index}`,
+          previousSha256: item.newFile ? null : item.oldExpected,
+        })),
+      }, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
+      const stateSlot = staged.findIndex(item => item.isState);
+      fs.writeFileSync(path.join(stageWithinCwd, transitionName), encode({
+        schemaVersion: 1,
+        beforeSha256: installed.sha256,
+        afterSha256: hash(fresh._snapshot.nextStateBytes),
+        backupSlot: `backup/${stateSlot}`,
+      }), { flag: 'wx', mode: 0o600 });
+      syncFile(path.join(stageWithinCwd, 'backup-index.json'));
+      syncFile(path.join(stageWithinCwd, transitionName));
+      for (const item of Object.values(directories)) syncDirectory(item.fd);
+      syncDirectory(stageHandle.fd);
+      syncDirectory(rootHandle.fd);
+    };
+    // The archive must already have its final name. Windows may reject
+    // renaming an archive with held directory handles, even when a managed
+    // file's original inode stays open in an editor.
+    if (process.platform === 'win32') {
+      withPinnedProjectCwd(project, plan.rootIdentity, () => {
+        const stageWithinCwd = fs.mkdtempSync(backupPrefix);
+        prepareArchive(fs.realpathSync.native(stageWithinCwd), stageWithinCwd);
+      });
+    } else {
+      const anchoredStage = fs.mkdtempSync(path.join(rootHandle.anchor, backupPrefix));
+      prepareArchive(anchoredStage, anchoredStage);
+    }
 
     for (const [index, item] of staged.entries()) {
       if (!isOriginalDirectory(project, plan.rootIdentity) || directoryIdentity(stage) !== stageIdentity) {
