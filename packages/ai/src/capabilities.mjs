@@ -22,14 +22,18 @@ export function ownData(record, key) {
 
 function normalizeHost(record, kind) {
   if (kind === 'webDev' && isRecord(record) && ownData(record, 'browserObservationV2Available') === true) {
+    const preflight = ownData(record, 'preflight');
     if (ownData(record, 'available') !== true || ownData(record, 'reasonCode') !== 'AVAILABLE' ||
         ownData(record, 'routeAvailable') !== 'web-dev' || ownData(record, 'modelRouteAvailable') !== 'chatgpt-web/gpt-6-sol' ||
-        ownData(record, 'reasoningRequired') !== 'high' || !isRecord(ownData(record, 'preflight'))) {
+        ownData(record, 'reasoningRequired') !== 'high' || !isRecord(preflight) ||
+        ownData(preflight, 'authenticated') !== true || ownData(preflight, 'newChat') !== true ||
+        ownData(preflight, 'solAvailable') !== true ||
+        typeof ownData(preflight, 'url') !== 'string' || !ownData(preflight, 'url')) {
       return unavailable('AI_ROUTING_WEB_OBSERVATION_V2_UNVERIFIED');
     }
     return { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
       modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
-      reasoningRequired: 'high', preflight: ownData(record, 'preflight'), inspect: ownData(record, 'inspect') };
+      reasoningRequired: 'high', preflight, inspect: ownData(record, 'inspect') };
   }
   const modelObserved = ownData(record, 'modelObserved');
   const available = ownData(record, 'available');
