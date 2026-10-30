@@ -172,7 +172,7 @@ static napi_value create_guard(napi_env env, napi_callback_info info) {
   pin_unicode name = { (USHORT)(length * sizeof(wchar_t)),
       (USHORT)((length + 1) * sizeof(wchar_t)), filename };
   pin_object_attributes attributes = { sizeof(pin_object_attributes), parent->handle,
-      &name, 0x40 /* OBJ_CASE_INSENSITIVE */, NULL, NULL };
+      &name, 0x40 | 0x1000 /* OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE */, NULL, NULL };
   pin_io_status status = {0};
   HANDLE handle = INVALID_HANDLE_VALUE;
   LONG outcome = create_file(&handle, FILE_READ_DATA | FILE_WRITE_DATA | FILE_READ_ATTRIBUTES |

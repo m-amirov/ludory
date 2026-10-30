@@ -22,10 +22,20 @@
    project/managed/archive directory. No full-path guard creation in an empty
    directory is accepted as race-free. Reject stale addon protocol versions.
 3. Delete guards by the same native HANDLE only after safe finalization; retain
-   guards, backup and lock on incomplete rollback. Test both `GENERIC_WRITE`
+   guards, backup and lock on incomplete rollback. A verification error after
+   native guard creation is sticky even if there were no managed publications
+   to undo: retain the lock for orphan-guard recovery. Test both `GENERIC_WRITE`
    and attribute-only junction injection on Windows Node 22/24.
 4. Keep Draft until the exact final SHA passes all four CI matrix jobs and an
    independent security review confirms the file-guard lifetime contract.
+5. Probe the additional empty-stage window immediately after `mkdtempSync`
+   and before acquiring the stage pin. A successful outside junction must
+   abort without creating metadata outside, and retain the recovery lock.
+   Also inject after the native stage pin but immediately before its
+   `NtCreateFile(RootDirectory=held)` guard creation; prove no guard is ever
+   written through the malicious junction.
+   Use `OBJ_DONT_REPARSE` as defense-in-depth on handle-relative guard creation;
+   do not treat that flag alone as a proven security boundary.
 
 ## Task 2 — Native addon onboarding (bounded)
 

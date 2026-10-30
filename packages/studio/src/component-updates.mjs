@@ -541,6 +541,7 @@ export function applyComponentPlan(plan) {
   let directories = null;
   let stageIdentity = null;
   let rollbackComplete = true;
+  let guardIntegrityFailure = false;
   let retainedBackup = null;
   let outcomeError = null;
   const operations = [];
@@ -554,6 +555,7 @@ export function applyComponentPlan(plan) {
       catch (error) {
         // A handle-relative create may have succeeded even if its follow-up
         // visible-path verification fails; retain the lock for recovery.
+        guardIntegrityFailure = true;
         rollbackComplete = false;
         throw error;
       }
@@ -571,6 +573,8 @@ export function applyComponentPlan(plan) {
     lockStat = process.platform === 'win32'
       ? withPinnedProjectCwd(project, plan.rootIdentity, () => createLock(lockName))
       : createLock(lockPath);
+    // Do not mutate project contents before the exclusive lock. The existing
+    // ownership state/manifest keep the root nonempty during lock creation.
     guardDirectory(rootHandle, project);
     // Revalidate every game byte after the exclusive transaction lock is held.
     if (!isOriginalDirectory(project, plan.rootIdentity)) throw new Error('Project directory changed before locked apply');
@@ -624,7 +628,7 @@ export function applyComponentPlan(plan) {
     // CWD on Windows. Creating the directory under that CWD and then using
     // its absolute path leaves a post-mkdtemp pathname-swap window.
     const prepareArchive = (anchoredStage, stageWithinCwd) => {
-      stage = path.join(project, path.basename(anchoredStage));
+      stage = path.join(project, path.basename(stageWithinCwd));
       stageIdentity = directoryIdentity(stageWithinCwd);
       retainedBackup = stage;
       const stageHandle = heldDirectory(stageWithinCwd, anchoredStage);
@@ -690,7 +694,15 @@ export function applyComponentPlan(plan) {
     if (process.platform === 'win32') {
       withPinnedProjectCwd(project, plan.rootIdentity, () => {
         const stageWithinCwd = fs.mkdtempSync(backupPrefix);
-        prepareArchive(fs.realpathSync.native(stageWithinCwd), stageWithinCwd);
+        stage = path.join(project, path.basename(stageWithinCwd));
+        try { prepareArchive(fs.realpathSync.native(stageWithinCwd), stageWithinCwd); }
+        catch (error) {
+          // An empty, newly created archive may have been changed to a
+          // junction before its first native handle could be acquired.
+          // Preserve the transaction lock and do not write through that path.
+          guardIntegrityFailure = true;
+          throw error;
+        }
       });
     } else {
       const anchoredStage = fs.mkdtempSync(path.join(rootHandle.anchor, backupPrefix));
@@ -830,7 +842,10 @@ export function applyComponentPlan(plan) {
         });
       } catch (restoreError) { problems.push(`${op.name}: ${restoreError.message}`); }
     }
-    rollbackComplete = problems.length === 0;
+    // Guard integrity failure is sticky: if creating a native guard succeeded
+    // but its visible verification failed, an untracked guard may remain even
+    // when there were no managed operations to roll back. Keep the lock.
+    rollbackComplete = problems.length === 0 && !guardIntegrityFailure;
     if (problems.length) {
       outcomeError = new Error(`${error.message}; incomplete component rollback: ${problems.join('; ')}; recover from ${stage}`,
         { cause: error });

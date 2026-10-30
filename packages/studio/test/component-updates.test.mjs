@@ -1075,6 +1075,124 @@ test('Windows-native pinned parents must permit ordinary child reads, metadata a
   }
 });
 
+test('Windows native guard post-create verification failure retains the lock and author bytes', t => {
+  if (process.platform !== 'win32') return t.skip('Requires Windows native guard creation');
+  const f = fixture(t);
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const originalLstat = fs.lstatSync;
+  let injected = false;
+  fs.lstatSync = function (filename, ...args) {
+    if (!injected && path.dirname(String(filename)) === path.join(f.project, 'src') &&
+        /^\.ludory-components-guard-[0-9a-f]{32}$/.test(path.basename(String(filename)))) {
+      injected = true;
+      throw new Error('injected native guard verification failure after creation');
+    }
+    return originalLstat.call(this, filename, ...args);
+  };
+  try {
+    assert.throws(() => applyComponentPlan(plan), /injected native guard verification failure/);
+  } finally { fs.lstatSync = originalLstat; }
+  assert.equal(injected, true);
+  assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 1;\n');
+  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true,
+    'An untracked anchored guard may exist: transaction lock must be retained');
+  assert.equal(fs.readdirSync(path.join(f.project, 'src'))
+    .some(name => /^\.ludory-components-guard-[0-9a-f]{32}$/.test(name)), true);
+});
+
+test('Windows empty archive junction before its native pin cannot receive metadata or release recovery lock', t => {
+  if (process.platform !== 'win32') return t.skip('Requires actual NTFS stage creation race');
+  const f = fixture(t);
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const outside = path.join(f.root, 'external-archive-author');
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'do-not-edit.txt'), 'EXTERNAL ARCHIVE AUTHOR BYTES\n');
+  const originalMkdtemp = fs.mkdtempSync;
+  const script = fileURLToPath(new URL('./fixtures/windows-junction-in-place.ps1', import.meta.url));
+  let stage;
+  let injection;
+  fs.mkdtempSync = function (prefix, ...args) {
+    const created = originalMkdtemp.call(this, prefix, ...args);
+    if (!injection && /^\.ludory-components-backup-/.test(String(prefix))) {
+      stage = path.resolve(created);
+      injection = spawnSync('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script,
+        '-Source', stage, '-Target', outside, '-AccessMode', 'Attributes',
+      ], { cwd: f.root, encoding: 'utf8', timeout: 30000 });
+    }
+    return created;
+  };
+  let failure;
+  try { applyComponentPlan(plan); }
+  catch (error) { failure = error; }
+  finally {
+    fs.mkdtempSync = originalMkdtemp;
+    if (stage && fs.lstatSync(stage).isSymbolicLink()) fs.rmdirSync(stage);
+  }
+  assert.ok(injection, 'Did not reach archive creation window');
+  assert.equal(injection.error, undefined);
+  assert.equal(injection.status, 0,
+    `Unpinned empty archive junction injection unavailable: ${injection.stdout} ${injection.stderr}`);
+  assert.equal(injection.stdout.trim(), 'CREATED');
+  assert.ok(failure, 'Reparse substitution of an empty unguarded archive must abort before writes');
+  assert.equal(fs.readFileSync(path.join(outside, 'do-not-edit.txt'), 'utf8'),
+    'EXTERNAL ARCHIVE AUTHOR BYTES\n');
+  assert.deepEqual(fs.readdirSync(outside), ['do-not-edit.txt'],
+    'No backup index, transition or staged bytes may be created outside the game');
+  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true,
+    'A tainted archive pathname must keep the recovery lock');
+  assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 1;\n');
+});
+
+test('Windows archive junction after native pin cannot redirect its handle-relative guard creation', t => {
+  if (process.platform !== 'win32') return t.skip('Requires actual native RootDirectory creation race');
+  const f = fixture(t);
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const outside = path.join(f.root, 'external-guard-author');
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'do-not-edit.txt'), 'EXTERNAL NATIVE GUARD BYTES\n');
+  const script = fileURLToPath(new URL('./fixtures/windows-junction-in-place.ps1', import.meta.url));
+  const originalRandomBytes = crypto.randomBytes;
+  let stage;
+  let injection;
+  crypto.randomBytes = function (size, ...args) {
+    const bytes = originalRandomBytes.call(this, size, ...args);
+    if (!injection && size === 16) {
+      const archive = fs.readdirSync(f.project).find(name => name.startsWith('.ludory-components-backup-'));
+      if (archive) {
+        stage = path.join(f.project, archive);
+        injection = spawnSync('powershell.exe', [
+          '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script,
+          '-Source', stage, '-Target', outside, '-AccessMode', 'Attributes',
+        ], { cwd: f.root, encoding: 'utf8', timeout: 30000 });
+      }
+    }
+    return bytes;
+  };
+  let failure;
+  try { applyComponentPlan(plan); }
+  catch (error) { failure = error; }
+  finally {
+    crypto.randomBytes = originalRandomBytes;
+    if (stage && fs.lstatSync(stage).isSymbolicLink()) fs.rmdirSync(stage);
+  }
+  assert.ok(injection, 'Did not reach post-pin/pre-guard native archive window');
+  assert.equal(injection.error, undefined);
+  assert.equal(injection.status, 0,
+    `NTFS injection after stage pin unavailable: ${injection.stdout} ${injection.stderr}`);
+  assert.equal(injection.stdout.trim(), 'CREATED');
+  assert.ok(failure, 'Changed archive parent must abort before any metadata publication');
+  assert.deepEqual(fs.readdirSync(outside), ['do-not-edit.txt'],
+    'RootDirectory guard creation must never resolve through a replaced stage pathname');
+  assert.equal(fs.readFileSync(path.join(outside, 'do-not-edit.txt'), 'utf8'),
+    'EXTERNAL NATIVE GUARD BYTES\n');
+  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true);
+  assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 1;\n');
+});
+
 test('Windows-style flat staged file swap with identical bytes cannot publish an external hardlink', t => {
   if (process.platform !== 'win32') return t.skip('Requires Windows-native flat archive pin');
   const f = fixture(t);
