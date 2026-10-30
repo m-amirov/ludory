@@ -36,15 +36,16 @@ public static class LudoryJunctionProbe {
   public static bool SetInPlace(string source, string target, out int error) {
     error = 0;
     byte[] name = Encoding.Unicode.GetBytes(@"\??\" + Path.GetFullPath(target));
-    if (name.Length + 10 > UInt16.MaxValue) {
+    if (name.Length + 12 > UInt16.MaxValue) {
       error = 87;
       return false;
     }
     // REPARSE_DATA_BUFFER, MountPointReparseBuffer:
-    // tag(4), dataLength(2), reserved(2), offsets/lengths(8), UTF16 target + NUL.
-    byte[] input = new byte[16 + name.Length + 2];
+    // tag(4), dataLength(2), reserved(2), offsets/lengths(8),
+    // UTF16 substitute + NUL followed by the empty print-name NUL.
+    byte[] input = new byte[16 + name.Length + 4];
     Array.Copy(BitConverter.GetBytes(IO_REPARSE_TAG_MOUNT_POINT), 0, input, 0, 4);
-    Array.Copy(BitConverter.GetBytes((ushort)(name.Length + 10)), 0, input, 4, 2);
+    Array.Copy(BitConverter.GetBytes((ushort)(name.Length + 12)), 0, input, 4, 2);
     Array.Copy(BitConverter.GetBytes((ushort)0), 0, input, 8, 2);
     Array.Copy(BitConverter.GetBytes((ushort)name.Length), 0, input, 10, 2);
     Array.Copy(BitConverter.GetBytes((ushort)(name.Length + 2)), 0, input, 12, 2);
