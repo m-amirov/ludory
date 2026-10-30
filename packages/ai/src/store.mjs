@@ -29,19 +29,8 @@ const ARCHIVED_IMAGE_REQUEST_MODELS = new Map([
 const IMAGE_CODES = new Set(['HOST_OBSERVED', 'IMAGE_EXECUTOR_UNVERIFIED', 'IMAGE_EXECUTOR_INTERRUPTED']);
 const ART_REVIEW_CODES = new Set(['ART_REVIEW_OBSERVED', 'ART_REVIEW_INTERRUPTED']);
 
-/** A paid host turn must never start until its intent has crossed the filesystem barrier.
- * On platforms that cannot flush directory metadata (including some Windows filesystems),
- * fail closed instead of silently claiming an unproven durable journal. */
-function flushNativeDirectory() {
-  let fd;
-  try {
-    fd = fs.openSync('.', fs.constants.O_RDONLY);
-    if (!fs.fstatSync(fd).isDirectory()) throw new Error('NOT_A_DIRECTORY');
-    fs.fsyncSync(fd);
-  } catch { throw new Error('NATIVE_STORAGE_DURABILITY_UNVERIFIED'); }
-  finally { if (fd !== undefined) fs.closeSync(fd); }
-}
-
+/** Flush journal file contents and commit marker before host submission.
+ * Directory-entry persistence across sudden power loss is not guaranteed. */
 function flushNativeFile(fd) {
   try { fs.fsyncSync(fd); }
   catch { throw new Error('NATIVE_STORAGE_DURABILITY_UNVERIFIED'); }
@@ -1004,7 +993,6 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
       const committed = fs.openSync(`${prefix}.commit.json`, EXCLUSIVE, 0o600);
       try { fs.writeFileSync(committed, marker); fs.fsyncSync(committed); }
       finally { fs.closeSync(committed); }
-      flushNativeDirectory();
     }));
     const verified = readNativeArtReviews(source.project, current.run.runId);
     if (verified.length !== index) throw new Error('ART_REVIEW_INTEGRITY_SEQUENCE');
@@ -1284,11 +1272,11 @@ export function commitNativeEvent(plan) {
         fs.linkSync(tmpEvent, `${prefix}.json`);
         // Commit marker published last: an interrupted event is never accepted.
         fs.linkSync(tmpReceipt, `${prefix}.commit.json`);
-        // Persist both final names AND the removal of temporary aliases in one
-        // directory barrier. No paid turn may start while pending names survive.
+        // Complete the visible commit pair before any Web DEV turn. Sudden
+        // power loss may lose directory metadata; crash remnants are recovered
+        // explicitly and uncertain host outcomes are never retried silently.
         fs.unlinkSync(tmpEvent);
         fs.unlinkSync(tmpReceipt);
-        if (durableArtEvent) flushNativeDirectory();
       } catch (error) {
         if (error.message === 'NATIVE_STORAGE_DURABILITY_UNVERIFIED') throw error;
         throw new Error('NATIVE_EVENT_CONFLICT');

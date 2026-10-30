@@ -78,7 +78,7 @@ test('a timed-out art host leaves durable intent and never silently resubmits a 
   assert.equal(calls, 1, 'no implicit second paid browser submission');
 });
 
-test('intent publication requires flushed event, marker and directory before a paid host turn', async t => {
+test('intent publication requires flushed event and marker without a directory fsync dependency', async t => {
   const item = await imported(t);
   const plan = planArtReview(item.project, options(item), discovered);
   const originalFsync = fs.fsyncSync;
@@ -98,14 +98,14 @@ test('intent publication requires flushed event, marker and directory before a p
   try {
     await assert.rejects(executeArtReview(plan, { apply: true, host: {
       probe: async () => observedWeb,
-      turn: async () => { calls++; throw new Error('HOST_TURN_SHOULD_NOT_RUN'); },
-    } }), /NATIVE_STORAGE_DURABILITY_UNVERIFIED/);
+      turn: async () => { calls++; throw new Error('SIMULATED_HOST_TIMEOUT'); },
+    } }), /SIMULATED_HOST_TIMEOUT/);
   } finally { fs.fsyncSync = originalFsync; }
   assert.ok(fileFlushes >= 2, 'both art request data and marker must be flushed');
-  assert.ok(directoryFlushes >= 1, 'published directory metadata must be flushed');
-  assert.equal(calls, 0, 'no external browser operation without a durable request');
+  assert.equal(directoryFlushes, 0, 'ordinary Web DEV workflow must not require directory fsync');
+  assert.equal(calls, 1, 'request must be recorded before attempting the host call');
   const replay = planArtReview(item.project, options(item), discovered);
-  assert.notEqual(replay.status, 'READY', 'ambiguous publication remains fail-closed');
+  assert.equal(replay.status, 'BLOCKED', 'uncertain host result remains pending without implicit retry');
 });
 
 test('failures at each intent publication boundary prohibit the external host call', async t => {
