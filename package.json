@@ -20,6 +20,6 @@
   },
   "devDependencies": {
     "esbuild": "0.25.12",
-    "node-gyp": "11.5.0"
+    "node-gyp": "12.4.0"
   }
 }
