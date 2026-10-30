@@ -13,10 +13,12 @@ scope. PR #46 remains Draft; `main` is unchanged.
 ## Options and selected approach
 
 - **Selected after native experiment:** A small Win32 N-API module uses
-  `CreateFileW` with `FILE_READ_ATTRIBUTES`, `FILE_FLAG_BACKUP_SEMANTICS`,
+  `CreateFileW` with `FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES`, `FILE_FLAG_BACKUP_SEMANTICS`,
   `FILE_SHARE_READ | FILE_SHARE_WRITE` and **without `FILE_SHARE_DELETE`**.
   Returned handles stay in the same Node process for the whole transaction.
   Build the addon explicitly; if absent, refuse Windows apply before writes.
+  `FILE_READ_ATTRIBUTES` alone was insufficient: metadata-only opens did not
+  enforce the expected rename sharing restriction on Windows CI.
 - **Rejected by native CI:** `UV_FS_O_EXLOCK` disallows all sharing: rename
   of the target directory is denied, but even the legitimate `new-0` to
   `backup-0` file move beneath it returns `EBUSY` on NTFS (both Node 22/24).
@@ -49,3 +51,19 @@ no broadened ownership, no silent recovery/deletion, and no pretending ordinary
 `fs.openSync` pins a directory. Review sharing conflicts with running editors, failure while
 creating the archive, post-lock rename attempts, parent junction swaps and
 rollback under filesystem errors.
+
+## Pending NTFS reparse-point and distribution verification
+
+The passing rename tests do **not** prove protection against
+`FSCTL_SET_REPARSE_POINT` turning an *existing, temporarily empty* managed parent
+into a junction without renaming it. Add a Windows-only native injection probe
+that establishes the same runner can create an in-place junction on an
+unprotected empty directory, then retries at the publication window while
+the managed parent is pinned. Reject diverted writes or `APPLIED` after a
+successful malicious substitution. Retain a backup and lock on incomplete
+recovery. A blocked injection is evidence of a working OS guard only if the
+unprotected baseline succeeds; never pass on a missing/unsupported probe.
+
+The production addon presently needs `npm run build:windows-pin` on Windows.
+Any smoother installation mechanism must remain offline, verified and
+fail-closed; no unauthenticated binary downloads or Windows apply fallback.

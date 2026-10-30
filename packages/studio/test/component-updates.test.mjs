@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { planComponentUpdate, componentStatus, applyComponentPlan,
   previewComponentTrust, acceptComponentTrust } from '../src/component-updates.mjs';
@@ -930,6 +932,83 @@ test('Windows-held flat archive and project root must prevent rename while publi
   } finally {
     root.close();
     held.close();
+  }
+});
+
+test('Windows NTFS cannot redirect an existing empty managed parent to an outside junction during publish', t => {
+  if (process.platform !== 'win32') return t.skip('Requires actual Windows NTFS reparse-point IOCTL');
+  const f = fixture(t);
+  const outside = path.join(f.root, 'external-author-directory');
+  const sentinel = path.join(outside, 'do-not-edit.txt');
+  fs.mkdirSync(outside);
+  fs.writeFileSync(sentinel, 'EXTERNAL AUTHOR BYTES\n');
+  const probeScript = fileURLToPath(new URL('./fixtures/windows-junction-in-place.ps1', import.meta.url));
+  const setInPlaceJunction = source => {
+    const response = spawnSync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      '-File', probeScript, '-Source', source, '-Target', outside,
+    ], { encoding: 'utf8', timeout: 30000 });
+    assert.equal(response.error, undefined, `Junction probe executable failed: ${response.error?.message}`);
+    const output = response.stdout.trim();
+    assert.ok(response.status === 0 && output === 'CREATED' ||
+      response.status === 2 && /^BLOCKED:\d+$/.test(output),
+    `Junction probe did not run correctly: exit=${response.status} stdout=${output} stderr=${response.stderr}`);
+    return { created: response.status === 0, output };
+  };
+
+  // A successful unpinned control distinguishes a genuinely blocked attack
+  // from a fixture which never had permission/correct IOCTL support.
+  const control = path.join(f.root, 'unpinned-control');
+  fs.mkdirSync(control);
+  assert.deepEqual(setInPlaceJunction(control), { created: true, output: 'CREATED' },
+    'Native NTFS injection control is unavailable: cannot claim a security PASS');
+  assert.equal(fs.readFileSync(path.join(control, 'do-not-edit.txt'), 'utf8'), 'EXTERNAL AUTHOR BYTES\n');
+  fs.rmdirSync(control); // remove junction, not its target
+
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  assert.equal(plan.status, 'READY');
+  const originalRename = fs.renameSync;
+  let attempted = false;
+  let attack;
+  fs.renameSync = function (source, destination, ...args) {
+    const result = originalRename.call(this, source, destination, ...args);
+    if (!attempted && anchoredBasename(source, 'main.js') &&
+        /[\\/]backup-0$/.test(String(destination))) {
+      attempted = true;
+      attack = setInPlaceJunction(path.join(f.project, 'src'));
+    }
+    return result;
+  };
+  let result;
+  let failure;
+  try { result = applyComponentPlan(plan); }
+  catch (error) { failure = error; }
+  finally { fs.renameSync = originalRename; }
+
+  assert.equal(attempted, true, 'Did not reach the actual empty-directory publication window');
+  assert.ok(attack, 'Missing native junction injection result');
+  console.log(`Windows in-place NTFS junction injection with managed-parent pin: ${attack.output}`);
+  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'EXTERNAL AUTHOR BYTES\n');
+  assert.equal(fs.existsSync(path.join(outside, 'main.js')), false,
+    'A game component was written into the external author directory');
+  if (attack.created) {
+    assert.equal(result?.status === 'APPLIED', false,
+      'Windows must not commit when a managed directory becomes an in-place junction');
+    assert.ok(failure, 'Successful malicious junction substitution must abort the update');
+    assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true,
+      'Incomplete or unsafe rollback must retain the recovery lock');
+    const archives = fs.readdirSync(f.project).filter(name => name.startsWith('.ludory-components-backup-'));
+    assert.equal(archives.length, 1, 'Original component backup must survive unsafe rollback');
+    assert.equal(fs.readFileSync(path.join(f.project, archives[0], 'backup-0'), 'utf8'),
+      'export const version = 1;\n');
+    // The in-place reparse point is deliberately removed only in the temp
+    // fixture, after verifying no out-of-project user bytes were touched.
+    fs.rmdirSync(path.join(f.project, 'src'));
+  } else {
+    assert.equal(failure, undefined, `A rejected injection should allow a clean apply: ${failure?.message}`);
+    assert.equal(result?.status, 'APPLIED');
+    assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 2;\n');
   }
 });
 
