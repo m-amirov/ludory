@@ -451,6 +451,7 @@ function heldDirectory(directory, visibleAnchor = directory) {
     const pin = openProtectedDirectory(directory);
     return { fd: null, anchor: visibleAnchor,
       stat: () => ({ dev: pin.dev, ino: pin.ino, isDirectory: () => true }),
+      createGuard: basename => pin.createGuard(basename),
       close: () => pin.close() };
   }
   const fd = fs.openSync(directory, fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0) |
@@ -543,7 +544,24 @@ export function applyComponentPlan(plan) {
   let retainedBackup = null;
   let outcomeError = null;
   const operations = [];
+  const guards = [];
   try {
+    const guardDirectory = (pin, visibleParent) => {
+      if (process.platform !== 'win32') return;
+      const basename = `.ludory-components-guard-${crypto.randomBytes(16).toString('hex')}`;
+      let guard;
+      try { guard = pin.createGuard(basename); }
+      catch (error) {
+        // A handle-relative create may have succeeded even if its follow-up
+        // visible-path verification fails; retain the lock for recovery.
+        rollbackComplete = false;
+        throw error;
+      }
+      guards.push({ parent: visibleParent, basename, pin, guard });
+    };
+    // Native guards are created against the held physical directory inode;
+    // they deny DELETE sharing and prevent a temporarily empty parent from
+    // becoming a junction, while normal managed child writes remain allowed.
     const createLock = filename => {
       const fd = fs.openSync(filename, fs.constants.O_WRONLY | fs.constants.O_CREAT |
         fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
@@ -553,6 +571,7 @@ export function applyComponentPlan(plan) {
     lockStat = process.platform === 'win32'
       ? withPinnedProjectCwd(project, plan.rootIdentity, () => createLock(lockName))
       : createLock(lockPath);
+    guardDirectory(rootHandle, project);
     // Revalidate every game byte after the exclusive transaction lock is held.
     if (!isOriginalDirectory(project, plan.rootIdentity)) throw new Error('Project directory changed before locked apply');
     assertManifestUnchanged(project, plan.manifestSha256);
@@ -591,6 +610,7 @@ export function applyComponentPlan(plan) {
         if (pinned.stat().dev !== expected.dev || pinned.stat().ino !== expected.ino) {
           throw new Error(`Changed managed parent while pinning: ${parent}`);
         }
+        guardDirectory(pinned, parent);
       }
     }
     const staged = [];
@@ -609,6 +629,7 @@ export function applyComponentPlan(plan) {
       retainedBackup = stage;
       const stageHandle = heldDirectory(stageWithinCwd, anchoredStage);
       held.push(stageHandle);
+      guardDirectory(stageHandle, stage);
       if (!flatArchive) {
         for (const dirname of ['new', 'backup', 'quarantine']) fs.mkdirSync(path.join(stageWithinCwd, dirname));
       }
@@ -818,7 +839,24 @@ export function applyComponentPlan(plan) {
     outcomeError = error;
     throw error;
   } finally {
-    try { if (rollbackComplete && lockStat) {
+    try {
+      if (rollbackComplete) {
+        // Remove by the original native FILE HANDLE, not by a newly resolved
+        // path, so an attacker cannot replace the basename before cleanup.
+        for (const { parent, basename, pin, guard } of guards.reverse()) {
+          const directory = fs.lstatSync(parent, { bigint: true });
+          const child = fs.lstatSync(path.join(parent, basename), { bigint: true });
+          const pinned = pin.stat();
+          if (!directory.isDirectory() || directory.isSymbolicLink() ||
+              directory.dev !== pinned.dev || directory.ino !== pinned.ino ||
+              !child.isFile() || child.isSymbolicLink() || child.nlink !== 1n ||
+              child.dev !== pinned.dev || child.ino !== guard.fileId) {
+            throw new Error(`Changed anchored component guard during finalization: ${parent}`);
+          }
+          guard.remove();
+        }
+      }
+      if (rollbackComplete && lockStat) {
       try {
         // Never delete a moved original inode: an editor may still have its
         // handle open and write AFTER our final hash check. The archive was
@@ -840,7 +878,14 @@ export function applyComponentPlan(plan) {
           outcomeError.message += `; finalization blocked (lock retained): ${finalizationError.message}`;
         } else throw finalizationError;
       }
-    } }
-    finally { for (const handle of held.reverse()) handle.close(); }
+      }
+    } catch (guardFinalizationError) {
+      rollbackComplete = false; // keep lock and original backup for recovery
+      if (outcomeError) outcomeError.message += `; anchored guard finalization blocked (lock retained): ${guardFinalizationError.message}`;
+      else throw guardFinalizationError;
+    } finally {
+      for (const { guard } of guards) guard.close();
+      for (const handle of held.reverse()) handle.close();
+    }
   }
 }

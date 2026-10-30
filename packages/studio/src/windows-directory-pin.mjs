@@ -5,12 +5,13 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const nativePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../native/build/Release/directory_pin.node');
-const requiredPinContractVersion = 3;
+const requiredPinContractVersion = 4;
 let native;
 
 export function assertWindowsDirectoryPinContract(candidate) {
   if (candidate?.pinContractVersion !== requiredPinContractVersion ||
-      typeof candidate.open !== 'function' || typeof candidate.close !== 'function') {
+      typeof candidate.open !== 'function' || typeof candidate.close !== 'function' ||
+      typeof candidate.createGuard !== 'function' || typeof candidate.removeGuard !== 'function') {
     throw new Error(`Stale or invalid Win32 native pin security contract: requires pinContractVersion=${requiredPinContractVersion}; rebuild from trusted Ludory source with npm run build:windows-pin`);
   }
 }
@@ -41,7 +42,28 @@ export function openProtectedDirectory(directory) {
         pin.fileId !== after.ino) {
       throw new Error(`Changed Windows directory while pinning: ${directory}`);
     }
-    return { dev: after.dev, ino: after.ino, close: () => addon.close(pin.token) };
+    return { dev: after.dev, ino: after.ino, close: () => addon.close(pin.token),
+      createGuard: basename => {
+        const guard = addon.createGuard(pin.token, basename);
+        try {
+          const parent = fs.lstatSync(directory, { bigint: true });
+          const child = fs.lstatSync(path.join(directory, basename), { bigint: true });
+          if (parent.isSymbolicLink() || !parent.isDirectory() ||
+              parent.dev !== after.dev || parent.ino !== after.ino ||
+              !child.isFile() || child.isSymbolicLink() || child.nlink !== 1n ||
+              child.ino !== guard.fileId || child.dev !== after.dev) {
+            throw new Error(`Changed Windows directory or guard after anchored creation: ${directory}`);
+          }
+          return { basename, fileId: guard.fileId, close: () => addon.close(guard.token),
+            remove: () => addon.removeGuard(guard.token) };
+        } catch (error) {
+          // A guard may be the only file keeping a formerly empty physical
+          // directory safe. Never delete it merely because its visible path
+          // changed; leave it closed and fail the transaction before writes.
+          addon.close(guard.token);
+          throw error;
+        }
+      } };
   } catch (error) {
     addon.close(pin.token);
     throw error;

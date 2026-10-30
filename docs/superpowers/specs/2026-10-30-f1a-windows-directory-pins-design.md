@@ -19,13 +19,21 @@ scope. PR #46 remains Draft; `main` is unchanged.
   Build the addon explicitly; if absent, refuse Windows apply before writes.
   `FILE_READ_ATTRIBUTES` alone was insufficient: metadata-only opens did not
   enforce the expected rename sharing restriction on Windows CI.
-- **Current candidate, awaiting Windows CI:** Deny `FILE_SHARE_WRITE` as well
-  (leave only `FILE_SHARE_READ`) to prevent `FSCTL_SET_REPARSE_POINT` on an
-  existing temporarily empty managed directory. The actual Windows Node 22/24
+- **Rejected by native CI:** Denying `FILE_SHARE_WRITE` (leaving only
+  `FILE_SHARE_READ`) prevented normal child rename with `EBUSY`, and
+  attribute-only reparse handles may bypass that sharing restriction anyway.
+  The actual Windows Node 22/24
   injection proved the former candidate *did* allow a junction and transient
   publication into an outside author directory; this is a confirmed blocker,
-  not a hypothetical threat. The stronger pin must also pass legitimate child
-  creation, rename, hardlink and rollback checks before acceptance.
+  not a hypothetical threat.
+- **Current v4 candidate, awaiting Windows CI:** Retain required directory
+  READ+WRITE sharing without DELETE sharing. Add a randomly named child guard
+  in each held project/managed/archive directory using `NtCreateFile` with the
+  actual directory HANDLE as `RootDirectory`. Keep the guard's native file
+  handle open without DELETE sharing, so malicious removal cannot empty the
+  directory; use handle-based deletion after safe transaction finalization.
+  Test both generic-write and attribute-only `FSCTL_SET_REPARSE_POINT` attempts
+  with successful unprotected controls, rollback and exact native CI.
 - **Rejected by native CI:** `UV_FS_O_EXLOCK` disallows all sharing: rename
   of the target directory is denied, but even the legitimate `new-0` to
   `backup-0` file move beneath it returns `EBUSY` on NTFS (both Node 22/24).

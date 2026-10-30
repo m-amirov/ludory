@@ -935,7 +935,7 @@ test('Windows-held flat archive and project root must prevent rename while publi
   }
 });
 
-test('Windows NTFS cannot redirect an existing empty managed parent to an outside junction during publish', t => {
+for (const accessMode of ['Full', 'Attributes']) test(`Windows NTFS cannot redirect a guarded managed parent during publish (${accessMode})`, t => {
   if (process.platform !== 'win32') return t.skip('Requires actual Windows NTFS reparse-point IOCTL');
   const f = fixture(t);
   const outside = path.join(f.root, 'external-author-directory');
@@ -946,7 +946,7 @@ test('Windows NTFS cannot redirect an existing empty managed parent to an outsid
   const setInPlaceJunction = source => {
     const response = spawnSync('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-      '-File', probeScript, '-Source', source, '-Target', outside,
+      '-File', probeScript, '-Source', source, '-Target', outside, '-AccessMode', accessMode,
     ], { cwd: f.root, encoding: 'utf8', timeout: 30000 });
     assert.equal(response.error, undefined, `Junction probe executable failed: ${response.error?.message}`);
     const output = response.stdout.trim();
@@ -975,14 +975,20 @@ test('Windows NTFS cannot redirect an existing empty managed parent to an outsid
   const originalLink = fs.linkSync;
   let attempted = false;
   let attack;
-  let emptyAtAttack = false;
+  let nativeGuardAtAttack = false;
+  let guardDeletionRefused = false;
   let outsideEverPublished = false;
   fs.renameSync = function (source, destination, ...args) {
     const result = originalRename.call(this, source, destination, ...args);
     if (!attempted && anchoredBasename(source, 'main.js') &&
         /[\\/]backup-0$/.test(String(destination))) {
       attempted = true;
-      emptyAtAttack = fs.readdirSync(path.join(f.project, 'src')).length === 0;
+      const entries = fs.readdirSync(path.join(f.project, 'src'));
+      nativeGuardAtAttack = entries.length === 1 && /^\.ludory-components-guard-[0-9a-f]{32}$/.test(entries[0]);
+      if (nativeGuardAtAttack) {
+        try { fs.unlinkSync(path.join(f.project, 'src', entries[0])); }
+        catch (error) { guardDeletionRefused = /^(?:EPERM|EACCES|EBUSY)$/.test(error.code ?? ''); }
+      }
       attack = setInPlaceJunction(path.join(f.project, 'src'));
     }
     return result;
@@ -1000,8 +1006,10 @@ test('Windows NTFS cannot redirect an existing empty managed parent to an outsid
 
   try {
     assert.equal(attempted, true, 'Did not reach the actual empty-directory publication window');
-    assert.equal(emptyAtAttack, true,
-      'The junction probe must target a temporarily empty managed parent, not a nonempty-directory rejection');
+    assert.equal(nativeGuardAtAttack, true,
+      'The original managed file must have been moved while the nondeletable native guard remains');
+    assert.equal(guardDeletionRefused, true,
+      'Windows must reject attacker deletion of the held native directory guard');
     assert.ok(attack, 'Missing native junction injection result');
     console.log(`Windows in-place NTFS junction injection with managed-parent pin: ${attack.output}`);
     assert.equal(fs.readFileSync(sentinel, 'utf8'), 'EXTERNAL AUTHOR BYTES\n');
@@ -1040,11 +1048,11 @@ test('Windows native pinning must not be silently emulated on an unsupported hos
 });
 
 test('stale Windows native pins cannot claim the share-enforced security contract', () => {
-  const validShape = { open() {}, close() {} };
+  const validShape = { open() {}, close() {}, createGuard() {}, removeGuard() {} };
   assert.throws(() => assertWindowsDirectoryPinContract(validShape), /stale|contract|version/i);
-  assert.throws(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 2 }),
+  assert.throws(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 3 }),
     /stale|contract|version/i);
-  assert.doesNotThrow(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 3 }));
+  assert.doesNotThrow(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 4 }));
 });
 
 test('Windows-native pinned parents must permit ordinary child reads, metadata and writes', t => {

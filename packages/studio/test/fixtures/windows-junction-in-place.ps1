@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$Source,
-  [Parameter(Mandatory = $true)][string]$Target
+  [Parameter(Mandatory = $true)][string]$Target,
+  [ValidateSet('Full', 'Attributes')][string]$AccessMode = 'Full'
 )
 
 # Test-only NTFS adversarial probe. Unlike mklink /J, this writes a mount-point
@@ -33,7 +34,7 @@ public static class LudoryJunctionProbe {
       byte[] input, uint inputLength, IntPtr output, uint outputLength,
       out uint returned, IntPtr overlapped);
 
-  public static bool SetInPlace(string source, string target, out int error) {
+  public static bool SetInPlace(string source, string target, bool attributesOnly, out int error) {
     error = 0;
     byte[] name = Encoding.Unicode.GetBytes(@"\??\" + Path.GetFullPath(target));
     if (name.Length + 12 > UInt16.MaxValue) {
@@ -51,7 +52,7 @@ public static class LudoryJunctionProbe {
     Array.Copy(BitConverter.GetBytes((ushort)(name.Length + 2)), 0, input, 12, 2);
     Array.Copy(name, 0, input, 16, name.Length);
 
-    using (SafeFileHandle handle = CreateFileW(source, GENERIC_READ_WRITE,
+    using (SafeFileHandle handle = CreateFileW(source, attributesOnly ? 0x100U : GENERIC_READ_WRITE,
         FILE_SHARE_ALL, IntPtr.Zero, OPEN_EXISTING,
         FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, IntPtr.Zero)) {
       if (handle.IsInvalid) {
@@ -68,7 +69,7 @@ public static class LudoryJunctionProbe {
 }
 '@
   $code = 0
-  if ([LudoryJunctionProbe]::SetInPlace($Source, $Target, [ref]$code)) {
+  if ([LudoryJunctionProbe]::SetInPlace($Source, $Target, $AccessMode -eq 'Attributes', [ref]$code)) {
     Write-Output 'CREATED'
     exit 0
   }

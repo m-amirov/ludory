@@ -12,6 +12,21 @@
    mutation was *blocked* or *succeeded*; fix the root cause if it succeeds
    and diverts a write or authorizes an incorrect commit.
 
+## Task 1b — Verified in-place junction remediation (activated by RED)
+
+1. Reproduce the confirmed transient outside-project hardlink on native NTFS.
+   Do not accept a successful rollback as evidence that no outside write took
+   place. The v3 read-only-share experiment is rejected by Windows `EBUSY` on
+   ordinary managed-file rename.
+2. Create native, handle-relative nondeletable guard files within each pinned
+   project/managed/archive directory. No full-path guard creation in an empty
+   directory is accepted as race-free. Reject stale addon protocol versions.
+3. Delete guards by the same native HANDLE only after safe finalization; retain
+   guards, backup and lock on incomplete rollback. Test both `GENERIC_WRITE`
+   and attribute-only junction injection on Windows Node 22/24.
+4. Keep Draft until the exact final SHA passes all four CI matrix jobs and an
+   independent security review confirms the file-guard lifetime contract.
+
 ## Task 2 — Native addon onboarding (bounded)
 
 1. Identify the current Windows native build and failure surfaces in Studio.
