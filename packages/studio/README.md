@@ -50,6 +50,82 @@ a CEOS orchestration replacement, a runtime migrator or a release/publishing
 pipeline. Studio's separate `runtime-basic` template is for **new** games only.
 Those features require independent validation before any legacy adoption.
 
+## Safe managed component updates (new Studio games only)
+
+Every `create --apply` now writes a dedicated `ludory.components.json` ownership
+record for eligible Studio-generated template assets. It excludes
+`package.json`, `AGENTS.md`, `game-spec.yaml`, `ludory.project.json`,
+`ludory.studio.json`, `.ludory/**`, hidden paths (`.env`, `.github/**`),
+`rights/**`, `saves/**`, `evidence/**`, user config and transaction metadata.
+The older creation receipt is informational **and cannot grant update ownership**.
+The updater additionally verifies the new state against the narrow original
+receipt and retained `component-transition.json` proofs. **Authority comes
+from a Studio-controlled host trust registry outside the game directory.**
+It pins the exact game path, directory identity, creation receipt, original
+manifest and latest component state SHA-256, and advances only on successful
+Studio updates. Forging a project-local archive and state cannot add ownership
+without matching this independent pin. This protects against *project-only*
+tampering, not a process with write access to the user's host state directory.
+By default the registry is under `%LOCALAPPDATA%/ludory/studio/component-trust-v1`
+on Windows and `$XDG_STATE_HOME/ludory/studio/component-trust-v1` (or
+`~/.local/state/ludory/studio/component-trust-v1`) on Unix. A host-configured
+`LUDORY_STUDIO_TRUST_DIR` may override that location; a path inside the game
+is refused. If the registry is missing or altered, updates fail closed.
+Treat archive corruption as a stop condition.
+Games created
+before this dedicated record existed, including frozen projects, are `BLOCKED`;
+there is no implicit adoption or bulk migration.
+
+```sh
+# Read-only, including for a dirty or unversioned new game:
+node packages/studio/bin/ludory.mjs components status --project /path/to/new-game --json
+node packages/studio/bin/ludory.mjs components update --project /path/to/new-game --json
+
+# After examining the exact changed-file list and any conflict:
+node packages/studio/bin/ludory.mjs components update --project /path/to/new-game --apply --json
+
+# On another PC/host, after inspecting every listed managed path and its bytes:
+node packages/studio/bin/ludory.mjs components trust --project /path/to/copied-game --json
+# Copy the exact stateSha256 from the preview; acceptance is not automatic:
+node packages/studio/bin/ludory.mjs components trust --project /path/to/copied-game --accept-state-sha256 <exact-64-hex-from-preview> --apply --json
+```
+
+`components trust` is an explicit owner grant on a new host, **not** proof that
+copied project metadata is authentic. Review the source and all listed managed
+paths before accepting. An existing host pin cannot be replaced through this
+command, including if the pin disagrees with the game. A crash between game
+publication and host registry publication may require operator recovery; never
+automatically re-anchor a mismatched host pin.
+
+Use `--catalog /path/to/catalog` for an explicitly installed local catalog.
+Only a strictly newer compatible template can be applied; same-version drift,
+downgrades, removed paths, unsupported profile/engine/targets, edited or missing
+managed files, symlinks, hardlinks, new-path collisions and a stale preview
+block the operation. Existing owner files and author-owned assets are not
+updated during honest operation. Even valid changes to the game manifest are
+conservatively blocked until its creation-time compatibility can be reviewed;
+Studio never reclaims project-owned metadata. The command never performs a
+three-way merge, deletion or `--force`.
+
+Apply uses an exclusive `.ludory-components.lock`, same-filesystem staging and
+physical-path checks. Original file inodes are retained under
+`.ludory-components-backup-*` **even after a successful update**, because an
+editor may still hold an open file descriptor. Do not delete these archives
+until edits through old handles have been reconciled; newer component status
+also depends on the archived ownership chain. Stage files, receipts and
+directory entries are flushed with filesystem `fsync`; unsupported filesystem
+durability behavior is an explicit error, not a successful apply. On an incomplete rollback
+the lock and archive remain for human recovery; inspect `backup-index.json`,
+affected paths and any `quarantine/` entries before correcting state. Never
+force-remove a lock while another update may still be running. Disk-full,
+file-sharing, unsupported hardlink/rename and other filesystem failures are
+visible blockers, not successful updates. On Windows, inspect the actual CI
+result before relying on NTFS behavior; Linux-only checks do not certify it.
+
+Exit code: `0` successful preview/IN_SYNC/apply; `2` explicit conflict/blocker;
+`1` invalid command or unrelated operational failure. JSON preserves status,
+planned paths, conflict details and the backup directory on success.
+
 ## Profiles and templates (new projects only)
 
 Profile declarations specify a web engine, allowed targets and compatible templates.

@@ -1,10 +1,16 @@
+import './setup-trust-env.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+
 import { runCli } from '../src/cli.mjs';
+
+test('Studio test runner always isolates the host trust registry', () => {
+  assert.match(process.env.LUDORY_STUDIO_TRUST_DIR ?? '', /ludory-test-host-trust-/);
+});
 
 function cli(...args) {
   let stdout = '';
@@ -180,4 +186,111 @@ test('profiles apply rejects incompatible games and malformed operation flags', 
   assert.equal(cli('profiles', 'apply', '--project', project).status, 1);
   assert.equal(cli('profiles', 'update', '--project', project, '--name', 'web-game').status, 1);
   assert.equal(fs.existsSync(path.join(project, '.ludory')), false);
+});
+
+function componentFixture(t) {
+  const root = temporary(t);
+  const project = path.join(root, 'new-game');
+  const catalog = path.join(root, 'catalog');
+  fs.mkdirSync(project);
+  fs.mkdirSync(path.join(catalog, 'profiles'), { recursive: true });
+  const templateDir = path.join(catalog, 'templates', 'cli-web');
+  fs.mkdirSync(path.join(templateDir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(catalog, 'profiles', 'cli-game.json'), JSON.stringify({
+    schemaVersion: 1, id: 'cli-game', version: '1.0.0', description: 'CLI test profile',
+    engine: 'web', targets: ['vk-games'], templates: ['cli-web'],
+  }));
+  const descriptor = path.join(templateDir, 'template.json');
+  fs.writeFileSync(descriptor, JSON.stringify({
+    schemaVersion: 1, id: 'cli-web', version: '1.0.0', description: 'CLI test template',
+    profile: 'cli-game', engine: 'web', targets: ['vk-games'], files: ['index.html', 'src/main.js'],
+  }));
+  fs.writeFileSync(path.join(templateDir, 'index.html'), '<main>v1</main>\n');
+  fs.writeFileSync(path.join(templateDir, 'src', 'main.js'), 'export const v = 1;\n');
+  const created = cli('create', '--project', project, '--id', 'cli-test', '--title', 'CLI test',
+    '--lang', 'en', '--profile', 'cli-game', '--template', 'cli-web', '--targets', 'vk-games',
+    '--catalog', catalog, '--apply', '--json');
+  assert.equal(created.status, 0, created.stderr);
+  const upgrade = () => {
+    const data = JSON.parse(fs.readFileSync(descriptor, 'utf8'));
+    data.version = '1.1.0';
+    fs.writeFileSync(descriptor, JSON.stringify(data));
+    fs.writeFileSync(path.join(templateDir, 'src', 'main.js'), 'export const v = 2;\n');
+  };
+  return { root, project, catalog, descriptor, upgrade };
+}
+
+test('components status and update preview are read-only, apply is explicit and preserves owner data', t => {
+  const f = componentFixture(t);
+  const args = ['components', 'update', '--project', f.project, '--catalog', f.catalog, '--json'];
+  assert.equal(JSON.parse(cli('components', 'status', '--project', f.project, '--catalog', f.catalog, '--json').stdout).status, 'IN_SYNC');
+  fs.writeFileSync(path.join(f.project, 'my-assets.txt'), 'author data');
+  f.upgrade();
+  const before = fs.readFileSync(path.join(f.project, 'src/main.js'), 'utf8');
+  const preview = cli(...args);
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.deepEqual(JSON.parse(preview.stdout).writes, ['src/main.js', 'ludory.components.json']);
+  assert.equal(JSON.parse(preview.stdout).status, 'READY');
+  assert.equal(fs.readFileSync(path.join(f.project, 'src/main.js'), 'utf8'), before);
+  const applied = cli(...args, '--apply');
+  assert.equal(applied.status, 0, applied.stderr);
+  const result = JSON.parse(applied.stdout);
+  assert.equal(result.status, 'APPLIED');
+  assert.equal(fs.readFileSync(path.join(f.project, 'src/main.js'), 'utf8'), 'export const v = 2;\n');
+  assert.equal(fs.readFileSync(path.join(f.project, 'my-assets.txt'), 'utf8'), 'author data');
+  assert.ok(result.backupDirectory?.startsWith(f.project));
+  assert.equal(JSON.parse(cli(...args).stdout).status, 'IN_SYNC');
+});
+
+test('components refuse modified files, historical games, and unapproved/invalid flags', t => {
+  const f = componentFixture(t);
+  f.upgrade();
+  fs.writeFileSync(path.join(f.project, 'index.html'), 'editor customisation\n');
+  const conflict = cli('components', 'update', '--project', f.project, '--catalog', f.catalog, '--apply', '--json');
+  assert.equal(conflict.status, 2, conflict.stderr);
+  assert.equal(JSON.parse(conflict.stdout).status, 'CONFLICT');
+  assert.equal(fs.readFileSync(path.join(f.project, 'index.html'), 'utf8'), 'editor customisation\n');
+  const historical = path.join(f.root, 'historical');
+  fs.mkdirSync(historical);
+  fs.writeFileSync(path.join(historical, 'ludory.studio.json'), '{}\n');
+  assert.equal(JSON.parse(cli('components', 'status', '--project', historical, '--json').stdout).status, 'BLOCKED');
+  assert.equal(cli('components', 'update', '--project', historical, '--apply').status, 2);
+  assert.equal(cli('components', 'status', '--project', f.project, '--apply').status, 1);
+  assert.equal(cli('components', 'update', '--project', f.project, '--force').status, 1);
+  assert.equal(cli('components', 'update', '--project', f.project, '--project', f.project).status, 1);
+});
+
+test('components operational errors preserve JSON FAILED status and avoid implicit apply', t => {
+  const f = componentFixture(t);
+  const failed = cli('components', 'update', '--project', path.join(f.root, 'missing'), '--json');
+  assert.equal(failed.status, 1);
+  assert.equal(JSON.parse(failed.stdout).status, 'FAILED');
+  assert.equal(cli('components', 'unknown', '--project', f.project).status, 1);
+});
+
+test('components trust requires an explicit SHA-256 after a host transfer', t => {
+  const f = componentFixture(t);
+  const originalTrust = process.env.LUDORY_STUDIO_TRUST_DIR;
+  process.env.LUDORY_STUDIO_TRUST_DIR = path.join(f.root, 'transferred-host');
+  t.after(() => {
+    if (originalTrust === undefined) delete process.env.LUDORY_STUDIO_TRUST_DIR;
+    else process.env.LUDORY_STUDIO_TRUST_DIR = originalTrust;
+  });
+  const args = ['components', 'trust', '--project', f.project, '--json'];
+  const preview = cli(...args);
+  assert.equal(preview.status, 2, preview.stderr);
+  const inspected = JSON.parse(preview.stdout);
+  assert.equal(inspected.status, 'NEEDS_USER_ACTION');
+  assert.deepEqual(inspected.managedPaths, ['index.html', 'src/main.js']);
+  const plain = cli('components', 'trust', '--project', f.project);
+  assert.match(plain.stdout, /src\/main\.js/);
+  assert.match(plain.stdout, new RegExp(inspected.stateSha256));
+  assert.match(plain.stdout, /review|inspect|проверь/i);
+  assert.equal(cli(...args, '--apply').status, 1);
+  assert.equal(cli(...args, '--accept-state-sha256', '0'.repeat(64), '--apply').status, 1);
+  const applied = cli(...args, '--accept-state-sha256', inspected.stateSha256, '--apply');
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.equal(JSON.parse(applied.stdout).status, 'TRUSTED');
+  assert.equal(JSON.parse(cli('components', 'status', '--project', f.project, '--catalog', f.catalog, '--json').stdout).status, 'IN_SYNC');
+  assert.equal(JSON.parse(cli(...args).stdout).status, 'IN_SYNC');
 });

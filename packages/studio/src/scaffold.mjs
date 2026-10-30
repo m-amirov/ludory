@@ -2,8 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { defineGame } from '@ludory/core';
-import { loadCatalog } from './catalog.mjs';
+import { loadCatalog, isStudioComponentPath } from './catalog.mjs';
 import { planInit, directoryIdentity, isOriginalDirectory } from './projects.mjs';
+import { registerComponentTrust, hostTrustDigest } from './component-trust.mjs';
 
 const digest = b => crypto.createHash('sha256').update(b).digest('hex');
 const serialize = item => Buffer.from(`${JSON.stringify(item, null, 2)}\n`, 'utf8');
@@ -12,11 +13,13 @@ function filesFor(manifest, profile, template) {
   const manifestBytes = serialize(manifest);
   const entries = [['ludory.project.json', manifestBytes]];
   const tracked = Object.create(null);
+  const managed = Object.create(null);
   tracked['ludory.project.json'] = digest(manifestBytes);
   for (const filename of template.files) {
     const bytes = template.assets.get(filename).bytes;
     entries.push([filename, bytes]);
     tracked[filename] = digest(bytes);
+    if (isStudioComponentPath(filename)) managed[filename] = digest(bytes);
   }
   const receipt = {
     schemaVersion: 1,
@@ -29,6 +32,12 @@ function filesFor(manifest, profile, template) {
     },
     files: tracked,
   };
+  entries.push(['ludory.components.json', serialize({
+    schemaVersion: 1,
+    template: { id: template.id, version: template.version, profile: template.profile,
+      origin: template.origin, sourceSha256: template.sourceSha256 },
+    files: managed,
+  })]);
   entries.push(['ludory.studio.json', serialize(receipt)]);
   return { entries, receipt };
 }
@@ -242,6 +251,18 @@ export function applyCreatePlan(plan) {
     if (!isOriginalDirectory(fresh.project, plan.rootIdentity)) {
       throw new Error('Project directory moved during apply; created files remain anchored to original directory');
     }
+    const created = new Map(fresh._snapshot);
+    for (const name of ['ludory.studio.json', 'ludory.project.json', 'ludory.components.json']) {
+      if (!fs.readFileSync(path.join(fresh.project, name)).equals(created.get(name))) {
+        throw new Error(`Created Studio trust input changed before registration: ${name}`);
+      }
+    }
+    registerComponentTrust(fresh.project, {
+      rootIdentity: plan.rootIdentity,
+      receiptSha256: hostTrustDigest(created.get('ludory.studio.json')),
+      manifestSha256: hostTrustDigest(created.get('ludory.project.json')),
+      stateSha256: hostTrustDigest(created.get('ludory.components.json')),
+    });
     return { ...fresh, status: 'APPLIED', applied: true };
   } catch (error) {
     if (anchored && isOriginalDirectory(fresh.project, plan.rootIdentity)) {

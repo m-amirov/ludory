@@ -1,3 +1,4 @@
+import './setup-trust-env.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -41,7 +42,7 @@ test('creation preview never writes and explicit apply creates runnable files an
   const cwd = process.cwd();
   const plan = planCreate(root, params);
   assert.equal(plan.status, 'READY', plan.conflicts.join(' '));
-  assert.deepEqual(plan.writes, ['ludory.project.json', 'index.html', 'src/main.js', 'ludory.studio.json']);
+  assert.deepEqual(plan.writes, ['ludory.project.json', 'index.html', 'src/main.js', 'ludory.components.json', 'ludory.studio.json']);
   assert.deepEqual(fs.readdirSync(root), []);
   const outcome = applyCreatePlan(plan);
   assert.equal(outcome.status, 'APPLIED');
@@ -54,10 +55,49 @@ test('creation preview never writes and explicit apply creates runnable files an
   assert.deepEqual(receipt.profile, { id: 'narrative-game', version: '1.1.0' });
   assert.deepEqual(receipt.template, { id: 'narrative-basic', version: '1.0.0' });
   assert.deepEqual(Object.keys(receipt.files), ['ludory.project.json', 'index.html', 'src/main.js']);
+  const components = JSON.parse(fs.readFileSync(path.join(root, 'ludory.components.json'), 'utf8'));
+  assert.deepEqual(components, {
+    schemaVersion: 1,
+    template: { id: 'narrative-basic', version: '1.0.0', profile: 'narrative-game',
+      origin: 'builtin', sourceSha256: receipt.catalog.templateSha256 },
+    files: { 'index.html': receipt.files['index.html'], 'src/main.js': receipt.files['src/main.js'] },
+  });
   for (const [name, sha] of Object.entries(receipt.files)) {
     assert.equal(hash(fs.readFileSync(path.join(root, name))), sha);
   }
   assert.doesNotMatch(fs.readFileSync(path.join(root, 'src/main.js'), 'utf8'), /<script>/);
+});
+
+test('new component provenance excludes author-owned template files and keeps receipt unchanged', t => {
+  const project = empty(t);
+  const catalog = custom(t);
+  const templateRoot = path.join(catalog, 'templates', 'custom-basic');
+  const descriptorPath = path.join(templateRoot, 'template.json');
+  const descriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf8'));
+  const authorFiles = ['package.json', 'AGENTS.md', 'game-spec.yaml', '.env', '.github/workflows/ci.yml',
+    'rights/manifest.json', 'saves/profile.json', 'evidence/report.json'];
+  descriptor.files.push(...authorFiles);
+  for (const name of authorFiles) {
+    fs.mkdirSync(path.dirname(path.join(templateRoot, name)), { recursive: true });
+    fs.writeFileSync(path.join(templateRoot, name), `user-owned ${name}`);
+  }
+  fs.writeFileSync(descriptorPath, JSON.stringify(descriptor));
+  const options = { ...params, profile: 'custom-game', template: 'custom-basic', targets: ['vk-games'], catalog };
+  const plan = planCreate(project, options);
+  assert.equal(plan.status, 'READY');
+  assert.deepEqual(fs.readdirSync(project), []);
+  applyCreatePlan(plan);
+  const receipt = JSON.parse(fs.readFileSync(path.join(project, 'ludory.studio.json')));
+  const ownership = JSON.parse(fs.readFileSync(path.join(project, 'ludory.components.json')));
+  assert.deepEqual(Object.keys(ownership.files), ['index.html', 'src/main.js']);
+  assert.deepEqual(Object.keys(receipt.files),
+    ['ludory.project.json', 'index.html', 'src/main.js', ...authorFiles]);
+  for (const [name, sha] of Object.entries(ownership.files)) {
+    assert.equal(hash(fs.readFileSync(path.join(project, name))), sha);
+  }
+  for (const name of authorFiles) {
+    assert.equal(fs.readFileSync(path.join(project, name), 'utf8'), `user-owned ${name}`);
+  }
 });
 
 test('interactive narrative creation is opt-in, preview-only and refuses occupied project', t => {

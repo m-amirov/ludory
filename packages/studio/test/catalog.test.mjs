@@ -67,7 +67,7 @@ test('catalog rejects traversal, absolute/Windows paths and reserved template ou
   const catalog = external(t);
   const descriptor = path.join(catalog, 'templates', 'arcade-basic', 'template.json');
   const value = JSON.parse(fs.readFileSync(descriptor, 'utf8'));
-  for (const invalid of ['../escape', '/tmp/escape', 'src\\..\\evil', 'C:/escape', 'ludory.project.json', 'ludory.studio.json']) {
+  for (const invalid of ['../escape', '/tmp/escape', 'src\\..\\evil', 'C:/escape', 'ludory.project.json', 'ludory.studio.json', 'ludory.components.json', '.ludory/evidence.json', 'LUDORY.COMPONENTS.JSON', 'Package.json', 'Game-Spec.yaml', '.ludory-components.lock', '.ludory-components-backup-manual/index.html', '.git/config', 'src/CON.txt', 'NUL', 'src/AUX.js', 'src/COM1', 'main.js.']) {
     value.files = [invalid];
     fs.writeFileSync(descriptor, JSON.stringify(value));
     assert.throws(() => loadCatalog(catalog), /path|reserved|invalid/i, invalid);
@@ -91,6 +91,9 @@ test('catalog rejects incompatible references and ambiguous duplicate file entri
   value.files = ['index.html', 'index.html'];
   fs.writeFileSync(file, JSON.stringify(value));
   assert.throws(() => loadCatalog(catalog), /duplicate/i);
+  value.files = ['index.html', 'INDEX.HTML'];
+  fs.writeFileSync(file, JSON.stringify(value));
+  assert.throws(() => loadCatalog(catalog), /duplicate|case|collision/i);
   value.files = ['index.html'];
   value.profile = 'missing-profile';
   fs.writeFileSync(file, JSON.stringify(value));
@@ -118,7 +121,7 @@ test('reserved metadata filenames cannot be ancestors of generated template file
   const templateRoot = path.join(catalog, 'templates', 'arcade-basic');
   const manifest = path.join(templateRoot, 'template.json');
   const value = JSON.parse(fs.readFileSync(manifest, 'utf8'));
-  for (const reserved of ['ludory.project.json', 'ludory.studio.json']) {
+  for (const reserved of ['ludory.project.json', 'ludory.studio.json', 'ludory.components.json', '.ludory']) {
     fs.mkdirSync(path.join(templateRoot, reserved));
     fs.writeFileSync(path.join(templateRoot, reserved, 'data.txt'), 'existing template asset');
     value.files = [`${reserved}/data.txt`];
