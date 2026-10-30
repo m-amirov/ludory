@@ -8,6 +8,7 @@ import { planNewRun, commitNewRun, readNativeRun, listNativeRuns, readNativeArtR
 import { prepareCodexExecution, checkCodexAvailable, runCodexExecution, hasStudioCreationReceipt,
   EMPTY_TRANSCRIPT_SHA256 } from './executor.mjs';
 import { blockedNarrativeVerdict } from './narrative-review-contract.mjs';
+import { verifyStudioOrigin } from '@ludory/studio-trust';
 
 const OPERATIONS = new Set(['doctor', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover', 'recover-storage']);
 const READ_ONLY = new Set(['doctor', 'status', 'next']);
@@ -113,6 +114,9 @@ export function planWorkflow(projectDir, operation, options = {}) {
   const project = source.project;
   if (operation === 'recover-storage') {
     const inventory = inspectNativeStorageRecovery(project, options.run);
+    const origin = verifyStudioOrigin(project);
+    if (!origin.ok) return { ...blocked(project, operation, `NATIVE_${origin.code}`),
+      inventory, runId: inventory.runId, confirmNoExecutor: options.confirmNoExecutor === true };
     return { engine: 'ludory-ai', project, operation, status: inventory.status,
       writes: inventory.entries.map(x => x.file), conflicts: [], runId: inventory.runId,
       inventory, confirmNoExecutor: options.confirmNoExecutor === true,
@@ -122,6 +126,10 @@ export function planWorkflow(projectDir, operation, options = {}) {
     return { engine: 'ludory-ai', project, operation, status: 'OK', writes: [],
       conflicts: [], manifestId: source.manifest.id, sourceHead: source.gitHead,
       gitRoot: source.gitRoot, gitClean: source.gitClean, gitTrusted: source.gitTrusted };
+  }
+  if (!READ_ONLY.has(operation)) {
+    const origin = verifyStudioOrigin(project);
+    if (!origin.ok) return blocked(project, operation, `NATIVE_${origin.code}`);
   }
   if (operation === 'start') {
     getPipeline(options.pipeline);
@@ -267,6 +275,11 @@ export function executeWorkflow(plan, { apply = false, executor } = {}) {
   if (!plan || !OPERATIONS.has(plan.operation) || !['OK', 'READY', 'BLOCKED', 'NEEDS_CONFIRMATION', 'CLEAN'].includes(plan.status)) {
     throw new Error('Invalid native workflow plan');
   }
+  if (apply && !READ_ONLY.has(plan.operation) &&
+      (plan.status === 'READY' || plan.operation === 'recover-storage')) {
+    const origin = verifyStudioOrigin(plan.project);
+    if (!origin.ok) throw new Error(`NATIVE_${origin.code}`);
+  }
   if (plan.operation === 'recover-storage') {
     if (!apply || plan.status === 'CLEAN') return plan;
     if (!plan.confirmNoExecutor) return { ...plan, status: 'BLOCKED', reasonCode: 'NATIVE_RECOVERY_CONFIRMATION_REQUIRED' };
@@ -350,6 +363,10 @@ function executeCodexAttempt(plan, executor, requiredCommand = null, repairAttem
     const available = impl.check(executablePlan);
     if (!available.ok) return { ...blocked(plan.project, 'continue', available.code),
       runId: plan.runId, executor: 'codex' };
+    // Availability probes can be user-controlled and can alter the project;
+    // never publish the request or launch Codex against a now-untrusted root.
+    const origin = verifyStudioOrigin(plan.project);
+    if (!origin.ok) throw new Error(`NATIVE_${origin.code}`);
     commitNativeEvent(plan.nativePlan); // Publish intent before running the external process.
     let execution;
     try { execution = impl.run(executablePlan); }

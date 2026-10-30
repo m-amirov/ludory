@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { nativeProject } from './helpers/project.mjs';
+import { nativeProject, newStudioAiProject } from './helpers/project.mjs';
 import { planNewRun, commitNewRun, readNativeRun } from '../src/store.mjs';
 import { planDevDraft, verifyDevDraftPlan, executeDevDraft,
   planDevDraftImport, executeDevDraftImport } from '../src/draft-tasks.mjs';
@@ -11,11 +11,7 @@ import { planDevDraft, verifyDevDraftPlan, executeDevDraft,
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
 function game(t, { receipt = true } = {}) {
-  const project = nativeProject(t);
-  if (receipt) fs.writeFileSync(path.join(project, 'ludory.studio.json'), JSON.stringify({
-    schemaVersion: 1, profile: { id: 'narrative-game' }, template: { id: 'starter' },
-    files: { 'ludory.project.json': sha256(fs.readFileSync(path.join(project, 'ludory.project.json'))) },
-  }));
+  const project = receipt ? newStudioAiProject(t) : nativeProject(t);
   fs.writeFileSync(path.join(project, 'brief.md'), 'Episode 1: the boat reaches the port.');
   const start = planNewRun(project, { pipeline: 'production-art', scope: {
     target: 'EP1', inScope: ['brief.md'], outOfScope: [],

@@ -7,6 +7,7 @@ import { prepareCodexExecution, checkCodexAvailable, runCodexExecution } from '.
 import { qualityDigest, readQualityPolicy, planQualityEnable, safeQualityDirectory,
   safeQualityFile, snapshotQualitySource } from './quality-policy.mjs';
 import { persistQualityReceipt } from './quality-store.mjs';
+import { verifyStudioOrigin } from '@ludory/studio-trust';
 
 const RUNNER = fileURLToPath(new URL('./quality-runner.mjs', import.meta.url));
 const SHA = /^[a-f0-9]{64}$/;
@@ -128,6 +129,13 @@ export function executeQualityCheck(plan, { apply = false, executor } = {}) {
     const impl = executor ?? { check: checkCodexAvailable, run: runCodexExecution };
     if (!impl.check(prepared).ok) return blockedAfterExecution(plan.project, plan.tier,
       plan.sourceDigest, 'QUALITY_EXECUTOR_UNAVAILABLE', null, attemptId);
+    // Availability probes can run arbitrary host code. Recheck the independent
+    // Studio pin before launching Codex; never journal a successful execution
+    // for a game whose trusted origin was revoked while probing.
+    const origin = verifyStudioOrigin(plan.project);
+    if (!origin.ok) return { mode: 'quality-check', project: plan.project, tier: plan.tier,
+      status: 'BLOCKED', reasonCode: `QUALITY_${origin.code}`,
+      writes: [`${relative}/quality.test.mjs`, `${relative}/request.json`] };
     const execution = impl.run(prepared);
     if (!execution?.ok || execution.code !== 'EXECUTED_UNVERIFIED') return blockedAfterExecution(
       plan.project, plan.tier, plan.sourceDigest, 'QUALITY_EXECUTION_UNVERIFIED', execution, attemptId);

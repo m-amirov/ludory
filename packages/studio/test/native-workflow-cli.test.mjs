@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { runCli } from '../src/cli.mjs';
-import { nativeProject } from '../../ai/test/helpers/project.mjs';
+import { nativeProject, newStudioAiProject } from '../../ai/test/helpers/project.mjs';
 import { checkCodexAvailable, runCodexExecution } from '../../ai/src/executor.mjs';
 import { commitNativeEvent, readNativeRun } from '../../ai/src/store.mjs';
 import { planWorkflow } from '../../ai/src/workflows.mjs';
@@ -29,7 +29,7 @@ test('CLI workflow doctor uses the native engine with no CEOS installation or pr
 });
 
 test('CLI workflow start/next/continue/checkpoint preserves preview-only defaults', t => {
-  const project = nativeProject(t);
+  const project = newStudioAiProject(t);
   const basic = ['--project', project, '--json'];
   const start = ['workflow', 'start', ...basic, '--pipeline', 'audit-repair-loop', '--target', 'EP3 QA',
     '--in-scope', 'src/main.js', '--acceptance', 'verified', '--mutation-boundary', 'evidence only'];
@@ -55,7 +55,7 @@ test('CLI workflow start/next/continue/checkpoint preserves preview-only default
 });
 
 test('native workflow CLI rejects CEOS adapter flags and returns honest blockers in JSON', t => {
-  const project = nativeProject(t);
+  const project = newStudioAiProject(t);
   const base = ['--project', project, '--json'];
   const oldFlag = cli('workflow', 'doctor', ...base, '--ceos-entry', '/legacy/ceos.mjs');
   assert.equal(oldFlag.status, 1);
@@ -72,7 +72,7 @@ test('native workflow CLI rejects CEOS adapter flags and returns honest blockers
 });
 
 test('CLI status lists every active run ID instead of leaving latest ambiguous', t => {
-  const project = nativeProject(t);
+  const project = newStudioAiProject(t);
   const common = ['--project', project, '--json'];
   const start = ['workflow', 'start', ...common, '--pipeline', 'audit-repair-loop',
     '--target', 'test', '--in-scope', 'src', '--acceptance', 'evidence',
@@ -154,21 +154,19 @@ test('CLI executor refuses frozen projects and flags outside continue', t => {
   const start = cli('workflow', 'start', '--project', project, '--pipeline', 'audit-repair-loop',
     '--target', 'Protected', '--in-scope', 'src', '--acceptance', 'no writes',
     '--mutation-boundary', 'none', '--apply', '--json');
-  const run = JSON.parse(start.stdout).runId;
-  const legacy = cli('workflow', 'continue', '--project', project, '--run', run, '--executor', 'codex', '--apply', '--json');
+  assert.equal(start.status, 2);
+  assert.equal(JSON.parse(start.stdout).status, 'BLOCKED');
+  assert.match(JSON.parse(start.stdout).conflicts[0], /STUDIO_ORIGIN/);
+  const legacy = cli('workflow', 'continue', '--project', project, '--run', 'latest', '--executor', 'codex', '--apply', '--json');
   assert.equal(legacy.status, 2);
-  assert.match(JSON.parse(legacy.stdout).conflicts[0], /STUDIO_CREATION_REQUIRED/);
-  assert.equal(readNativeRun(project, run).events.length, 0);
+  assert.match(JSON.parse(legacy.stdout).conflicts[0], /STUDIO_ORIGIN/);
+  assert.equal(fs.existsSync(path.join(project, '.ludory')), false);
   assert.equal(cli('workflow', 'doctor', '--project', project, '--executor', 'codex', '--json').status, 1);
 });
 
 test('CLI recovery previews, requires confirmation, then records an interrupted attempt', t => {
-  const project = nativeProject(t);
+  const project = newStudioAiProject(t);
   const common = ['--project', project, '--json'];
-  fs.writeFileSync(path.join(project, 'ludory.studio.json'), JSON.stringify({
-    schemaVersion: 1, profile: { id: 'web-game', version: 1 },
-    template: { id: 'web-basic', version: 1 }, files: { 'ludory.project.json': 'f'.repeat(64) },
-  }));
   const start = cli('workflow', 'start', ...common, '--pipeline', 'audit-repair-loop',
     '--target', 'recover', '--in-scope', 'src/main.js', '--acceptance', 'verified',
     '--mutation-boundary', 'src/main.js', '--apply');

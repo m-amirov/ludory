@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { nativeProject } from './helpers/project.mjs';
+import { nativeProject, newStudioAiProject } from './helpers/project.mjs';
 import { planWorkflow, executeWorkflow } from '../src/workflows.mjs';
 import { commitNativeEvent, planNativeEvent, readNativeRun } from '../src/store.mjs';
 
@@ -24,7 +24,7 @@ test('native workflow doctor reports health without creating CEOS or Ludory run 
 });
 
 test('native start plans first, commits once and exposes status/next without CEOS', t => {
-  const project = nativeProject(t);
+  const project = newStudioAiProject(t);
   const plan = planWorkflow(project, 'start', startOptions);
   assert.equal(plan.status, 'READY');
   assert.equal(fs.existsSync(path.join(project, '.ludory')), false);
@@ -40,7 +40,7 @@ test('native start plans first, commits once and exposes status/next without CEO
 });
 
 test('continue applies an action request, never pretends an agent finished the stage', t => {
-  const project = nativeProject(t);
+  const project = newStudioAiProject(t);
   const started = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true });
   const resume = planWorkflow(project, 'continue', { run: started.runId });
   assert.equal(executeWorkflow(resume).status, 'READY');
@@ -59,7 +59,7 @@ test('continue applies an action request, never pretends an agent finished the s
 });
 
 test('without native Release verifier terminal PASS remains explicitly blocked', t => {
-  const project = nativeProject(t);
+  const project = newStudioAiProject(t);
   const started = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true });
   const unsupported = planWorkflow(project, 'checkpoint', { run: started.runId,
     stage: 'EVIDENCE_COLLECTED', artifact: 'src/main.js', outcome: 'PASS' });
@@ -69,7 +69,7 @@ test('without native Release verifier terminal PASS remains explicitly blocked',
 });
 
 test('native mutations revalidate project and block stale plans and unknown options', t => {
-  const project = nativeProject(t);
+  const project = newStudioAiProject(t);
   const editing = planWorkflow(project, 'start', startOptions);
   fs.writeFileSync(path.join(project, 'src', 'main.js'), 'changed\n');
   assert.equal(executeWorkflow(editing, { apply: true }).status, 'APPLIED');
@@ -78,12 +78,12 @@ test('native mutations revalidate project and block stale plans and unknown opti
   const updated = JSON.parse(fs.readFileSync(manifest, 'utf8'));
   updated.version = '0.2.0';
   fs.writeFileSync(manifest, `${JSON.stringify(updated)}\n`);
-  assert.throws(() => executeWorkflow(stale, { apply: true }), /SOURCE|STALE/);
+  assert.throws(() => executeWorkflow(stale, { apply: true }), /SOURCE|STALE|STUDIO_ORIGIN/);
   assert.throws(() => planWorkflow(project, 'start', { ...startOptions, command: 'rm -rf' }), /Unknown workflow option/);
 });
 
 test('terminal blocked run cannot continue and multiple active runs need explicit selection', t => {
-  const project = nativeProject(t);
+  const project = newStudioAiProject(t);
   const first = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true });
   const second = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true });
   const listing = planWorkflow(project, 'status');
@@ -99,16 +99,8 @@ test('terminal blocked run cannot continue and multiple active runs need explici
   assert.equal(planWorkflow(project, 'continue', { run: first.runId }).status, 'BLOCKED');
 });
 
-function markNewStudioGame(project) {
-  fs.writeFileSync(path.join(project, 'ludory.studio.json'), JSON.stringify({
-    schemaVersion: 1, profile: { id: 'web-game', version: 1 },
-    template: { id: 'web-basic', version: 1 }, files: { 'ludory.project.json': 'f'.repeat(64) },
-  }));
-}
-
 test('opt-in Codex preview is side-effect-free and --apply records a real unverified execution', t => {
-  const project = nativeProject(t);
-  markNewStudioGame(project);
+  const project = newStudioAiProject(t);
   const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
   const plan = planWorkflow(project, 'continue', { run: id, executor: 'codex' });
   assert.equal(plan.status, 'READY');
@@ -144,8 +136,7 @@ test('opt-in Codex preview is side-effect-free and --apply records a real unveri
 });
 
 test('missing Codex blocks before writing a request; attempted failure is recorded for retry', t => {
-  const project = nativeProject(t);
-  markNewStudioGame(project);
+  const project = newStudioAiProject(t);
   const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
   const preview = planWorkflow(project, 'continue', { run: id, executor: 'codex' });
   const unavailable = executeWorkflow(preview, { apply: true, executor: {
@@ -165,8 +156,7 @@ test('missing Codex blocks before writing a request; attempted failure is record
 });
 
 test('interrupted Codex execution requires explicit recovery confirmation and preserves partial files', t => {
-  const project = nativeProject(t);
-  markNewStudioGame(project);
+  const project = newStudioAiProject(t);
   const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
   const request = planWorkflow(project, 'continue', { run: id, executor: 'codex' });
   fs.writeFileSync(path.join(project, 'src', 'main.js'), '// partial work\n');
@@ -194,8 +184,7 @@ test('interrupted Codex execution requires explicit recovery confirmation and pr
 });
 
 test('lost external result does not restart Codex, replay recovery, or overwrite dirty game files', t => {
-  const project = nativeProject(t);
-  markNewStudioGame(project);
+  const project = newStudioAiProject(t);
   const note = path.join(project, 'untracked-owner-note.txt');
   fs.writeFileSync(note, 'owner draft must survive\n');
   const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
@@ -217,16 +206,15 @@ test('lost external result does not restart Codex, replay recovery, or overwrite
 
 test('executor never starts on a project lacking Studio creation receipt', t => {
   const project = nativeProject(t);
-  const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
-  const preview = planWorkflow(project, 'continue', { run: id, executor: 'codex' });
+  const preview = planWorkflow(project, 'continue', { run: 'latest', executor: 'codex' });
   assert.equal(preview.status, 'BLOCKED');
   assert.match(preview.conflicts[0], /STUDIO|FROZEN|CREATION/);
-  assert.equal(readNativeRun(project, id).events.length, 0);
+  assert.equal(planWorkflow(project, 'start', startOptions).status, 'BLOCKED');
+  assert.equal(fs.existsSync(path.join(project, '.ludory')), false);
 });
 
 test('an amended executor preview cannot redirect Codex to another directory', t => {
-  const project = nativeProject(t);
-  markNewStudioGame(project);
+  const project = newStudioAiProject(t);
   const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
   const plan = planWorkflow(project, 'continue', { run: id, executor: 'codex' });
   const other = nativeProject(t);
@@ -242,8 +230,7 @@ test('an amended executor preview cannot redirect Codex to another directory', t
 });
 
 test('a valid event plan from a different run cannot be spliced into Codex execution', t => {
-  const project = nativeProject(t);
-  markNewStudioGame(project);
+  const project = newStudioAiProject(t);
   const first = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
   const second = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
   const attacker = planWorkflow(project, 'continue', { run: first, executor: 'codex' });
@@ -260,8 +247,7 @@ test('a valid event plan from a different run cannot be spliced into Codex execu
 });
 
 test('a valid same-run checkpoint event cannot be substituted for a Codex request', t => {
-  const project = nativeProject(t);
-  markNewStudioGame(project);
+  const project = newStudioAiProject(t);
   const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
   const preview = planWorkflow(project, 'continue', { run: id, executor: 'codex' });
   const checkpoint = planWorkflow(project, 'checkpoint', {
@@ -278,8 +264,7 @@ test('a valid same-run checkpoint event cannot be substituted for a Codex reques
 });
 
 test('cycle preview is read-only and a successful check stops at unverified manual checkpoint', t => {
-  const project = nativeProject(t);
-  markNewStudioGame(project);
+  const project = newStudioAiProject(t);
   const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
   const plan = planWorkflow(project, 'cycle', { run: id, test: 'src/main.test.js', repairs: '2' });
   assert.equal(plan.status, 'READY');
@@ -304,8 +289,7 @@ test('cycle preview is read-only and a successful check stops at unverified manu
 
 test('cycle performs bounded repairs on failed test telemetry and stops after 3 attempts', t => {
   for (const passingAttempt of [2, Infinity]) {
-    const project = nativeProject(t);
-    markNewStudioGame(project);
+    const project = newStudioAiProject(t);
     const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
     let invoked = 0;
     const executor = { check: () => ({ ok: true }), run: executionPlan => {
@@ -329,8 +313,7 @@ test('cycle performs bounded repairs on failed test telemetry and stops after 3 
 });
 
 test('cycle stops on infrastructure failures without hidden retries', t => {
-  const project = nativeProject(t);
-  markNewStudioGame(project);
+  const project = newStudioAiProject(t);
   const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
   let invoked = 0;
   const result = executeWorkflow(planWorkflow(project, 'cycle', {
@@ -347,11 +330,11 @@ test('cycle stops on infrastructure failures without hidden retries', t => {
 });
 
 test('cycle rejects frozen games, unsafe tests, invalid budgets, pending runs and stale previews', t => {
-  const project = nativeProject(t);
+  const frozen = nativeProject(t);
+  assert.equal(planWorkflow(frozen, 'cycle', { run: 'latest', test: 'src/main.test.js' }).status, 'BLOCKED');
+  const project = newStudioAiProject(t);
   const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
   const args = { run: id, test: 'src/main.test.js' };
-  assert.equal(planWorkflow(project, 'cycle', args).status, 'BLOCKED');
-  markNewStudioGame(project);
   for (const testPath of ['../outside.test.js', '/tmp/a.test.js', 'src/evil;rm.test.js',
     '.ludory/ai/evil.test.js', 'src/main.js', 'src\\main.test.js']) {
     const result = planWorkflow(project, 'cycle', { ...args, test: testPath });
@@ -371,8 +354,7 @@ test('cycle rejects frozen games, unsafe tests, invalid budgets, pending runs an
 });
 
 test('cycle rejects symlinked test ancestors and stops before writes if Codex is unavailable', t => {
-  const project = nativeProject(t);
-  markNewStudioGame(project);
+  const project = newStudioAiProject(t);
   const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
   fs.symlinkSync(path.join(project, 'src'), path.join(project, 'linked'));
   assert.equal(planWorkflow(project, 'cycle', { run: id, test: 'linked/main.test.js' }).status, 'BLOCKED');
@@ -389,8 +371,7 @@ test('cycle rejects symlinked test ancestors and stops before writes if Codex is
 });
 
 test('cycle rechecks test paths between repairs and stops if Codex replaced a test with a symlink', t => {
-  const project = nativeProject(t);
-  markNewStudioGame(project);
+  const project = newStudioAiProject(t);
   const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
   let invoked = 0;
   const result = executeWorkflow(planWorkflow(project, 'cycle', { run: id,

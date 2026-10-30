@@ -6,6 +6,6 @@
   "private": true,
   "engines": { "node": ">=22" },
   "bin": { "ludory": "./bin/ludory.mjs" },
-  "dependencies": { "@ludory/core": "0.1.0", "@ludory/ai": "0.1.0" },
+  "dependencies": { "@ludory/core": "0.1.0", "@ludory/ai": "0.1.0", "@ludory/studio-trust": "0.1.0" },
   "license": "UNLICENSED"
 }

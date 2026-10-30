@@ -65,6 +65,9 @@ Automatic updates require an independent per-user host trust registry. Transferr
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
 Engineering Quality is opt-in and project-scoped; it runs tools only in the Codex sandbox, records bounded local evidence, and never grants Release PASS.
 workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
+Native AI mutations require a new game created by Studio with matching independent host trust registration.
+Copying ludory.studio.json alone cannot authorize a game; STUDIO_ORIGIN blockers mean stop, never auto-enroll.
+Transferred, restored or previously existing games remain read-only until a separately approved trust procedure.
 workflow route is read-only: image routing hands the brief to a dedicated Codex image-generator subagent.
 workflow draft preview never calls the DEV host; --apply probes only the isolated DEV helper and saves a review-only draft if the actual selected model is attested.
 Without a verified DEV host, draft returns a manual handoff packet; draft-import records USER_DECLARED provenance, never HOST_OBSERVED or narrative PASS.

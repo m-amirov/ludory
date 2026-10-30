@@ -4,17 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { runCli } from '../src/cli.mjs';
-import { nativeProject } from '../../ai/test/helpers/project.mjs';
+import { nativeProject, newStudioAiProject } from '../../ai/test/helpers/project.mjs';
 import { planNewRun, commitNewRun, readNativeRun } from '../../ai/src/store.mjs';
 
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
 function game(t, receipt = true) {
-  const project = nativeProject(t);
-  if (receipt) fs.writeFileSync(path.join(project, 'ludory.studio.json'), JSON.stringify({
-    schemaVersion: 1, profile: { id: 'narrative-game' }, template: { id: 'starter' },
-    files: { 'ludory.project.json': hash(fs.readFileSync(path.join(project, 'ludory.project.json'))) },
-  }));
+  const project = receipt ? newStudioAiProject(t) : nativeProject(t);
   fs.writeFileSync(path.join(project, 'episode.md'), 'A storm tests the sailors.');
   fs.writeFileSync(path.join(project, 'candidate.md'), 'A new episode draft, awaiting review.');
   const start = planNewRun(project, { pipeline: 'production-art', scope: {

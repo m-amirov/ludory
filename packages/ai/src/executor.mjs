@@ -2,23 +2,16 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { verifyStudioOrigin } from '@ludory/studio-trust';
 
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const MAX_OUTPUT = 2 * 1024 * 1024;
 const MAX_DURATION_MS = 10 * 60 * 1000;
 export const EMPTY_TRANSCRIPT_SHA256 = sha256('');
 
-/** Historical metadata migration does not create this Studio-owned opt-in receipt. */
+/** A local receipt alone is never an authority to run AI against a game. */
 export function hasStudioCreationReceipt(project) {
-  try {
-    const filename = path.join(project, 'ludory.studio.json');
-    const stat = fs.lstatSync(filename);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024) return false;
-    const receipt = JSON.parse(fs.readFileSync(filename, 'utf8'));
-    return receipt?.schemaVersion === 1 &&
-      typeof receipt.profile?.id === 'string' && typeof receipt.template?.id === 'string' &&
-      /^[a-f0-9]{64}$/.test(receipt.files?.['ludory.project.json'] ?? '');
-  } catch { return false; }
+  return verifyStudioOrigin(project).ok;
 }
 
 /** One bounded Codex subprocess, not a provider broker or a release verifier. */
