@@ -111,6 +111,15 @@ static napi_value close_directory(napi_env env, napi_callback_info info) {
 }
 
 NAPI_MODULE_INIT() {
+  // Security protocol v2 specifically means the handle requests
+  // FILE_LIST_DIRECTORY (share-enforced) and does NOT grant FILE_SHARE_DELETE.
+  // The JavaScript loader rejects old metadata-only binaries before apply.
+  napi_value version;
+  if (napi_create_uint32(env, 2, &version) != napi_ok ||
+      napi_set_named_property(env, exports, "pinContractVersion", version) != napi_ok) {
+    napi_throw_error(env, NULL, "Creating native pin security contract failed");
+    return NULL;
+  }
   napi_property_descriptor functions[] = {
     {"open", NULL, open_directory, NULL, NULL, NULL, napi_default, NULL},
     {"close", NULL, close_directory, NULL, NULL, NULL, napi_default, NULL},

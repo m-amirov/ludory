@@ -138,7 +138,10 @@ code: `ludory components native --json` returns `READY` only after acquiring
 and releasing a real native directory handle, `BLOCKED` with a precise build
 command if Windows setup is missing, or `NOT_REQUIRED` off Windows. Build
 once from the trusted Ludory checkout using `npm run build:windows-pin`, then
-repeat the doctor. Do not use a downloaded or unverified `.node` binary;
+repeat the doctor. The loader requires `pinContractVersion=2` on every use;
+stale `.node` files from earlier metadata-only builds fail closed even if
+they still load and expose the same functions. Rebuild after updating the
+native source. Do not use a downloaded or unverified `.node` binary;
 automated signed/prebuilt distribution is **not yet supported**.
 Never force-remove a lock while another update may still be running. Disk-full,
 file-sharing, unsupported hardlink/rename and other filesystem failures are

@@ -11,7 +11,7 @@ import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { planComponentUpdate, componentStatus, applyComponentPlan,
   previewComponentTrust, acceptComponentTrust } from '../src/component-updates.mjs';
 import { loadCatalog } from '../src/catalog.mjs';
-import { openProtectedDirectory } from '../src/windows-directory-pin.mjs';
+import { openProtectedDirectory, assertWindowsDirectoryPinContract } from '../src/windows-directory-pin.mjs';
 
 const physicalPath = value => {
   const raw = String(value);
@@ -947,7 +947,7 @@ test('Windows NTFS cannot redirect an existing empty managed parent to an outsid
     const response = spawnSync('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
       '-File', probeScript, '-Source', source, '-Target', outside,
-    ], { encoding: 'utf8', timeout: 30000 });
+    ], { cwd: f.root, encoding: 'utf8', timeout: 30000 });
     assert.equal(response.error, undefined, `Junction probe executable failed: ${response.error?.message}`);
     const output = response.stdout.trim();
     assert.ok(response.status === 0 && output === 'CREATED' ||
@@ -972,8 +972,10 @@ test('Windows NTFS cannot redirect an existing empty managed parent to an outsid
   const plan = planComponentUpdate(f.project, { catalog: f.catalog });
   assert.equal(plan.status, 'READY');
   const originalRename = fs.renameSync;
+  const originalLink = fs.linkSync;
   let attempted = false;
   let attack;
+  let outsideEverPublished = false;
   fs.renameSync = function (source, destination, ...args) {
     const result = originalRename.call(this, source, destination, ...args);
     if (!attempted && anchoredBasename(source, 'main.js') &&
@@ -983,17 +985,24 @@ test('Windows NTFS cannot redirect an existing empty managed parent to an outsid
     }
     return result;
   };
+  fs.linkSync = function (source, destination, ...args) {
+    const result = originalLink.call(this, source, destination, ...args);
+    if (fs.existsSync(path.join(outside, 'main.js'))) outsideEverPublished = true;
+    return result;
+  };
   let result;
   let failure;
   try { result = applyComponentPlan(plan); }
   catch (error) { failure = error; }
-  finally { fs.renameSync = originalRename; }
+  finally { fs.renameSync = originalRename; fs.linkSync = originalLink; }
 
   try {
     assert.equal(attempted, true, 'Did not reach the actual empty-directory publication window');
     assert.ok(attack, 'Missing native junction injection result');
     console.log(`Windows in-place NTFS junction injection with managed-parent pin: ${attack.output}`);
     assert.equal(fs.readFileSync(sentinel, 'utf8'), 'EXTERNAL AUTHOR BYTES\n');
+    assert.equal(outsideEverPublished, false,
+      'Transient component publication into the external author directory is forbidden even if rolled back');
     assert.equal(fs.existsSync(path.join(outside, 'main.js')), false,
       'A game component was written into the external author directory');
     if (attack.created) {
@@ -1024,6 +1033,14 @@ test('Windows native pinning must not be silently emulated on an unsupported hos
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-pin-test-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   assert.throws(() => openProtectedDirectory(directory), /Windows.*only|unsupported/i);
+});
+
+test('stale Windows native pins cannot claim the share-enforced security contract', () => {
+  const validShape = { open() {}, close() {} };
+  assert.throws(() => assertWindowsDirectoryPinContract(validShape), /stale|contract|version/i);
+  assert.throws(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 1 }),
+    /stale|contract|version/i);
+  assert.doesNotThrow(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 2 }));
 });
 
 test('Windows-native pinned parents must permit ordinary child reads, metadata and writes', t => {

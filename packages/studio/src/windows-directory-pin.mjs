@@ -5,17 +5,24 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const nativePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../native/build/Release/directory_pin.node');
+const requiredPinContractVersion = 2;
 let native;
 
+export function assertWindowsDirectoryPinContract(candidate) {
+  if (candidate?.pinContractVersion !== requiredPinContractVersion ||
+      typeof candidate.open !== 'function' || typeof candidate.close !== 'function') {
+    throw new Error(`Stale or invalid Win32 native pin security contract: requires pinContractVersion=${requiredPinContractVersion}; rebuild from trusted Ludory source with npm run build:windows-pin`);
+  }
+}
+
 function nativePin() {
-  if (native) return native;
-  try { native = require(nativePath); }
-  catch (cause) {
-    throw new Error('Windows-native directory pin unavailable: build the Win32 N-API module before component apply', { cause });
+  if (!native) {
+    try { native = require(nativePath); }
+    catch (cause) {
+      throw new Error('Windows-native directory pin unavailable: build the Win32 N-API module before component apply', { cause });
+    }
   }
-  if (typeof native.open !== 'function' || typeof native.close !== 'function') {
-    throw new Error('Invalid Windows-native directory pin API');
-  }
+  assertWindowsDirectoryPinContract(native);
   return native;
 }
 

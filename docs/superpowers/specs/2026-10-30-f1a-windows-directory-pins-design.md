@@ -67,3 +67,8 @@ unprotected baseline succeeds; never pass on a missing/unsupported probe.
 The production addon presently needs `npm run build:windows-pin` on Windows.
 Any smoother installation mechanism must remain offline, verified and
 fail-closed; no unauthenticated binary downloads or Windows apply fallback.
+An older addon may remain loadable in ignored `native/build/Release` after a
+source update, so the loader must require a versioned native security contract
+before any directory pin operation. Merely probing `open` and `close` is not
+sufficient to distinguish an old metadata-only binary from the corrected
+share-enforced implementation.
