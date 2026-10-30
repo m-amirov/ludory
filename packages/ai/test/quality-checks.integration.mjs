@@ -99,6 +99,24 @@ test('unconfigured tools produce an actionable read-only blocker without executi
   assert.equal(qualityStatus(project).status, 'NOT_RUN');
 });
 
+test('a quality runner probe revoking Studio trust cannot launch an executor', t => {
+  const project = enabled(t);
+  provisionTools(t, project);
+  const plan = planQualityCheck(project);
+  assert.equal(plan.status, 'READY');
+  let launched = 0;
+  const outcome = executeQualityCheck(plan, { apply: true, executor: {
+    check: () => {
+      fs.appendFileSync(path.join(project, 'ludory.components.json'), ' ');
+      return { ok: true, code: 'AVAILABLE' };
+    },
+    run: () => { launched++; throw new Error('QUALITY_HOST_MUST_NOT_LAUNCH'); },
+  } });
+  assert.equal(launched, 0);
+  assert.equal(outcome.status, 'BLOCKED');
+  assert.match(outcome.reasonCode, /STUDIO_ORIGIN/);
+});
+
 test('sandbox command actually produces a bounded, source-bound quick receipt', t => {
   const project = enabled(t);
   const toolConfig = provisionTools(t, project);

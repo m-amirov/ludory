@@ -27,6 +27,8 @@
 
 The 2026-10-28 foundation baseline is in [the foundation audit](audits/2026-10-28-foundation-acceptance.md). R1–R7 are in `main`; the foundation audit predates them. R4 added manual persistence/audio, R5 a separate Phaser 3 renderer without modifying Core, and R6 an offline Studio browser game with observed browser/mobile emulation. R7 completed technical acceptance, not physical-device or platform SDK verification. C1 Connect Yandex is merged, C2 is a new separate candidate; neither establishes live Yandex runtime acceptance or Release PASS.
 
+F1c is a separate candidate for the AI origin-trust boundary: native AI mutations are restricted to independently host-registered Studio-created games. Existing games remain read-only; modified source files and absence of Git do not revoke a genuine Studio creation pin. Local contract acceptance is documented in the [F1 AI acceptance addendum](audits/2026-10-30-f1-ai-acceptance.md); exact-HEAD CI and owner-authorized merge are separate gates.
+
 ## Source mapping
 
 | Existing component | Destination | Notes |

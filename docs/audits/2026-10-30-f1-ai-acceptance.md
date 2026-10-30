@@ -80,7 +80,7 @@ Command: `node --test packages/ai/test/workflows.test.mjs packages/ai/test/store
 
 No live host call was launched to force a green cell. Host-response fixtures are **test doubles**, not `HOST_OBSERVED_PASS`. There are currently **zero** real-host PASS receipts for this phase.
 
-**Existing compatibility risk (not fixed in F1b):** manual `workflow start --apply` can still create a native run in a non-Studio project. `hasStudioCreationReceipt` checks local marker structure, not cryptographically proven project origin. Direct executor/image/review calls enforce their Studio receipt checks, but users must **not** run manual workflow mutation on frozen legacy games. Tightening creation provenance while preserving legitimate dirty/unversioned Studio games needs a separately scoped migration-safe design.
+**Historical F1b compatibility risk (addressed by the separate F1c candidate below, not by F1b):** manual `workflow start --apply` could create a native run in a non-Studio project. The old `hasStudioCreationReceipt` checked local marker structure instead of independent Studio host registration. The F1b baseline therefore did **not** authorize mutation on frozen legacy games. F1c adds a separately reviewed origin guard; this historical F1b observation must not be read as current F1c behavior.
 
 ## Old Draft PR comparison (no mutation)
 
@@ -94,3 +94,20 @@ Post-review local verification of the same code tree: `npm test` **exit 0** (665
 Published code HEAD `bcd953326f1e85974e383583ed92d2ece4e72bbc`: GitHub **Core checks** run `41065404017` completed SUCCESS with four jobs (Windows and Ubuntu × Node 22/24); the Windows jobs include `build:windows-pin` and component tests. **Runtime browser R6** run `41065404016` completed SUCCESS, with Chromium/Firefox/WebKit setup and browser smoke steps. Independent read-only review found no confirmed Critical/Important in the final crash-recovery code. These receipts prove contract/CI coverage, not a live Web DEV browser session. The present documentation update is not included in that tested code SHA, so its new exact HEAD must pass CI before merge.
 
 F1b reliability, fail-closed routing, crash-artifact reconciliation and owner-confirmed recovery: **CONTRACT_PASS** in Linux fixtures and exact-code-HEAD Linux/Windows CI. Real authenticated Web DEV text-only route, Codex-native ImageGen execution and independent artistic review: **BLOCKED/NOT_OBSERVED**; there are no host receipts and no synthetic acceptance. F1 **combined** sign-off, F2–F6 and any platform Release gate remain **NOT_RUN/BLOCKED** separately. F1b is eligible for code review after exact-HEAD CI, but **not automatically merge-authorized**: independent review, evidence alignment and an explicit owner integration decision remain required. Frozen projects remain untouched.
+
+## F1c addendum — independent Studio-origin guard (candidate)
+
+**Scope:** approved [origin-guard design](../superpowers/specs/2026-10-30-f1c-studio-origin-guard-design.md) and [implementation plan](../superpowers/plans/2026-10-30-f1c-studio-origin-guard.md), based on accepted `main` commit `468bbfa4aad76f8bfc9be95156757a391c59080e` (PR #47). Isolated branch `feat/f1c-ai-origin-trust`. This addendum supersedes the **F1b-only** historical compatibility risk above; it does not retroactively alter F1b's observed tests.
+
+| Acceptance boundary | Local result | Evidence and limitation |
+| --- | --- | --- |
+| Independent origin registration | `CONTRACT_PASS` | New `@ludory/studio-trust` verifier compares the physical project root and three bounded, safe, byte-pinned Studio files against the independent host registry; a copied or fabricated `ludory.studio.json` cannot grant trust. No auto-enrollment. |
+| Manual native workflow | `CONTRACT_PASS` | `start`, `continue`, `checkpoint`, `cycle`, Codex apply and storage recovery validate origin before mutation. A plan becomes invalid if the host pin or pinned files change before apply, or if the root inode changes. |
+| Foreign/frozen project isolation | `CONTRACT_PASS` | Foreign and forged projects block direct route, draft, image, narrative/art review, Quality enable/check and native mutations with no host calls or writes; read-only doctor/status/next and orphan inventory remain available. `recover-storage --apply` fails closed. |
+| Legitimate Studio development | `CONTRACT_PASS` | Real `planCreate/applyCreatePlan` fixtures demonstrate start → continue → checkpoint on a game **without Git** and on a Git game with modified and untracked owner source files. No fake Studio marker is used to authorize positive tests. |
+| Engineering Quality executor | `CONTRACT_PASS` | A runner availability probe that revokes Studio origin no longer launches the runner. Already staged per-attempt QA files are reported as writes, not described as an empty mutation. |
+| F1c full local checks | `CONTRACT_PASS` | `npm test`: exit 0, **682 Node tests** (669 PASS, 13 OS-specific SKIP, 0 FAIL) plus **18/18** Engineering Quality integration. `npm run check`, `node examples/core-session.mjs`, `git diff --check`: exit 0. Process-capable Linux test environment; not a Windows test. |
+| Exact candidate HEAD Linux/Windows CI | `NOT_RUN` | Must run on the eventual pushed PR HEAD, including Windows native pin and normal Linux checks. Local evidence cannot substitute for CI. |
+| Authenticated Web DEV, ImageGen, platform, rights and Release | `BLOCKED/NOT_RUN` | F1c did not call real paid hosts, use physical devices, publish VK/Yandex or issue art/rights/Release PASS. External-host capability and platform checks remain independent later gates. |
+
+**Decision:** F1c has **local contract acceptance only**. Do not merge until exact-HEAD CI and review evidence have been checked and the owner authorizes integration. Frozen CEOS/Starter Kit and existing game repositories were not accessed or modified.

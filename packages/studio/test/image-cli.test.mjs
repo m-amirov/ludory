@@ -4,17 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { runCli } from '../src/cli.mjs';
-import { nativeProject } from '../../ai/test/helpers/project.mjs';
+import { nativeProject, newStudioAiProject } from '../../ai/test/helpers/project.mjs';
 import { planNewRun, commitNewRun, readNativeRun } from '../../ai/src/store.mjs';
 import { png } from '../../ai/test/helpers/images.mjs';
 
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 function game(t, studio = true) {
-  const project = nativeProject(t);
-  if (studio) fs.writeFileSync(path.join(project, 'ludory.studio.json'), JSON.stringify({
-    schemaVersion: 1, profile: { id: 'web-game' }, template: { id: 'starter' },
-    files: { 'ludory.project.json': sha(fs.readFileSync(path.join(project, 'ludory.project.json'))) },
-  }));
+  const project = studio ? newStudioAiProject(t) : nativeProject(t);
   fs.writeFileSync(path.join(project, 'brief.md'), 'winter harbor');
   fs.writeFileSync(path.join(project, 'image.png'), png);
   const run = commitNewRun(planNewRun(project, { pipeline: 'production-art', scope: {

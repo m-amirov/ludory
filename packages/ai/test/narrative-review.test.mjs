@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { nativeProject } from './helpers/project.mjs';
+import { nativeProject, newStudioAiProject } from './helpers/project.mjs';
 import { planNewRun, commitNewRun, readNativeRun, planNativeEvent, commitNativeEvent } from '../src/store.mjs';
 import { planDevDraftImport, executeDevDraftImport } from '../src/draft-tasks.mjs';
 import { planWorkflow, executeWorkflow } from '../src/workflows.mjs';
@@ -18,11 +18,7 @@ const visualOnlyV2 = { available: true, reasonCode: 'AVAILABLE', routeAvailable:
     url: 'https://chatgpt.com/', solAvailable: true } };
 
 function game(t, kind = 'episode-script', draftText = 'S01 Maya accepts Leo. He promises to return. S02 Leo returns and apologizes.') {
-  const project = nativeProject(t);
-  fs.writeFileSync(path.join(project, 'ludory.studio.json'), JSON.stringify({
-    schemaVersion: 1, profile: { id: 'narrative-game' }, template: { id: 'starter' },
-    files: { 'ludory.project.json': digest(fs.readFileSync(path.join(project, 'ludory.project.json'))) },
-  }));
+  const project = newStudioAiProject(t);
   fs.writeFileSync(path.join(project, 'brief.md'), 'S01 Maya chooses whether to trust Leo at the harbor.');
   fs.writeFileSync(path.join(project, 'draft.md'), draftText);
   const created = commitNewRun(planNewRun(project, { pipeline: 'production-art', scope: {

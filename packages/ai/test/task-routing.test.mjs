@@ -1,24 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { planTaskRoute } from '../src/task-routing.mjs';
 import { discoverTaskCapabilities } from '../src/capabilities.mjs';
+import { newStudioAiProject } from './helpers/project.mjs';
 
 function freshStudioGame(t) {
-  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-routing-'));
-  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(project, 'ludory.project.json'), `${JSON.stringify({
-    schemaVersion: 1, id: 'route-game', version: '0.1.0',
-    title: { en: 'Route Game' }, engine: 'web', targets: ['vk-games'],
-  })}\n`);
-  fs.writeFileSync(path.join(project, 'ludory.studio.json'), `${JSON.stringify({
-    schemaVersion: 1, profile: { id: 'web-game', version: '1.0.0' },
-    template: { id: 'web-basic', version: '1.0.0' },
-    files: { 'ludory.project.json': 'a'.repeat(64) },
-  })}\n`);
-  return project;
+  return newStudioAiProject(t, { git: false });
 }
 
 test('the five task kinds preserve their selected preferred executors in read-only previews', t => {
@@ -37,7 +26,7 @@ test('the five task kinds preserve their selected preferred executors in read-on
     assert.equal(result.engine, 'ludory-ai');
     assert.deepEqual(result.writes, []);
   }
-  assert.deepEqual(fs.readdirSync(project).sort(), ['ludory.project.json', 'ludory.studio.json']);
+  assert.equal(fs.existsSync(path.join(project, '.ludory')), false);
 });
 
 test('the router rejects arbitrary task kinds, non-image model pins and unrecognized options', t => {
