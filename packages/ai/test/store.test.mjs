@@ -87,7 +87,10 @@ test('SIGKILL between event link and commit marker leaves a recoverable uncommit
   `;
   const killed = spawnSync(process.execPath, ['--input-type=module', '-e', child, project, run.run.runId],
     { encoding: 'utf8', timeout: 10000 });
-  assert.equal(killed.signal, 'SIGKILL', killed.stderr);
+  assert.ok(killed.signal === 'SIGKILL' || (process.platform === 'win32' && killed.status !== 0),
+    `worker did not terminate: ${killed.stderr}`);
+  assert.equal(fs.existsSync(path.join(project, '.ludory', 'ai', 'runs', run.run.runId,
+    'events', '000001.json')), true, 'worker must have linked the uncommitted event before termination');
   assert.throws(() => readNativeRun(project, run.run.runId), /NATIVE_INTEGRITY/);
   const preview = inspectNativeStorageRecovery(project, run.run.runId);
   assert.equal(preview.status, 'NEEDS_CONFIRMATION');
