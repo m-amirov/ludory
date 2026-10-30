@@ -157,7 +157,10 @@ test('receipt tampering, unsafe reviews directory and post-turn source edits fai
   assert.equal(first.code, 0);
   const file = path.join(item.project, '.ludory', 'ai', 'runs', item.run, 'reviews', '000001.json');
   fs.writeFileSync(file, JSON.stringify({ invalid: true }));
-  assert.throws(() => readNativeArtReviews(item.project, item.run), /ART_REVIEW_INTEGRITY/);
+  // With cross-ledger replay checks, corruption is detected at the native
+  // result boundary before the standalone artistic ledger can be returned.
+  assert.throws(() => readNativeArtReviews(item.project, item.run),
+    /ART_REVIEW_INTEGRITY|NATIVE_INTEGRITY_ART_REVIEW_RESULT/);
   const blocked = await cli([...item.args, '--apply'], { devHost: () => host().instance });
   assert.notEqual(blocked.code, 0);
   // Separate project for a storage-link attack; no existing receipt is overwritten.

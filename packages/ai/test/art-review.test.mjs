@@ -78,6 +78,79 @@ test('a timed-out art host leaves durable intent and never silently resubmits a 
   assert.equal(calls, 1, 'no implicit second paid browser submission');
 });
 
+test('intent publication requires flushed event, marker and directory before a paid host turn', async t => {
+  const item = await imported(t);
+  const plan = planArtReview(item.project, options(item), discovered);
+  const originalFsync = fs.fsyncSync;
+  let fileFlushes = 0;
+  let directoryFlushes = 0;
+  let calls = 0;
+  fs.fsyncSync = fd => {
+    if (fs.fstatSync(fd).isDirectory()) {
+      directoryFlushes++;
+      const error = new Error('SIMULATED_DIRECTORY_FSYNC_FAILURE');
+      error.code = 'EIO';
+      throw error;
+    }
+    fileFlushes++;
+    return originalFsync(fd);
+  };
+  try {
+    await assert.rejects(executeArtReview(plan, { apply: true, host: {
+      probe: async () => observedWeb,
+      turn: async () => { calls++; throw new Error('HOST_TURN_SHOULD_NOT_RUN'); },
+    } }), /NATIVE_STORAGE_DURABILITY_UNVERIFIED/);
+  } finally { fs.fsyncSync = originalFsync; }
+  assert.ok(fileFlushes >= 2, 'both art request data and marker must be flushed');
+  assert.ok(directoryFlushes >= 1, 'published directory metadata must be flushed');
+  assert.equal(calls, 0, 'no external browser operation without a durable request');
+  const replay = planArtReview(item.project, options(item), discovered);
+  assert.notEqual(replay.status, 'READY', 'ambiguous publication remains fail-closed');
+});
+
+test('failures at each intent publication boundary prohibit the external host call', async t => {
+  for (const boundary of ['event-file-flush', 'marker-file-flush', 'first-link', 'commit-link']) {
+    await t.test(boundary, async sub => {
+      const item = await imported(sub);
+      const plan = planArtReview(item.project, options(item), discovered);
+      const originalFsync = fs.fsyncSync;
+      const originalLink = fs.linkSync;
+      let flushed = 0;
+      let linked = 0;
+      let calls = 0;
+      fs.fsyncSync = fd => {
+        if (!fs.fstatSync(fd).isDirectory() && ++flushed ===
+            (boundary === 'event-file-flush' ? 1 : boundary === 'marker-file-flush' ? 2 : -1)) {
+          throw new Error('INJECTED_NATIVE_WRITE_FAILURE');
+        }
+        return originalFsync(fd);
+      };
+      fs.linkSync = (...args) => {
+        if (++linked === (boundary === 'first-link' ? 1 : boundary === 'commit-link' ? 2 : -1)) {
+          throw new Error('INJECTED_NATIVE_LINK_FAILURE');
+        }
+        return originalLink(...args);
+      };
+      try {
+        await assert.rejects(executeArtReview(plan, { apply: true, host: {
+          probe: async () => observedWeb,
+          turn: async () => { calls++; throw new Error('UNEXPECTED_PAID_HOST_TURN'); },
+        } }), /NATIVE_STORAGE_DURABILITY_UNVERIFIED|NATIVE_EVENT_CONFLICT/);
+      } finally {
+        fs.fsyncSync = originalFsync;
+        fs.linkSync = originalLink;
+      }
+      assert.equal(calls, 0, `${boundary} failure must prohibit the browser turn`);
+      if (boundary === 'commit-link') {
+        assert.throws(() => readNativeRun(item.project, item.run), /NATIVE_INTEGRITY_EVENT_RECEIPT_MISSING/);
+        assert.equal(planArtReview(item.project, options(item), discovered).status, 'BLOCKED');
+      } else {
+        assert.equal(readNativeRun(item.project, item.run).pendingArtReview, null);
+      }
+    });
+  }
+});
+
 test('owner-confirmed recovery closes pending visual intent without touching partial owner edits', async t => {
   const item = await imported(t);
   const original = planArtReview(item.project, options(item), discovered);
@@ -130,6 +203,31 @@ test('recover preserves a witnessed art receipt when the final native event was 
   assert.equal(planArtReview(item.project, options(item), discovered).reasonCode, 'ART_ALREADY_ACCEPTED');
 });
 
+test('stale interrupted-recovery plan cannot override a newly committed witnessed receipt', async t => {
+  const item = await imported(t);
+  const original = planArtReview(item.project, options(item), discovered);
+  const requested = commitNativeEvent(planNativeEvent(item.project, item.run, {
+    kind: 'ART_REVIEW_REQUESTED', stage: original.stage,
+    artReview: { image: original.image, brief: original.brief, sources: original.sources,
+      modelObserved: 'gpt-6-sol' },
+  }));
+  const stale = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
+  assert.equal(stale.nativePlan.event.artReviewResult.code, 'ART_REVIEW_INTERRUPTED');
+  const witness = witnessedArt(original);
+  recordNativeArtReview(item.project, item.run, requested.headSha256, {
+    provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', visualInputObserved: true,
+    artRequestSha256: requested.pendingArtReview, verdict: 'PASS_ART',
+    reasonCode: 'ART_REPORT_STRUCTURED', summary: 'Scene matches source.', findings: [],
+    hostObservation: witness.hostObservation, image: original.image,
+    brief: original.brief, sources: original.sources,
+  });
+  assert.throws(() => executeWorkflow(stale, { apply: true }), /NATIVE_ART_REVIEW_RESULT_STALE/);
+  assert.equal(readNativeRun(item.project, item.run).pendingArtReview, requested.pendingArtReview);
+  const fresh = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
+  assert.equal(fresh.nativePlan.event.artReviewResult.code, 'ART_REVIEW_OBSERVED');
+  assert.equal(executeWorkflow(fresh, { apply: true }).status, 'APPLIED');
+});
+
 test('the same pending visual request cannot produce two REWORK receipts', async t => {
   const item = await imported(t);
   const original = planArtReview(item.project, options(item), discovered);
@@ -171,6 +269,20 @@ test('old art host response cannot commit a review after owner has recovered the
   assert.equal(readNativeArtReviews(item.project, item.run).length, 0);
 });
 
+test('missing art receipts after a witnessed result cannot make a paid review appear new', async t => {
+  const item = await imported(t);
+  const original = planArtReview(item.project, options(item), discovered);
+  const observed = await executeArtReview(original, { apply: true, host: {
+    probe: async () => observedWeb, turn: async () => witnessedArt(original),
+  } });
+  assert.equal(observed.verdict, 'PASS_ART');
+  const directory = path.join(item.project, '.ludory', 'ai', 'runs', item.run, 'reviews');
+  fs.renameSync(directory, path.join(item.project, 'moved-review-receipts'));
+  const repeated = planArtReview(item.project, options(item), discovered);
+  assert.equal(repeated.status, 'BLOCKED');
+  assert.equal(repeated.reasonCode, 'ART_RUN_UNAVAILABLE');
+});
+
 test('art review preview only accepts a recorded original and carries exact image/source hashes without writes', async t => {
   const item = await imported(t);
   const runDir = path.join(item.project, '.ludory', 'ai', 'runs', item.run);
@@ -196,6 +308,32 @@ test('art review requires explicit context and verified Web image route', async 
     { discover: () => ({ ...observedWeb, modelRouteAvailable: 'chatgpt-web/gpt-5.6-sol' }) }).status, 'NEEDS_USER_ACTION');
   assert.equal(planArtReview(item.project, options(item),
     { discover: () => ({ ...observedWeb, browserObservationV2Available: false }) }).status, 'NEEDS_USER_ACTION');
+});
+
+test('inherited or accessor-supplied v2 host preflight cannot authorize a paid browser turn', async t => {
+  const item = await imported(t);
+  const legacy = { available: true, reasonCode: 'AVAILABLE', transportVerified: true,
+    entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol' };
+  const inherited = Object.assign(Object.create({ browserObservationV2Available: true,
+    routeAvailable: 'web-dev', modelRouteAvailable: 'chatgpt-web/gpt-6-sol', reasoningRequired: 'high',
+    preflight: observedWeb.preflight }), legacy);
+  let accessorReads = 0;
+  const accessors = { ...legacy };
+  for (const key of ['browserObservationV2Available', 'routeAvailable', 'modelRouteAvailable',
+    'reasoningRequired', 'preflight']) Object.defineProperty(accessors, key, {
+    enumerable: true, get() { accessorReads++; return observedWeb[key]; },
+  });
+  for (const forged of [inherited, accessors]) {
+    const preview = planArtReview(item.project, options(item), { discover: () => forged });
+    assert.equal(preview.status, 'NEEDS_USER_ACTION');
+    let calls = 0;
+    await executeArtReview(preview, { apply: true, host: {
+      probe: async () => forged, turn: async () => { calls++; return witnessedArt(preview); },
+    } });
+    assert.equal(calls, 0);
+    assert.equal(readNativeRun(item.project, item.run).pendingArtReview, null);
+  }
+  assert.equal(accessorReads, 0, 'preflight must not invoke untrusted accessor properties');
 });
 
 test('art review refuses unimported candidates, image corruption, linked text and edited context before the host', async t => {

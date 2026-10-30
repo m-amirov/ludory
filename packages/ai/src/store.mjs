@@ -29,6 +29,24 @@ const ARCHIVED_IMAGE_REQUEST_MODELS = new Map([
 const IMAGE_CODES = new Set(['HOST_OBSERVED', 'IMAGE_EXECUTOR_UNVERIFIED', 'IMAGE_EXECUTOR_INTERRUPTED']);
 const ART_REVIEW_CODES = new Set(['ART_REVIEW_OBSERVED', 'ART_REVIEW_INTERRUPTED']);
 
+/** A paid host turn must never start until its intent has crossed the filesystem barrier.
+ * On platforms that cannot flush directory metadata (including some Windows filesystems),
+ * fail closed instead of silently claiming an unproven durable journal. */
+function flushNativeDirectory() {
+  let fd;
+  try {
+    fd = fs.openSync('.', fs.constants.O_RDONLY);
+    if (!fs.fstatSync(fd).isDirectory()) throw new Error('NOT_A_DIRECTORY');
+    fs.fsyncSync(fd);
+  } catch { throw new Error('NATIVE_STORAGE_DURABILITY_UNVERIFIED'); }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
+}
+
+function flushNativeFile(fd) {
+  try { fs.fsyncSync(fd); }
+  catch { throw new Error('NATIVE_STORAGE_DURABILITY_UNVERIFIED'); }
+}
+
 function validateArtRequest(request, current) {
   const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED')?.manual;
   if (!imported || !request || typeof request !== 'object' || Array.isArray(request) ||
@@ -747,7 +765,15 @@ export function readNativeRun(projectDir, runRef = 'latest') {
           event.outcome !== null || event.artifacts?.length) {
         throw new Error('NATIVE_INTEGRITY_ART_REVIEW_RESULT');
       }
-      try { validateArtResult(event.artReviewResult); }
+      try {
+        validateArtResult(event.artReviewResult);
+        if (event.artReviewResult.code === 'ART_REVIEW_OBSERVED') {
+          const witnessed = readArtReceiptEntries(project, runId, run.projectId).filter(item =>
+            item.artRequestSha256 === pendingArtReview &&
+            sha256(serial(item)) === event.artReviewResult.receiptSha256);
+          if (witnessed.length !== 1) throw new Error('ART_REVIEW_RECEIPT_MISSING');
+        }
+      }
       catch { throw new Error('NATIVE_INTEGRITY_ART_REVIEW_RESULT'); }
       pendingArtReview = null;
       pendingArtRequest = null;
@@ -764,11 +790,9 @@ export function readNativeRun(projectDir, runRef = 'latest') {
     integrity: { ok: true, issues: [] } };
 }
 
-/** A separate, append-only artistic ledger. Review receipts do not advance workflow stages. */
-export function readNativeArtReviews(projectDir, runRef) {
-  const project = canonicalPhysicalDirectory(projectDir);
-  const current = readNativeRun(project, runRef);
-  const runId = current.run.runId;
+/** Internal art-ledger parser: does not call readNativeRun, so witnessed native results
+ * can verify their receipt without recursive integrity reads. */
+function readArtReceiptEntries(project, runId, projectId) {
   const root = checkedRunDir(project, runId);
   const directory = path.join(root, 'reviews');
   try { fs.lstatSync(directory); }
@@ -792,7 +816,7 @@ export function readNativeArtReviews(projectDir, runRef) {
     } catch { throw new Error('ART_REVIEW_INTEGRITY_FILE'); }
     if (marker.schemaVersion !== 1 || marker.index !== i || marker.sha256 !== sha256(bytes) ||
         receipt.schemaVersion !== 1 || receipt.index !== i ||
-        receipt.projectId !== current.run.projectId || receipt.runId !== runId ||
+        receipt.projectId !== projectId || receipt.runId !== runId ||
         !/^[a-f0-9]{64}$/.test(receipt.runHeadSha256 ?? '') ||
         receipt.prevSha256 !== (previous ?? receipt.runHeadSha256) ||
         receipt.provenance !== 'HOST_OBSERVED' || receipt.modelObserved !== 'gpt-6-sol' ||
@@ -826,6 +850,13 @@ export function readNativeArtReviews(projectDir, runRef) {
     history.push(receipt);
   }
   return history;
+}
+
+/** A separate, append-only artistic ledger. Review receipts do not advance workflow stages. */
+export function readNativeArtReviews(projectDir, runRef) {
+  const project = canonicalPhysicalDirectory(projectDir);
+  const current = readNativeRun(project, runRef);
+  return readArtReceiptEntries(project, current.run.runId, current.run.projectId);
 }
 
 /** Atomically commit a witnessed review; refuse stale inputs and foreign filesystem entries. */
@@ -900,6 +931,7 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
       const committed = fs.openSync(`${prefix}.commit.json`, EXCLUSIVE, 0o600);
       try { fs.writeFileSync(committed, marker); fs.fsyncSync(committed); }
       finally { fs.closeSync(committed); }
+      flushNativeDirectory();
     }));
     const verified = readNativeArtReviews(source.project, current.run.runId);
     if (verified.length !== index) throw new Error('ART_REVIEW_INTEGRITY_SEQUENCE');
@@ -1147,6 +1179,11 @@ export function commitNativeEvent(plan) {
     if (plan.event.kind === 'ART_REVIEW_RESULT') {
       if (!current.pendingArtReview) throw new Error('NATIVE_ART_REVIEW_RESULT_WITHOUT_REQUEST');
       validateArtResult(plan.event.artReviewResult);
+      if (plan.event.artReviewResult.code === 'ART_REVIEW_INTERRUPTED' &&
+          readNativeArtReviews(plan.project, current.run.runId).some(item =>
+            item.artRequestSha256 === current.pendingArtReview)) {
+        throw new Error('NATIVE_ART_REVIEW_RESULT_STALE');
+      }
       verifyArtResultReceipt(plan.project, current.run.runId, current.pendingArtReview,
         plan.event.artReviewResult);
     }
@@ -1163,18 +1200,29 @@ export function commitNativeEvent(plan) {
       const receiptBytes = serial({ schemaVersion: 1, index: plan.event.index, eventSha256: sha256(eventBytes) });
       const tmpEvent = `.pending-${crypto.randomBytes(12).toString('hex')}`;
       const tmpReceipt = `.pending-${crypto.randomBytes(12).toString('hex')}`;
-      const eventFd = fs.openSync(tmpEvent, EXCLUSIVE, 0o600);
-      try { fs.writeFileSync(eventFd, eventBytes); } finally { fs.closeSync(eventFd); }
+      const durableArtEvent = ['ART_REVIEW_REQUESTED', 'ART_REVIEW_RESULT'].includes(plan.event.kind);
       try {
+        const eventFd = fs.openSync(tmpEvent, EXCLUSIVE, 0o600);
+        try { fs.writeFileSync(eventFd, eventBytes); if (durableArtEvent) flushNativeFile(eventFd); }
+        finally { fs.closeSync(eventFd); }
         const receiptFd = fs.openSync(tmpReceipt, EXCLUSIVE, 0o600);
-        try { fs.writeFileSync(receiptFd, receiptBytes); } finally { fs.closeSync(receiptFd); }
+        try { fs.writeFileSync(receiptFd, receiptBytes); if (durableArtEvent) flushNativeFile(receiptFd); }
+        finally { fs.closeSync(receiptFd); }
         fs.linkSync(tmpEvent, `${prefix}.json`);
         // Commit marker published last: an interrupted event is never accepted.
         fs.linkSync(tmpReceipt, `${prefix}.commit.json`);
-      } catch { throw new Error('NATIVE_EVENT_CONFLICT'); }
+        // Persist both final names AND the removal of temporary aliases in one
+        // directory barrier. No paid turn may start while pending names survive.
+        fs.unlinkSync(tmpEvent);
+        fs.unlinkSync(tmpReceipt);
+        if (durableArtEvent) flushNativeDirectory();
+      } catch (error) {
+        if (error.message === 'NATIVE_STORAGE_DURABILITY_UNVERIFIED') throw error;
+        throw new Error('NATIVE_EVENT_CONFLICT');
+      }
       finally {
         // Only unique temporary files created by this operation may be removed.
-        fs.unlinkSync(tmpEvent);
+        if (fs.existsSync(tmpEvent)) fs.unlinkSync(tmpEvent);
         if (fs.existsSync(tmpReceipt)) fs.unlinkSync(tmpReceipt);
       }
     }));

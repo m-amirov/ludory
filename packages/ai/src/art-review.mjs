@@ -6,7 +6,7 @@ import { readNativeRun, readNativeArtReviews, recordNativeArtReview,
   planNativeEvent, commitNativeEvent } from './store.mjs';
 import { planDevDraft } from './draft-tasks.mjs';
 import { hasStudioCreationReceipt } from './executor.mjs';
-import { isVerifiedCapability } from './capabilities.mjs';
+import { isVerifiedCapability, ownData } from './capabilities.mjs';
 
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const equals = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -16,9 +16,18 @@ const fail = (project, runId, code) => ({ engine: 'ludory-ai', operation: 'art-r
 const validPath = value => typeof value === 'string' && value.length > 0 && value.length <= 200 &&
   !/[\\:\0]/.test(value) && !value.startsWith('/') &&
   value.split('/').every(part => part && part !== '.' && part !== '..');
-const validArtPreflight = cap => Boolean(cap) && isVerifiedCapability(cap, 'webDev') &&
-  cap.browserObservationV2Available === true && cap.routeAvailable === 'web-dev' &&
-  cap.modelRouteAvailable === 'chatgpt-web/gpt-6-sol' && cap.reasoningRequired === 'high';
+const validArtPreflight = cap => {
+  const preflight = ownData(cap, 'preflight');
+  return isVerifiedCapability(cap, 'webDev') &&
+    ownData(cap, 'browserObservationV2Available') === true &&
+    ownData(cap, 'routeAvailable') === 'web-dev' &&
+    ownData(cap, 'modelRouteAvailable') === 'chatgpt-web/gpt-6-sol' &&
+    ownData(cap, 'reasoningRequired') === 'high' &&
+    ownData(preflight, 'authenticated') === true &&
+    ownData(preflight, 'newChat') === true &&
+    ownData(preflight, 'solAvailable') === true &&
+    typeof ownData(preflight, 'url') === 'string' && Boolean(ownData(preflight, 'url'));
+};
 
 function sourceImage(project, output) {
   const relative = output.outputPath;
