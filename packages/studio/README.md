@@ -125,7 +125,9 @@ all archive slots are flat files (`new-0`, `backup-0`, `quarantine-0`, etc.)
 under a Win32-native protected archive directory because NTFS permits moving
 some normally-open child directories; on POSIX, use the `new/`, `backup/`,
 `quarantine/` directories. Windows apply requires a native N-API module built
-with `npm run build:windows-pin` (Node 22+, node-gyp, MSVC build tools). The
+with `npm run build:windows-pin` (Node 22.9+ for node-gyp 12.4, MSVC build
+tools including Visual Studio 2026). The general Ludory runtime permits older
+Node 22 releases, but Windows native component apply does not. The
 module opens physical directories with read/write sharing but denies delete
 sharing. Without a successfully loaded and identity-checked module, Windows
 apply must refuse the operation; ordinary Node directory descriptors do not

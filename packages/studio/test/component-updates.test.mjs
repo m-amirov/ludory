@@ -781,7 +781,9 @@ test('swapped backup archive cannot move an original into an external directory'
     }
     return originalRename.call(this, source, destination, ...args);
   };
-  try { assert.throws(() => applyComponentPlan(plan), /changed|unsafe|rollback|conflict|exists|EEXIST|ELOOP|ENOENT|EPERM|finalization/i); }
+  // A Windows-native pin may reject the injected archive rename with EBUSY
+  // before the replacement symlink can be installed. That is the safer path.
+  try { assert.throws(() => applyComponentPlan(plan), /changed|unsafe|rollback|conflict|exists|EEXIST|ELOOP|ENOENT|EPERM|EBUSY|resource busy|finalization/i); }
   finally { fs.renameSync = originalRename; }
   assert.equal(swapped, true);
   assert.equal(fs.readFileSync(path.join(outside, 'backup', '0'), 'utf8'), 'external owner content\n');
