@@ -9,6 +9,7 @@ import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { planComponentUpdate, componentStatus, applyComponentPlan,
   previewComponentTrust, acceptComponentTrust } from '../src/component-updates.mjs';
 import { loadCatalog } from '../src/catalog.mjs';
+import { openProtectedDirectory } from '../src/windows-directory-pin.mjs';
 
 const physicalPath = value => {
   const raw = String(value);
@@ -921,7 +922,8 @@ test('Windows-held flat archive and project root must prevent rename while publi
   if (process.platform !== 'win32') return t.skip('Windows filesystem semantics only');
   const f = fixture(t);
   const archive = fs.mkdtempSync(path.join(f.project, '.ludory-components-backup-'));
-  const heldFd = fs.openSync(archive, fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY || 0));
+  const heldFd = openProtectedDirectory(archive);
+  const rootFd = openProtectedDirectory(f.project);
   try {
     for (const target of [archive, f.project]) {
       const renamed = `${target}-renamed`;
@@ -935,8 +937,16 @@ test('Windows-held flat archive and project root must prevent rename while publi
         `Unexpected filesystem error while checking Windows pin: ${target}`);
     }
   } finally {
+    fs.closeSync(rootFd);
     fs.closeSync(heldFd);
   }
+});
+
+test('Windows native pinning must not be silently emulated on an unsupported host', t => {
+  if (process.platform === 'win32') return t.skip('Non-Windows fail-closed contract only');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-pin-test-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  assert.throws(() => openProtectedDirectory(directory), /Windows.*only|unsupported/i);
 });
 
 test('Windows-style flat staged file swap with identical bytes cannot publish an external hardlink', t => {
