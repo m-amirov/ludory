@@ -20,6 +20,12 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci --ignore-scripts
+      - if: runner.os == 'Windows'
+        run: npm run build:windows-pin
+      # Fail early on actual NTFS native-handle and in-place reparse-point
+      # regressions; the complete suite still runs after this focused gate.
+      - if: runner.os == 'Windows'
+        run: node packages/studio/test/component-updates.test.mjs
       - run: npm test
       - run: npm run check
       - run: node examples/core-session.mjs

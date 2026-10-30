@@ -50,6 +50,119 @@ a CEOS orchestration replacement, a runtime migrator or a release/publishing
 pipeline. Studio's separate `runtime-basic` template is for **new** games only.
 Those features require independent validation before any legacy adoption.
 
+## Safe managed component updates (new Studio games only)
+
+Every `create --apply` now writes a dedicated `ludory.components.json` ownership
+record for eligible Studio-generated template assets. It excludes
+`package.json`, `AGENTS.md`, `game-spec.yaml`, `ludory.project.json`,
+`ludory.studio.json`, `.ludory/**`, hidden paths (`.env`, `.github/**`),
+`rights/**`, `saves/**`, `evidence/**`, user config and transaction metadata.
+The older creation receipt is informational **and cannot grant update ownership**.
+The updater additionally verifies the new state against the narrow original
+receipt and retained `component-transition.json` proofs. **Authority comes
+from a Studio-controlled host trust registry outside the game directory.**
+It pins the exact game path, directory identity, creation receipt, original
+manifest and latest component state SHA-256, and advances only on successful
+Studio updates. Forging a project-local archive and state cannot add ownership
+without matching this independent pin. This protects against *project-only*
+tampering, not a process with write access to the user's host state directory.
+By default the registry is under `%LOCALAPPDATA%/ludory/studio/component-trust-v1`
+on Windows and `$XDG_STATE_HOME/ludory/studio/component-trust-v1` (or
+`~/.local/state/ludory/studio/component-trust-v1`) on Unix. A host-configured
+`LUDORY_STUDIO_TRUST_DIR` may override that location; a path inside the game
+is refused. If the registry is missing or altered, updates fail closed.
+Treat archive corruption as a stop condition.
+Games created
+before this dedicated record existed, including frozen projects, are `BLOCKED`;
+there is no implicit adoption or bulk migration.
+
+```sh
+# Read-only, including for a dirty or unversioned new game:
+node packages/studio/bin/ludory.mjs components status --project /path/to/new-game --json
+node packages/studio/bin/ludory.mjs components update --project /path/to/new-game --json
+
+# After examining the exact changed-file list and any conflict:
+node packages/studio/bin/ludory.mjs components update --project /path/to/new-game --apply --json
+
+# On another PC/host, after inspecting every listed managed path and its bytes:
+node packages/studio/bin/ludory.mjs components trust --project /path/to/copied-game --json
+# Copy the exact stateSha256 from the preview; acceptance is not automatic:
+node packages/studio/bin/ludory.mjs components trust --project /path/to/copied-game --accept-state-sha256 <exact-64-hex-from-preview> --apply --json
+```
+
+`components trust` is an explicit owner grant on a new host, **not** proof that
+copied project metadata is authentic. Review the source and all listed managed
+paths before accepting. An existing host pin cannot be replaced through this
+command, including if the pin disagrees with the game. A crash between game
+publication and host registry publication may require operator recovery; never
+automatically re-anchor a mismatched host pin.
+
+Use `--catalog /path/to/catalog` for an explicitly installed local catalog.
+Only a strictly newer compatible template can be applied; same-version drift,
+downgrades, removed paths, unsupported profile/engine/targets, edited or missing
+managed files, symlinks, hardlinks, new-path collisions and a stale preview
+block the operation. Existing owner files and author-owned assets are not
+updated during honest operation. Even valid changes to the game manifest are
+conservatively blocked until its creation-time compatibility can be reviewed;
+Studio never reclaims project-owned metadata. The command never performs a
+three-way merge, deletion or `--force`.
+
+Apply uses an exclusive `.ludory-components.lock`, same-filesystem staging and
+physical-path checks. Original file inodes are retained under
+`.ludory-components-backup-*` **even after a successful update**, because an
+editor may still hold an open file descriptor. Do not delete these archives
+until edits through old handles have been reconciled; newer component status
+also depends on the archived ownership chain. Stage files and receipts are
+flushed with `fsync` on writable file descriptors. On Linux, affected directory
+entries are also `fsync`ed, and errors block apply. Node does not reliably
+support directory `fsync` on Windows, so this additional directory flush is
+not attempted there; NTFS power-loss durability of directory entry changes is
+not independently established. State/pin mismatch after interruption must
+block future updates until inspected. On an incomplete rollback
+the lock and archive remain for human recovery; inspect `backup-index.json`,
+affected paths and any quarantine entries before correcting state. On Windows,
+all archive slots are flat files (`new-0`, `backup-0`, `quarantine-0`, etc.)
+under a Win32-native protected archive directory because NTFS permits moving
+some normally-open child directories; on Linux, use the `new/`, `backup/`,
+`quarantine/` directories. Archive writes on Linux are anchored to the held
+archive directory descriptor even if its visible name changes. On macOS and
+other unsupported hosts, `components update --apply` fails before lock or
+archive creation because Node does not provide an equivalent safe directory
+pin for this transaction; read-only previews remain available. Windows apply
+requires a native N-API module built
+with `npm run build:windows-pin` (Node 22.9+ for node-gyp 12.4, MSVC build
+tools including Visual Studio 2026). The general Ludory runtime permits older
+Node 22 releases, but Windows native component apply does not. The
+module permits READ+WRITE sharing for child-file operations but denies directory
+DELETE sharing. Before publication, each relevant directory receives a native
+handle-relative, randomly named, nondeletable temporary guard file, preventing
+in-place junction creation while a managed parent would otherwise be empty.
+On successful update the guard is removed by its native handle; on unsafe
+rollback the guard and lock must remain for recovery. This mechanism is under
+native Windows CI verification. Without a
+successfully loaded and identity-checked module, Windows
+apply must refuse the operation; ordinary Node directory descriptors do not
+pin NTFS pathnames. The Windows native build is an explicit prerequisite and
+is run in GitHub CI, not automatically installed on unverified hosts.
+Codex can check the native capability without modifying the game or building
+code: `ludory components native --json` returns `READY` only after acquiring
+and releasing a real native directory handle, `BLOCKED` with a precise build
+command if Windows setup is missing, or `NOT_REQUIRED` off Windows. Build
+once from the trusted Ludory checkout using `npm run build:windows-pin`, then
+repeat the doctor. The loader requires `pinContractVersion=4` on every use;
+stale `.node` files from earlier metadata-only builds fail closed even if
+they still load and expose the same functions. Rebuild after updating the
+native source. Do not use a downloaded or unverified `.node` binary;
+automated signed/prebuilt distribution is **not yet supported**.
+Never force-remove a lock while another update may still be running. Disk-full,
+file-sharing, unsupported hardlink/rename and other filesystem failures are
+visible blockers, not successful updates. On Windows, inspect the actual CI
+result before relying on NTFS behavior; Linux-only checks do not certify it.
+
+Exit code: `0` successful preview/IN_SYNC/apply; `2` explicit conflict/blocker;
+`1` invalid command or unrelated operational failure. JSON preserves status,
+planned paths, conflict details and the backup directory on success.
+
 ## Profiles and templates (new projects only)
 
 Profile declarations specify a web engine, allowed targets and compatible templates.

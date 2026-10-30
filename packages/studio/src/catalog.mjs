@@ -7,7 +7,17 @@ import { canonicalPhysicalDirectory } from '@ludory/core';
 const builtin = fileURLToPath(new URL('../catalog/', import.meta.url));
 const idPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const versionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-const reserved = new Set(['ludory.project.json', 'ludory.studio.json']);
+const reserved = new Set(['ludory.project.json', 'ludory.studio.json', 'ludory.components.json', '.ludory']);
+const projectOwned = new Set(['agents.md', 'game-spec.yaml', 'package.json']);
+const userOwnedRoots = new Set(['rights', 'saves', 'save', 'evidence', 'config', 'secrets', 'user', 'userdata']);
+const windowsDevice = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+/** Creating an asset is not evidence that Studio may replace an authored project file. */
+export const isStudioComponentPath = filename => {
+  const pieces = String(filename).split('/');
+  const rootName = pieces[0].toLowerCase();
+  return !reserved.has(rootName) && !projectOwned.has(rootName) &&
+    !pieces.some(part => part.startsWith('.')) && !userOwnedRoots.has(rootName);
+};
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 
 function exactKeys(obj, fields, label) {
@@ -70,12 +80,18 @@ function jsonSource(filename) {
 }
 
 function safeFileName(value) {
+  const root = typeof value === 'string' ? value.split('/')[0] : '';
+  const ownerAsset = ['AGENTS.md', 'game-spec.yaml', 'package.json'].includes(root) ||
+    userOwnedRoots.has(root.toLowerCase()) ||
+    root === '.env' || root === '.github';
   if (typeof value !== 'string' || !value || value.includes('\\') || value.includes('\0') ||
-      value.startsWith('/') || value.includes(':') || reserved.has(value.split('/')[0])) {
+      value.startsWith('/') || value.includes(':') ||
+      (!isStudioComponentPath(value) && !ownerAsset)) {
     throw new Error(`Invalid or reserved template output path: ${value}`);
   }
   const pieces = value.split('/');
-  if (pieces.some(x => !x || x === '.' || x === '..' || !/^[A-Za-z0-9._-]+$/.test(x))) {
+  if (pieces.some(x => !x || x === '.' || x === '..' || !/^[A-Za-z0-9._-]+$/.test(x) ||
+    windowsDevice.test(x) || /[. ]$/.test(x))) {
     throw new Error(`Invalid template output path: ${value}`);
   }
   return value;
@@ -134,8 +150,10 @@ function readTemplate(source, origin) {
   uniqueIds(data.targets, 'template targets');
   if (!Array.isArray(data.files) || !data.files.length) throw new Error(`Template files required: ${source}`);
   const files = data.files.map(safeFileName);
-  if (new Set(files).size !== files.length) throw new Error('Template files contain duplicate path');
-  if (files.some(filename => files.some(other => other !== filename && other.startsWith(`${filename}/`)))) {
+  if (new Set(files.map(filename => filename.toLowerCase())).size !== files.length) {
+    throw new Error('Template files contain duplicate or case-colliding paths');
+  }
+  if (files.some(filename => files.some(other => other !== filename && other.toLowerCase().startsWith(`${filename.toLowerCase()}/`)))) {
     throw new Error('Template output path conflicts with a nested output directory');
   }
   const assets = new Map();

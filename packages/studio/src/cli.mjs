@@ -4,6 +4,9 @@ import { defineGame } from '@ludory/core';
 import { inspectProject, planInit, planMigration, applyPlan } from './projects.mjs';
 import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
+import { planComponentUpdate, componentStatus, applyComponentPlan,
+  previewComponentTrust, acceptComponentTrust } from './component-updates.mjs';
+import { inspectWindowsDirectoryPin } from './windows-directory-pin.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
 import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNativeRun,
   planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport,
@@ -27,6 +30,10 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory templates list [--catalog <directory>] [--json]
   ludory templates show --name <id> [--catalog <directory>] [--json]
   ludory create --project <empty-directory> --id <slug> --title <name> --lang <locale> --profile <id> --template <id> --targets <comma-separated> [--version <semver>] [--catalog <directory>] [--apply] [--json]
+  ludory components status --project <new-studio-game> [--catalog <directory>] [--json]
+  ludory components update --project <new-studio-game> [--catalog <directory>] [--apply] [--json]
+  ludory components trust --project <transferred-studio-game> [--accept-state-sha256 <64-hex> --apply] [--json]
+  ludory components native [--json]
   ludory quality enable --project <new-studio-game> [--apply] [--json]
   ludory quality check --project <new-studio-game> [--tier <quick|deep>] [--apply] [--json]
   ludory quality status --project <new-studio-game> [--json]
@@ -51,6 +58,9 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
 
 No writes by default. init/migrate --apply only create ludory.project.json;
 create --apply only creates new template files, manifest and Studio receipt in an empty directory.
+components update previews unless --apply; only explicitly Studio-managed files may change.
+Any edited managed file or missing ownership state blocks update; original inodes remain in recoverable project-local backups.
+Automatic updates require an independent per-user host trust registry. Transferred projects require inspected, explicit SHA-256 acceptance.
 profiles apply/update only manage declarations inside .ludory/profiles; never edit game code or created template files.
 Engineering Quality is opt-in and project-scoped; it runs tools only in the Codex sandbox, records bounded local evidence, and never grants Release PASS.
 workflow runs natively in Ludory AI; mutations require --apply and historical CEOS state is untouched.
@@ -105,10 +115,14 @@ function argumentsFor(command, argv) {
               : command === 'workflow-recover' ? [...workflowCommon, '--run', '--confirm-no-executor', '--apply']
               : [...workflowCommon, '--run', '--stage', '--artifact', '--outcome', '--apply'])
     : command === 'helper-install' ? new Set(['--apply', '--json'])
+    : command === 'components-native' ? new Set(['--json'])
     : command === 'init'
     ? new Set([...common, '--id', '--title', '--lang', '--engine', '--targets', '--version', '--apply'])
     : command === 'create'
       ? new Set([...common, '--id', '--title', '--lang', '--profile', '--template', '--targets', '--version', '--catalog', '--apply'])
+      : command === 'components-update' ? new Set([...common, '--catalog', '--apply'])
+        : command === 'components-trust' ? new Set([...common, '--apply', '--accept-state-sha256'])
+        : command === 'components-status' ? new Set([...common, '--catalog'])
       : command === 'migrate' ? new Set([...common, '--apply'])
         : command === 'profiles-list' || command === 'templates-list' ? new Set(['--json', '--catalog'])
           : command === 'profiles-show' || command === 'templates-show' ? new Set(['--json', '--catalog', '--name'])
@@ -129,7 +143,7 @@ function argumentsFor(command, argv) {
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
     flags.set(key, value);
   }
-  if (!['helper-install', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show'].includes(command) && !flags.get('--project')) {
+  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show'].includes(command) && !flags.get('--project')) {
     throw new Error('--project is required');
   }
   if (command.endsWith('-show') && !flags.get('--name')) throw new Error('--name is required for show');
@@ -381,13 +395,19 @@ function display(result, json, out) {
     return;
   }
   out(`${result.status} · ${result.project}\n`);
+  if (result.mode === 'component-trust') {
+    if (result.stateSha256) out(`  component state SHA-256: ${result.stateSha256}\n`);
+    for (const filename of result.managedPaths ?? []) out(`  managed path to review: ${filename}\n`);
+    if (result.warning) out(`  review required: ${result.warning}\n`);
+  }
   for (const item of result.writes) {
     const action = result.status === 'APPLIED'
-      ? result.mode.startsWith('profile-') ? 'applied' : 'created'
-      : result.mode === 'profile-update' ? 'would update' : 'would create';
+      ? result.mode.startsWith('profile-') ? 'applied' : result.mode === 'component-update' ? 'updated' : 'created'
+      : ['profile-update', 'component-update'].includes(result.mode) ? 'would update' : 'would create';
     out(`  ${action}: ${item}\n`);
   }
   for (const problem of result.conflicts) out(`  blocked: ${problem}\n`);
+  if (result.backupDirectory) out(`  recoverable backup: ${result.backupDirectory}\n`);
   if (result.manifest) out(`  id: ${result.manifest.id} · version: ${result.manifest.version}\n`);
   if (result.profile) out(`  profile: ${result.profile.id} · version: ${result.profile.version}\n`);
 }
@@ -548,6 +568,47 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
         return 2;
       }
     }
+    if (command === 'components') {
+      const [operation, ...args] = rest;
+      if (!['status', 'update', 'trust', 'native'].includes(operation)) {
+        throw new Error(`Unknown components operation: ${operation || '(missing)'}`);
+      }
+      const flags = argumentsFor(`components-${operation}`, args);
+      if (operation === 'native') {
+        const result = inspectWindowsDirectoryPin();
+        if (flags.has('--json')) out(`${JSON.stringify(result, null, 2)}\n`);
+        else {
+          out(`${result.status} · Windows native directory pin\n`);
+          if (result.reasonCode) out(`  reason: ${result.reasonCode}\n`);
+          if (result.nextAction) out(`  next: ${result.nextAction}\n`);
+        }
+        return result.status === 'BLOCKED' ? 2 : 0;
+      }
+      if (operation === 'trust') {
+        if (flags.has('--apply') !== flags.has('--accept-state-sha256')) {
+          throw new Error('Trust acceptance requires --accept-state-sha256 <64-hex> and --apply together');
+        }
+        const preview = previewComponentTrust(flags.get('--project'));
+        const accepted = flags.has('--apply') && preview.status === 'NEEDS_USER_ACTION'
+          ? acceptComponentTrust(preview, flags.get('--accept-state-sha256')) : preview;
+        display(accepted, flags.has('--json'), out);
+        return ['CONFLICT', 'BLOCKED', 'NEEDS_USER_ACTION'].includes(accepted.status) ? 2 : 0;
+      }
+      const options = { catalog: flags.get('--catalog') };
+      const preview = operation === 'status'
+        ? componentStatus(flags.get('--project'), options)
+        : planComponentUpdate(flags.get('--project'), options);
+      let result = preview;
+      if (operation === 'update' && flags.has('--apply') && preview.status === 'READY') {
+        try { result = applyComponentPlan(preview); }
+        catch (error) {
+          result = { ...preview, status: 'BLOCKED', writes: [],
+            conflicts: [`Component apply failed; inspect retained .ludory-components-backup-* and transaction lock before recovery: ${error.message}`] };
+        }
+      }
+      display(result, flags.has('--json'), out);
+      return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : 0;
+    }
     if (command === 'profiles' || command === 'templates') {
       const [operation, ...args] = rest;
       const operations = command === 'profiles' ? ['list', 'show', 'apply', 'update', 'status'] : ['list', 'show'];
@@ -580,7 +641,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     display(result, flags.has('--json'), out);
     return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : 0;
   } catch (error) {
-    if (['workflow', 'quality'].includes(argv[0]) && argv.includes('--json')) {
+    if (['workflow', 'quality', 'components'].includes(argv[0]) && argv.includes('--json')) {
       const projectIndex = argv.indexOf('--project');
       const result = { mode: `${argv[0]}-${argv[1] ?? 'unknown'}`, project: projectIndex < 0 ? null : (argv[projectIndex + 1] ?? null),
         status: 'FAILED', writes: [], conflicts: [error.message] };
