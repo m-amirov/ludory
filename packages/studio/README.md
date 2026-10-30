@@ -133,6 +133,13 @@ sharing. Without a successfully loaded and identity-checked module, Windows
 apply must refuse the operation; ordinary Node directory descriptors do not
 pin NTFS pathnames. The Windows native build is an explicit prerequisite and
 is run in GitHub CI, not automatically installed on unverified hosts.
+Codex can check the native capability without modifying the game or building
+code: `ludory components native --json` returns `READY` only after acquiring
+and releasing a real native directory handle, `BLOCKED` with a precise build
+command if Windows setup is missing, or `NOT_REQUIRED` off Windows. Build
+once from the trusted Ludory checkout using `npm run build:windows-pin`, then
+repeat the doctor. Do not use a downloaded or unverified `.node` binary;
+automated signed/prebuilt distribution is **not yet supported**.
 Never force-remove a lock while another update may still be running. Disk-full,
 file-sharing, unsupported hardlink/rename and other filesystem failures are
 visible blockers, not successful updates. On Windows, inspect the actual CI

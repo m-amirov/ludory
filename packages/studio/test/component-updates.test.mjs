@@ -960,10 +960,13 @@ test('Windows NTFS cannot redirect an existing empty managed parent to an outsid
   // from a fixture which never had permission/correct IOCTL support.
   const control = path.join(f.root, 'unpinned-control');
   fs.mkdirSync(control);
-  assert.deepEqual(setInPlaceJunction(control), { created: true, output: 'CREATED' },
-    'Native NTFS injection control is unavailable: cannot claim a security PASS');
-  assert.equal(fs.readFileSync(path.join(control, 'do-not-edit.txt'), 'utf8'), 'EXTERNAL AUTHOR BYTES\n');
-  fs.rmdirSync(control); // remove junction, not its target
+  try {
+    assert.deepEqual(setInPlaceJunction(control), { created: true, output: 'CREATED' },
+      'Native NTFS injection control is unavailable: cannot claim a security PASS');
+    assert.equal(fs.readFileSync(path.join(control, 'do-not-edit.txt'), 'utf8'), 'EXTERNAL AUTHOR BYTES\n');
+  } finally {
+    if (fs.lstatSync(control).isSymbolicLink()) fs.rmdirSync(control);
+  }
 
   version2(f);
   const plan = planComponentUpdate(f.project, { catalog: f.catalog });
@@ -986,29 +989,33 @@ test('Windows NTFS cannot redirect an existing empty managed parent to an outsid
   catch (error) { failure = error; }
   finally { fs.renameSync = originalRename; }
 
-  assert.equal(attempted, true, 'Did not reach the actual empty-directory publication window');
-  assert.ok(attack, 'Missing native junction injection result');
-  console.log(`Windows in-place NTFS junction injection with managed-parent pin: ${attack.output}`);
-  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'EXTERNAL AUTHOR BYTES\n');
-  assert.equal(fs.existsSync(path.join(outside, 'main.js')), false,
-    'A game component was written into the external author directory');
-  if (attack.created) {
-    assert.equal(result?.status === 'APPLIED', false,
-      'Windows must not commit when a managed directory becomes an in-place junction');
-    assert.ok(failure, 'Successful malicious junction substitution must abort the update');
-    assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true,
-      'Incomplete or unsafe rollback must retain the recovery lock');
-    const archives = fs.readdirSync(f.project).filter(name => name.startsWith('.ludory-components-backup-'));
-    assert.equal(archives.length, 1, 'Original component backup must survive unsafe rollback');
-    assert.equal(fs.readFileSync(path.join(f.project, archives[0], 'backup-0'), 'utf8'),
-      'export const version = 1;\n');
-    // The in-place reparse point is deliberately removed only in the temp
-    // fixture, after verifying no out-of-project user bytes were touched.
-    fs.rmdirSync(path.join(f.project, 'src'));
-  } else {
-    assert.equal(failure, undefined, `A rejected injection should allow a clean apply: ${failure?.message}`);
-    assert.equal(result?.status, 'APPLIED');
-    assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 2;\n');
+  try {
+    assert.equal(attempted, true, 'Did not reach the actual empty-directory publication window');
+    assert.ok(attack, 'Missing native junction injection result');
+    console.log(`Windows in-place NTFS junction injection with managed-parent pin: ${attack.output}`);
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'EXTERNAL AUTHOR BYTES\n');
+    assert.equal(fs.existsSync(path.join(outside, 'main.js')), false,
+      'A game component was written into the external author directory');
+    if (attack.created) {
+      assert.equal(result?.status === 'APPLIED', false,
+        'Windows must not commit when a managed directory becomes an in-place junction');
+      assert.ok(failure, 'Successful malicious junction substitution must abort the update');
+      assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true,
+        'Incomplete or unsafe rollback must retain the recovery lock');
+      const archives = fs.readdirSync(f.project).filter(name => name.startsWith('.ludory-components-backup-'));
+      assert.equal(archives.length, 1, 'Original component backup must survive unsafe rollback');
+      assert.equal(fs.readFileSync(path.join(f.project, archives[0], 'backup-0'), 'utf8'),
+        'export const version = 1;\n');
+    } else {
+      assert.equal(failure, undefined, `A rejected injection should allow a clean apply: ${failure?.message}`);
+      assert.equal(result?.status, 'APPLIED');
+      assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 2;\n');
+    }
+  } finally {
+    // Avoid recursive fixture teardown traversing an injected junction even
+    // if an assertion fails: remove ONLY the temporary reparse point itself.
+    const parent = path.join(f.project, 'src');
+    if (attack?.created && fs.lstatSync(parent).isSymbolicLink()) fs.rmdirSync(parent);
   }
 });
 

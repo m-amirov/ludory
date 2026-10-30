@@ -40,6 +40,19 @@ test('CLI help and unknown options have explicit exit codes', () => {
   assert.match(flag.stderr, /Unknown option/i);
 });
 
+test('components native doctor is read-only and explains the exact Windows build prerequisite', () => {
+  const outcome = cli('components', 'native', '--json');
+  assert.equal(outcome.status, 0, outcome.stderr);
+  const result = JSON.parse(outcome.stdout);
+  assert.equal(result.mode, 'component-native-doctor');
+  assert.equal(result.status, process.platform === 'win32' ? 'READY' : 'NOT_REQUIRED');
+  assert.equal(result.native, process.platform === 'win32');
+  assert.equal(result.buildCommand, 'npm run build:windows-pin');
+  assert.deepEqual(result.writes, []);
+  assert.equal(cli('components', 'native', '--apply').status, 1,
+    'Native inspection must not introduce an implicit build or write path');
+});
+
 test('init previews by default and applies explicit manifest only', t => {
   const project = temporary(t);
   const args = ['init', '--project', project, '--id', 'space-game', '--title', 'Космос', '--lang', 'ru', '--engine', 'phaser', '--targets', 'vk-games,yandex-games', '--json'];

@@ -6,6 +6,7 @@ import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
 import { planComponentUpdate, componentStatus, applyComponentPlan,
   previewComponentTrust, acceptComponentTrust } from './component-updates.mjs';
+import { inspectWindowsDirectoryPin } from './windows-directory-pin.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
 import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNativeRun,
   planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport,
@@ -32,6 +33,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory components status --project <new-studio-game> [--catalog <directory>] [--json]
   ludory components update --project <new-studio-game> [--catalog <directory>] [--apply] [--json]
   ludory components trust --project <transferred-studio-game> [--accept-state-sha256 <64-hex> --apply] [--json]
+  ludory components native [--json]
   ludory quality enable --project <new-studio-game> [--apply] [--json]
   ludory quality check --project <new-studio-game> [--tier <quick|deep>] [--apply] [--json]
   ludory quality status --project <new-studio-game> [--json]
@@ -113,6 +115,7 @@ function argumentsFor(command, argv) {
               : command === 'workflow-recover' ? [...workflowCommon, '--run', '--confirm-no-executor', '--apply']
               : [...workflowCommon, '--run', '--stage', '--artifact', '--outcome', '--apply'])
     : command === 'helper-install' ? new Set(['--apply', '--json'])
+    : command === 'components-native' ? new Set(['--json'])
     : command === 'init'
     ? new Set([...common, '--id', '--title', '--lang', '--engine', '--targets', '--version', '--apply'])
     : command === 'create'
@@ -140,7 +143,7 @@ function argumentsFor(command, argv) {
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
     flags.set(key, value);
   }
-  if (!['helper-install', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show'].includes(command) && !flags.get('--project')) {
+  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show'].includes(command) && !flags.get('--project')) {
     throw new Error('--project is required');
   }
   if (command.endsWith('-show') && !flags.get('--name')) throw new Error('--name is required for show');
@@ -567,10 +570,20 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'components') {
       const [operation, ...args] = rest;
-      if (!['status', 'update', 'trust'].includes(operation)) {
+      if (!['status', 'update', 'trust', 'native'].includes(operation)) {
         throw new Error(`Unknown components operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`components-${operation}`, args);
+      if (operation === 'native') {
+        const result = inspectWindowsDirectoryPin();
+        if (flags.has('--json')) out(`${JSON.stringify(result, null, 2)}\n`);
+        else {
+          out(`${result.status} · Windows native directory pin\n`);
+          if (result.reasonCode) out(`  reason: ${result.reasonCode}\n`);
+          if (result.nextAction) out(`  next: ${result.nextAction}\n`);
+        }
+        return result.status === 'BLOCKED' ? 2 : 0;
+      }
       if (operation === 'trust') {
         if (flags.has('--apply') !== flags.has('--accept-state-sha256')) {
           throw new Error('Trust acceptance requires --accept-state-sha256 <64-hex> and --apply together');

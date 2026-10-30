@@ -40,3 +40,21 @@ export function openProtectedDirectory(directory) {
     throw error;
   }
 }
+
+/** Read-only prerequisite probe for Codex on Windows; never builds or fetches code. */
+export function inspectWindowsDirectoryPin() {
+  const shared = { mode: 'component-native-doctor',
+    native: process.platform === 'win32', buildCommand: 'npm run build:windows-pin', writes: [] };
+  if (process.platform !== 'win32') return { ...shared, status: 'NOT_REQUIRED', conflicts: [] };
+  try {
+    // Validate a real directory handle, not merely the presence of a .node
+    // filename. This also detects stale/ABI-incompatible or corrupt addons.
+    const held = openProtectedDirectory(path.dirname(fileURLToPath(import.meta.url)));
+    held.close();
+    return { ...shared, status: 'READY', conflicts: [] };
+  } catch (error) {
+    return { ...shared, status: 'BLOCKED', reasonCode: 'WINDOWS_NATIVE_PIN_UNAVAILABLE',
+      conflicts: [`Win32 directory pin unavailable: ${error.message}`],
+      nextAction: 'Run npm run build:windows-pin from the trusted Ludory repository with Node >=22.9 and MSVC; rerun this doctor before component apply.' };
+  }
+}
