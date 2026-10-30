@@ -47,8 +47,11 @@ static napi_value open_directory(napi_env env, napi_callback_info info) {
     return NULL;
   }
 
-  // Allow child reads/writes, but deny renaming or deleting this directory.
-  HANDLE handle = CreateFileW(filename, FILE_READ_ATTRIBUTES,
+  // FILE_READ_ATTRIBUTES alone is a metadata-only open: Windows can bypass
+  // its sharing restrictions and rename the directory. Request actual
+  // directory read access, while allowing child reads/writes and denying
+  // DELETE access to this specific directory pathname.
+  HANDLE handle = CreateFileW(filename, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES,
       FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
       FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
   free(filename);
