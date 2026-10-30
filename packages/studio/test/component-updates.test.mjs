@@ -592,7 +592,7 @@ test('backup fsync failure after a successful move restores managed original and
   let fired = false;
   fs.renameSync = function (src, dst, ...args) {
     const result = originalRename.call(this, src, dst, ...args);
-    if (anchoredBasename(src, 'main.js') && physicalPath(dst).includes(`${path.sep}backup${path.sep}`)) movedOriginal = true;
+    if (anchoredBasename(src, 'main.js') && /[\\/]backup(?:[\\/]|-)[0-9]+$/.test(physicalPath(dst))) movedOriginal = true;
     return result;
   };
   fs.fsyncSync = function (fd) {
@@ -949,6 +949,26 @@ test('Windows native pinning must not be silently emulated on an unsupported hos
   assert.throws(() => openProtectedDirectory(directory), /Windows.*only|unsupported/i);
 });
 
+test('Windows-native pinned parents must permit ordinary child reads, metadata and writes', t => {
+  if (process.platform !== 'win32') return t.skip('Windows filesystem semantics only');
+  const f = fixture(t);
+  const archive = fs.mkdtempSync(path.join(f.project, '.ludory-components-backup-'));
+  const rootFd = openProtectedDirectory(f.project);
+  const archiveFd = openProtectedDirectory(archive);
+  try {
+    assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 1;\n');
+    assert.equal(fs.lstatSync(f.project).isDirectory(), true);
+    assert.equal(fs.lstatSync(archive).isDirectory(), true);
+    const staged = path.join(archive, 'new-0');
+    fs.writeFileSync(staged, 'test', { flag: 'wx' });
+    assert.equal(fs.readFileSync(staged, 'utf8'), 'test');
+    fs.renameSync(staged, path.join(archive, 'backup-0'));
+  } finally {
+    fs.closeSync(archiveFd);
+    fs.closeSync(rootFd);
+  }
+});
+
 test('Windows-style flat staged file swap with identical bytes cannot publish an external hardlink', t => {
   const f = fixture(t);
   version2(f);
@@ -1140,11 +1160,12 @@ test('successful updates preserve the original inode for edits arriving after co
     fs.writeSync(fd, edit, 0, edit.length, 0);
   } finally { fs.closeSync(fd); }
   assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 2;\n');
-  assert.match(fs.readFileSync(path.join(applied.backupDirectory, 'backup', '0'), 'utf8'), /LATE USER EDIT/);
+  const oldSlot = process.platform === 'win32' ? 'backup-0' : path.join('backup', '0');
+  assert.match(fs.readFileSync(path.join(applied.backupDirectory, oldSlot), 'utf8'), /LATE USER EDIT/);
   const index = JSON.parse(fs.readFileSync(path.join(applied.backupDirectory, 'backup-index.json'), 'utf8'));
   assert.deepEqual(index.entries.map(({ path: name, backup }) => [name, backup]), [
-    ['src/main.js', 'backup/0'],
-    ['ludory.components.json', 'backup/1'],
+    ['src/main.js', process.platform === 'win32' ? 'backup-0' : 'backup/0'],
+    ['ludory.components.json', process.platform === 'win32' ? 'backup-1' : 'backup/1'],
   ]);
   assert.equal(planComponentUpdate(f.project, { catalog: f.catalog }).status, 'IN_SYNC');
 });
@@ -1179,7 +1200,8 @@ test('rollback must not delete user changes arriving between verification and re
   assert.ok(archive);
   // On a post-rename race, a safe rollback retains the modified inode in
   // quarantine instead of re-linking an untrusted pathname into the game.
-  assert.match(fs.readFileSync(path.join(f.project, archive, 'quarantine', '0'), 'utf8'), /USER EDIT DURING ROLLBACK/);
+  const quarantined = process.platform === 'win32' ? 'quarantine-0' : path.join('quarantine', '0');
+  assert.match(fs.readFileSync(path.join(f.project, archive, quarantined), 'utf8'), /USER EDIT DURING ROLLBACK/);
   assert.equal(fs.existsSync(f.gameApp), false);
   assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true);
   assert.equal(planComponentUpdate(f.project, { catalog: f.catalog }).status, 'CONFLICT');
