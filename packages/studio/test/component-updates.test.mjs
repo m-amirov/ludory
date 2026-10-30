@@ -1080,20 +1080,28 @@ test('Windows native guard post-create verification failure retains the lock and
   const f = fixture(t);
   version2(f);
   const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  // The plan uses the canonical physical project path. On Windows the fixture
+  // may still contain an 8.3 or differently cased temp-directory spelling.
+  const managedSrc = path.normalize(path.join(plan.project, 'src')).toLowerCase();
   const originalLstat = fs.lstatSync;
   let injected = false;
+  const observedGuardParents = new Set();
   fs.lstatSync = function (filename, ...args) {
-    if (!injected && path.dirname(String(filename)) === path.join(f.project, 'src') &&
-        /^\.ludory-components-guard-[0-9a-f]{32}$/.test(path.basename(String(filename)))) {
-      injected = true;
-      throw new Error('injected native guard verification failure after creation');
+    if (/^\.ludory-components-guard-[0-9a-f]{32}$/.test(path.basename(String(filename)))) {
+      const parent = path.normalize(path.dirname(String(filename))).toLowerCase();
+      observedGuardParents.add(parent);
+      if (!injected && parent === managedSrc) {
+        injected = true;
+        throw new Error('injected native guard verification failure after creation');
+      }
     }
     return originalLstat.call(this, filename, ...args);
   };
   try {
     assert.throws(() => applyComponentPlan(plan), /injected native guard verification failure/);
   } finally { fs.lstatSync = originalLstat; }
-  assert.equal(injected, true);
+  assert.equal(injected, true,
+    `Guard verification did not traverse canonical managed src: ${[...observedGuardParents].join(', ')}`);
   assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 1;\n');
   assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), true,
     'An untracked anchored guard may exist: transaction lock must be retained');
