@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { nativeProject } from './helpers/project.mjs';
-import { planNewRun, commitNewRun } from '../src/store.mjs';
+import { planNewRun, commitNewRun, readNativeRun } from '../src/store.mjs';
 import { planDevDraft, verifyDevDraftPlan, executeDevDraft,
   planDevDraftImport, executeDevDraftImport } from '../src/draft-tasks.mjs';
 
@@ -27,6 +27,27 @@ function game(t, { receipt = true } = {}) {
 
 const observedDev = { available: true, reasonCode: 'AVAILABLE', transportVerified: true,
   entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol' };
+const observedDevV2 = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
+  modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
+  reasoningRequired: 'high', preflight: { authenticated: true, newChat: true,
+    url: 'https://chatgpt.com/', solAvailable: true } };
+
+test('v2 browser preflight cannot journal a text-only draft without actual text observation support', async t => {
+  const { project, run } = game(t);
+  const plan = planDevDraft(project, { run, taskKind: 'episode-script', brief: 'brief.md' },
+    { discover: () => observedDevV2 });
+  assert.equal(plan.status, 'NEEDS_USER_ACTION');
+  assert.equal(plan.reasonCode, 'DEV_TEXT_V2_UNSUPPORTED');
+  assert.equal(plan.modelObserved, undefined, 'preflight cannot attest the eventual selected model');
+  let turns = 0;
+  const result = await executeDevDraft(plan, { apply: true, host: {
+    probe: async () => observedDevV2,
+    turn: async () => { turns++; throw new Error('V2_TEXT_HOST_MUST_NOT_RUN'); },
+  } });
+  assert.equal(turns, 0);
+  assert.equal(result.status, 'NEEDS_USER_ACTION');
+  assert.equal(readNativeRun(project, run).events.length, 0);
+});
 
 function artSources(project) {
   for (const [name, content] of [

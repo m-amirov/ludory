@@ -2,10 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { inspectNativeProject, snapshotArtifact, verifyNativeSource } from './source.mjs';
-import { readNativeRun, readNativeArtReviews, recordNativeArtReview } from './store.mjs';
+import { readNativeRun, readNativeArtReviews, recordNativeArtReview,
+  planNativeEvent, commitNativeEvent } from './store.mjs';
 import { planDevDraft } from './draft-tasks.mjs';
 import { hasStudioCreationReceipt } from './executor.mjs';
-import { isVerifiedCapability } from './capabilities.mjs';
+import { isVerifiedCapability, ownData } from './capabilities.mjs';
 
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const equals = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -15,9 +16,18 @@ const fail = (project, runId, code) => ({ engine: 'ludory-ai', operation: 'art-r
 const validPath = value => typeof value === 'string' && value.length > 0 && value.length <= 200 &&
   !/[\\:\0]/.test(value) && !value.startsWith('/') &&
   value.split('/').every(part => part && part !== '.' && part !== '..');
-const validArtPreflight = cap => Boolean(cap) && isVerifiedCapability(cap, 'webDev') &&
-  cap.browserObservationV2Available === true && cap.routeAvailable === 'web-dev' &&
-  cap.modelRouteAvailable === 'chatgpt-web/gpt-6-sol' && cap.reasoningRequired === 'high';
+const validArtPreflight = cap => {
+  const preflight = ownData(cap, 'preflight');
+  return isVerifiedCapability(cap, 'webDev') &&
+    ownData(cap, 'browserObservationV2Available') === true &&
+    ownData(cap, 'routeAvailable') === 'web-dev' &&
+    ownData(cap, 'modelRouteAvailable') === 'chatgpt-web/gpt-6-sol' &&
+    ownData(cap, 'reasoningRequired') === 'high' &&
+    ownData(preflight, 'authenticated') === true &&
+    ownData(preflight, 'newChat') === true &&
+    ownData(preflight, 'solAvailable') === true &&
+    typeof ownData(preflight, 'url') === 'string' && Boolean(ownData(preflight, 'url'));
+};
 
 function sourceImage(project, output) {
   const relative = output.outputPath;
@@ -62,6 +72,7 @@ export function planArtReview(projectDir, options = {}, { discover = () => null 
   let current;
   try { current = readNativeRun(project, run); }
   catch { return fail(project, run, 'ART_RUN_UNAVAILABLE'); }
+  if (current.pendingArtReview) return fail(project, run, 'ART_REVIEW_PENDING');
   if (current.terminal || current.pendingExecutor ||
       !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status)) {
     return fail(project, run, 'ART_RUN_NOT_ACTIVE');
@@ -89,7 +100,12 @@ export function planArtReview(projectDir, options = {}, { discover = () => null 
     return fail(project, run, drafted.reasonCode ?? 'ART_CONTEXT_INSUFFICIENT');
   }
   if (!equals(drafted.brief, imported.brief)) return fail(project, run, 'ART_BRIEF_CHANGED');
-  const verified = drafted.status === 'READY' && validArtPreflight(cap);
+  // A v2 helper cannot author text-only drafts, but it CAN independently
+  // inspect a real attached image. Reuse the source/context packet from the
+  // draft planner without making its text-turn capability an art-review gate.
+  const verified = (drafted.status === 'READY' ||
+    (drafted.status === 'NEEDS_USER_ACTION' && drafted.reasonCode === 'DEV_TEXT_V2_UNSUPPORTED')) &&
+    validArtPreflight(cap);
   const referenceFiles = drafted.manualPacket.sources.map((file, index) => ({
     role: drafted.sourceRoles[index], path: file.path, sha256: file.sha256,
     size: file.size, text: file.text,
@@ -141,7 +157,7 @@ export function verifyArtReviewPlan(plan) {
   try {
     const current = readNativeRun(plan.project, plan.runId);
     if (current.headSha256 !== plan.runHeadSha256 || current.nextStage !== plan.stage ||
-        current.pendingExecutor || current.terminal ||
+        current.pendingExecutor || current.pendingArtReview || current.terminal ||
         !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status)) {
       return { ok: false, code: 'ART_RUN_STALE' };
     }
@@ -242,6 +258,19 @@ export async function executeArtReview(plan, { apply = false, host = null } = {}
   const bytes = sourceImage(plan.project, {
     outputPath: plan.image.path, outputSha256: plan.image.sha256, outputSize: plan.image.size,
   });
+  // The durable intent is committed BEFORE the browser can upload/charge for an image.
+  // A lost helper response must remain pending until owner-confirmed recovery.
+  const requested = commitNativeEvent(planNativeEvent(plan.project, plan.runId, {
+    kind: 'ART_REVIEW_REQUESTED', stage: plan.stage,
+    artReview: { image: plan.image, brief: plan.brief, sources: plan.sources,
+      modelObserved: 'gpt-6-sol' },
+  }));
+  const artRequestSha256 = requested.pendingArtReview;
+  const pendingResult = code => ({ engine: 'ludory-ai', operation: 'art-review', project: plan.project,
+    runId: plan.runId, status: 'PENDING_RECOVERY', verdict: 'BLOCKED',
+    reasonCode: code, writes: [], requiresConfirmation: true,
+    warning: 'The browser review may have completed after losing its response. Verify the old helper is stopped before workflow recover --confirm-no-executor --apply.',
+    nextAction: { kind: 'CONFIRM_REVIEWER_STOPPED', executable: false } });
   const response = await host.turn({ prompt: fresh.prompt, taskId: `art-${plan.runId}`,
     images: [{ ref: plan.image.ref, mimeType: plan.image.mediaType,
       bytes, sha256: plan.image.sha256 }] });
@@ -250,25 +279,23 @@ export async function executeArtReview(plan, { apply = false, host = null } = {}
       response.modelObserved !== 'gpt-6-sol' || response.imageInputObserved !== true ||
       response.traceId !== expectedTraceId || response.imageRef !== plan.image.ref ||
       response.imageSha256 !== plan.image.sha256 || response.imageBytes !== plan.image.size) {
-    return { engine: 'ludory-ai', operation: 'art-review', project: plan.project,
-      runId: plan.runId, status: 'BLOCKED', verdict: 'BLOCKED',
-      reasonCode: 'ART_VISUAL_ATTESTATION_MISSING', writes: [],
-      nextAction: { kind: 'STOP', executable: false } };
+    return pendingResult('ART_VISUAL_ATTESTATION_MISSING');
   }
   if (!validHostObservation(response.hostObservation, plan.image, expectedTraceId)) {
-    return { engine: 'ludory-ai', operation: 'art-review', project: plan.project,
-      runId: plan.runId, status: 'BLOCKED', verdict: 'BLOCKED',
-      reasonCode: 'ART_VISUAL_ATTESTATION_MISSING', writes: [],
-      nextAction: { kind: 'STOP', executable: false } };
+    return pendingResult('ART_VISUAL_ATTESTATION_MISSING');
   }
-  if (!verifyArtReviewPlan(plan).ok) throw new Error('ART_SOURCE_STALE');
   const parsed = interpretArtReview(response.text, { imageSha256: plan.image.sha256 });
-  const receipt = recordNativeArtReview(plan.project, plan.runId, plan.runHeadSha256, {
+  const receipt = recordNativeArtReview(plan.project, plan.runId, requested.headSha256, {
     provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', visualInputObserved: true,
+    artRequestSha256,
     verdict: parsed.verdict, reasonCode: parsed.reasonCode, findings: parsed.findings,
     summary: parsed.summary, hostObservation: response.hostObservation,
     image: plan.image, brief: plan.brief, sources: plan.sources,
   });
+  commitNativeEvent(planNativeEvent(plan.project, plan.runId, {
+    kind: 'ART_REVIEW_RESULT', stage: plan.stage, artRequestSha256,
+    artReviewResult: { code: 'ART_REVIEW_OBSERVED', receiptSha256: receipt.receiptSha256 },
+  }));
   const exhausted = parsed.verdict === 'REWORK' &&
     readNativeArtReviews(plan.project, plan.runId).filter(item => item.verdict === 'REWORK').length >= 2;
   return { engine: 'ludory-ai', operation: 'art-review', project: plan.project,

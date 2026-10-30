@@ -27,6 +27,196 @@ const ARCHIVED_IMAGE_REQUEST_MODELS = new Map([
   ['flare', 'gpt-image-2.5-flare'],
 ]);
 const IMAGE_CODES = new Set(['HOST_OBSERVED', 'IMAGE_EXECUTOR_UNVERIFIED', 'IMAGE_EXECUTOR_INTERRUPTED']);
+const ART_REVIEW_CODES = new Set(['ART_REVIEW_OBSERVED', 'ART_REVIEW_INTERRUPTED']);
+
+/** Flush journal file contents and commit marker before host submission.
+ * Directory-entry persistence across sudden power loss is not guaranteed. */
+function flushNativeFile(fd) {
+  try { fs.fsyncSync(fd); }
+  catch { throw new Error('NATIVE_STORAGE_DURABILITY_UNVERIFIED'); }
+}
+
+/** Read-only inventory of narrowly recognized crash remnants. Never infer that
+ * an external reviewer has stopped merely because a local lock is stale. */
+export function inspectNativeStorageRecovery(projectDir, runId) {
+  const project = canonicalPhysicalDirectory(projectDir);
+  if (!RUN_ID.test(runId) || runId.includes('..')) throw new Error('NATIVE_RECOVERY_RUN_INVALID');
+  const runDir = checkedRunDir(project, runId);
+  const aiDir = path.join(project, '.ludory', 'ai');
+  const eventsDir = path.join(runDir, 'events');
+  const entries = [];
+  const collect = (file, label) => {
+    const st = fs.lstatSync(file);
+    if (!st.isFile() || st.isSymbolicLink() || st.size > 4 * 1024 * 1024) {
+      throw new Error('NATIVE_RECOVERY_UNSAFE_ENTRY');
+    }
+    const bytes = fs.readFileSync(file);
+    entries.push({ file, label, sha256: sha256(bytes), dev: st.dev, ino: st.ino, size: st.size });
+  };
+  const lock = path.join(aiDir, '.lock');
+  if (fs.existsSync(lock)) {
+    collect(lock, 'lock');
+    const raw = fs.readFileSync(lock, 'utf8');
+    if (!/^[1-9]\d*\n$/.test(raw)) throw new Error('NATIVE_RECOVERY_LOCK_UNKNOWN');
+    const pid = Number(raw.trim());
+    if (!Number.isSafeInteger(pid)) throw new Error('NATIVE_RECOVERY_LOCK_UNKNOWN');
+    try { process.kill(pid, 0); throw new Error('NATIVE_RECOVERY_EXECUTOR_MAY_BE_ACTIVE'); }
+    catch (error) { if (error.code !== 'ESRCH') throw error; }
+  }
+  const indexed = new Map();
+  for (const name of fs.readdirSync(eventsDir)) {
+    if (/^\.pending-[a-f0-9]{24}$/.test(name)) collect(path.join(eventsDir, name), `event-${name.slice(1)}`);
+    else if (!/^\d{6}(?:\.commit)?\.json$/.test(name)) throw new Error('NATIVE_RECOVERY_UNKNOWN_EVENT_ENTRY');
+    else {
+      const index = Number(name.slice(0, 6));
+      if (!indexed.has(index)) indexed.set(index, {});
+      indexed.get(index)[name.endsWith('.commit.json') ? 'marker' : 'event'] = name;
+    }
+  }
+  const ordered = [...indexed].sort((a, b) => a[0] - b[0]);
+  for (let offset = 0; offset < ordered.length; offset++) {
+    const [index, pair] = ordered[offset];
+    if (index !== offset + 1) throw new Error('NATIVE_RECOVERY_EVENT_SEQUENCE');
+    if (!pair.event || !pair.marker) {
+      if (offset !== ordered.length - 1) throw new Error('NATIVE_RECOVERY_EVENT_SEQUENCE');
+      collect(path.join(eventsDir, pair.event ?? pair.marker), `event-${pair.event ?? pair.marker}`);
+      continue;
+    }
+    const { data: marker } = readJsonBounded(path.join(eventsDir, pair.marker));
+    const { bytes } = readJsonBounded(path.join(eventsDir, pair.event));
+    if (marker.index !== index || marker.eventSha256 !== sha256(bytes)) {
+      throw new Error('NATIVE_RECOVERY_COMMITTED_EVENT_INVALID');
+    }
+  }
+  const reviewsDir = path.join(runDir, 'reviews');
+  if (fs.existsSync(reviewsDir)) {
+    safeDir(reviewsDir);
+    const reviewPairs = new Map();
+    for (const name of fs.readdirSync(reviewsDir)) {
+      if (!/^\d{6}(?:\.commit)?\.json$/.test(name)) throw new Error('NATIVE_RECOVERY_UNKNOWN_REVIEW_ENTRY');
+      const index = Number(name.slice(0, 6));
+      if (!reviewPairs.has(index)) reviewPairs.set(index, {});
+      reviewPairs.get(index)[name.endsWith('.commit.json') ? 'marker' : 'receipt'] = name;
+    }
+    const rows = [...reviewPairs].sort((a, b) => a[0] - b[0]);
+    for (let offset = 0; offset < rows.length; offset++) {
+      const [index, pair] = rows[offset];
+      if (index !== offset + 1) throw new Error('NATIVE_RECOVERY_REVIEW_SEQUENCE');
+      if (!pair.receipt || !pair.marker) {
+        if (offset !== rows.length - 1) throw new Error('NATIVE_RECOVERY_REVIEW_SEQUENCE');
+        collect(path.join(reviewsDir, pair.receipt ?? pair.marker), `review-${pair.receipt ?? pair.marker}`);
+        continue;
+      }
+      const { data: marker } = readJsonBounded(path.join(reviewsDir, pair.marker));
+      const { bytes } = readJsonBounded(path.join(reviewsDir, pair.receipt));
+      if (marker.index !== index || marker.sha256 !== sha256(bytes)) {
+        throw new Error('NATIVE_RECOVERY_COMMITTED_REVIEW_INVALID');
+      }
+    }
+  }
+  return { kind: 'NATIVE_STORAGE_RECOVERY', status: entries.length ? 'NEEDS_CONFIRMATION' : 'CLEAN',
+    project, runId, entries };
+}
+
+export function applyNativeStorageRecovery(preview, { confirmNoExecutor = false } = {}) {
+  if (!confirmNoExecutor) throw new Error('NATIVE_RECOVERY_CONFIRMATION_REQUIRED');
+  if (preview?.kind !== 'NATIVE_STORAGE_RECOVERY') throw new Error('NATIVE_RECOVERY_PLAN_INVALID');
+  const fresh = inspectNativeStorageRecovery(preview.project, preview.runId);
+  if (JSON.stringify(fresh.entries) !== JSON.stringify(preview.entries)) {
+    throw new Error('NATIVE_RECOVERY_STALE_PLAN');
+  }
+  if (!fresh.entries.length) return { status: 'CLEAN', quarantinedFiles: [] };
+  const quarantineId = crypto.randomBytes(12).toString('hex');
+  const quarantineName = label => `.recovered-${quarantineId}-${label}`;
+  const quarantinedFiles = [];
+  const ai = path.join(preview.project, '.ludory', 'ai');
+  const lock = path.join(ai, '.lock');
+  const originalCwd = process.cwd();
+  let fd, ourLockIdentity;
+  try {
+    // A dead writer's lock must be preserved before acquiring our own lock.
+    // If another writer acquires it first, stop without moving journal files.
+    const stale = fresh.entries.find(x => x.label === 'lock');
+    if (stale) {
+      const now = fs.lstatSync(lock);
+      if (now.dev !== stale.dev || now.ino !== stale.ino) throw new Error('NATIVE_RECOVERY_STALE_PLAN');
+      process.chdir(ai);
+      const aiIdentity = directoryIdentity('.');
+      fs.linkSync('.lock', `../${quarantineName('lock')}`);
+      fs.unlinkSync('.lock');
+      if (directoryIdentity(ai) !== aiIdentity) throw new Error('NATIVE_RECOVERY_DIRECTORY_CHANGED');
+      quarantinedFiles.push(path.join(path.dirname(ai), quarantineName('lock')));
+      process.chdir(originalCwd);
+    }
+    fd = fs.openSync(lock, EXCLUSIVE, 0o600);
+    ourLockIdentity = (() => { const st = fs.fstatSync(fd); return `${st.dev}:${st.ino}`; })();
+    fs.writeSync(fd, `${process.pid}\n`);
+    for (const entry of fresh.entries.filter(x => x.label !== 'lock')) {
+      const parent = path.dirname(entry.file);
+      const identity = directoryIdentity(parent);
+      const stat = fs.lstatSync(entry.file);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.dev !== entry.dev || stat.ino !== entry.ino ||
+          stat.size !== entry.size || sha256(fs.readFileSync(entry.file)) !== entry.sha256) {
+        throw new Error('NATIVE_RECOVERY_STALE_PLAN');
+      }
+      process.chdir(parent);
+      if (directoryIdentity('.') !== identity) throw new Error('NATIVE_RECOVERY_DIRECTORY_CHANGED');
+      const destination = quarantineName(entry.label);
+      fs.linkSync(path.basename(entry.file), `../${destination}`);
+      fs.unlinkSync(path.basename(entry.file));
+      quarantinedFiles.push(path.join(path.dirname(parent), destination));
+      if (directoryIdentity(parent) !== identity) throw new Error('NATIVE_RECOVERY_DIRECTORY_CHANGED');
+      process.chdir(originalCwd);
+    }
+    return { status: 'RECOVERED', quarantinedFiles, moved: fresh.entries.length };
+  } finally {
+    process.chdir(originalCwd);
+    if (fd !== undefined) fs.closeSync(fd);
+    if (ourLockIdentity) {
+      try {
+        const stat = fs.lstatSync(lock);
+        if (stat.isFile() && !stat.isSymbolicLink() && `${stat.dev}:${stat.ino}` === ourLockIdentity) fs.unlinkSync(lock);
+      } catch { /* Leave any displaced lock for manual inspection. */ }
+    }
+  }
+}
+
+function validateArtRequest(request, current) {
+  const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED')?.manual;
+  if (!imported || !request || typeof request !== 'object' || Array.isArray(request) ||
+      Object.keys(request).sort().join(',') !== 'brief,image,modelObserved,sources' ||
+      request.modelObserved !== 'gpt-6-sol' ||
+      request.image?.path !== imported.output.outputPath ||
+      request.image?.sha256 !== imported.output.outputSha256 ||
+      request.image?.size !== imported.output.outputSize ||
+      request.image?.mediaType !== imported.output.mediaType ||
+      request.image?.ref !== `candidate-${imported.output.outputSha256.slice(0, 20)}` ||
+      JSON.stringify(request.brief) !== JSON.stringify(imported.brief) ||
+      !Array.isArray(request.sources) || request.sources.length !== 4 ||
+      request.sources.map(x => x?.role).join(',') !== 'scene,characters,location,style' ||
+      request.sources.some(x => typeof x.path !== 'string' || !x.path ||
+        !/^[a-f0-9]{64}$/.test(x.sha256 ?? '') || !Number.isSafeInteger(x.size) || x.size < 1)) {
+    throw new Error('NATIVE_ART_REVIEW_REQUEST_INVALID');
+  }
+  return request;
+}
+
+function validateArtResult(result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result) ||
+      Object.keys(result).sort().join(',') !== 'code,receiptSha256' ||
+      !ART_REVIEW_CODES.has(result.code) ||
+      (result.code === 'ART_REVIEW_OBSERVED'
+        ? !/^[a-f0-9]{64}$/.test(result.receiptSha256 ?? '')
+        : result.receiptSha256 !== null)) throw new Error('NATIVE_ART_REVIEW_RESULT_INVALID');
+  return result;
+}
+
+function verifyArtResultReceipt(project, runId, requestSha256, result) {
+  if (result.code !== 'ART_REVIEW_OBSERVED') return;
+  const matching = readNativeArtReviews(project, runId).filter(item =>
+    item.artRequestSha256 === requestSha256 && sha256(serial(item)) === result.receiptSha256);
+  if (matching.length !== 1) throw new Error('NATIVE_ART_REVIEW_RECEIPT_NOT_FOUND');
+}
 
 function validateImageRequest(request, { allowArchived = false } = {}) {
   const archived = allowArchived && request?.route === 'gpt-image' &&
@@ -538,6 +728,9 @@ export function readNativeRun(projectDir, runRef = 'latest') {
   let pendingNarrativeRequest = null;
   let priorNarrativeStatus = null;
   let narrativeReview = null;
+  let pendingArtReview = null;
+  let pendingArtRequest = null;
+  let priorArtStatus = null;
   let manualImageImported = false;
   const events = [];
   for (let index = 0; index < files.length / 2; index++) {
@@ -556,6 +749,9 @@ export function readNativeRun(projectDir, runRef = 'latest') {
     }
     if (pendingNarrativeReview && event.kind !== 'NARRATIVE_REVIEW_RESULT') {
       throw new Error('NATIVE_INTEGRITY_REVIEW_PENDING');
+    }
+    if (pendingArtReview && event.kind !== 'ART_REVIEW_RESULT') {
+      throw new Error('NATIVE_INTEGRITY_ART_REVIEW_PENDING');
     }
     if (event.kind === 'CHECKPOINT') {
       if (pendingExecutor) throw new Error('NATIVE_INTEGRITY_EXECUTOR_PENDING_RESULT');
@@ -686,6 +882,37 @@ export function readNativeRun(projectDir, runRef = 'latest') {
       priorNarrativeStatus = null;
       narrativeDraftPending = narrativeReview.verdict !== 'ACCEPT';
       reviewPending = otherReviewPending || narrativeDraftPending;
+    } else if (event.kind === 'ART_REVIEW_REQUESTED') {
+      if (pendingExecutor || pendingArtReview || pendingNarrativeReview ||
+          !['ACTIVE', 'EXECUTION_FAILED'].includes(status) ||
+          event.outcome !== null || event.artifacts?.length) {
+        throw new Error('NATIVE_INTEGRITY_ART_REVIEW_REQUEST');
+      }
+      try { validateArtRequest(event.artReview, { events }); }
+      catch { throw new Error('NATIVE_INTEGRITY_ART_REVIEW_REQUEST'); }
+      pendingArtReview = sha256(bytes);
+      pendingArtRequest = event.artReview;
+      priorArtStatus = status;
+      status = 'ART_REVIEW_PENDING';
+    } else if (event.kind === 'ART_REVIEW_RESULT') {
+      if (!pendingArtReview || event.artRequestSha256 !== pendingArtReview ||
+          event.outcome !== null || event.artifacts?.length) {
+        throw new Error('NATIVE_INTEGRITY_ART_REVIEW_RESULT');
+      }
+      try {
+        validateArtResult(event.artReviewResult);
+        if (event.artReviewResult.code === 'ART_REVIEW_OBSERVED') {
+          const witnessed = readArtReceiptEntries(project, runId, run.projectId).filter(item =>
+            item.artRequestSha256 === pendingArtReview &&
+            sha256(serial(item)) === event.artReviewResult.receiptSha256);
+          if (witnessed.length !== 1) throw new Error('ART_REVIEW_RECEIPT_MISSING');
+        }
+      }
+      catch { throw new Error('NATIVE_INTEGRITY_ART_REVIEW_RESULT'); }
+      pendingArtReview = null;
+      pendingArtRequest = null;
+      status = priorArtStatus;
+      priorArtStatus = null;
     } else throw new Error('NATIVE_INTEGRITY_EVENT_KIND');
     precedingHash = sha256(bytes);
     events.push(event);
@@ -693,14 +920,13 @@ export function readNativeRun(projectDir, runRef = 'latest') {
   return { run, events, status, nextStage: next, terminal, headSha256: precedingHash,
     pendingExecutor, pendingRequestSha256, reviewPending, narrativeDraftPending, otherReviewPending,
     pendingNarrativeReview, pendingNarrativeRequest, narrativeReview,
+    pendingArtReview, pendingArtRequest,
     integrity: { ok: true, issues: [] } };
 }
 
-/** A separate, append-only artistic ledger. Review receipts do not advance workflow stages. */
-export function readNativeArtReviews(projectDir, runRef) {
-  const project = canonicalPhysicalDirectory(projectDir);
-  const current = readNativeRun(project, runRef);
-  const runId = current.run.runId;
+/** Internal art-ledger parser: does not call readNativeRun, so witnessed native results
+ * can verify their receipt without recursive integrity reads. */
+function readArtReceiptEntries(project, runId, projectId) {
   const root = checkedRunDir(project, runId);
   const directory = path.join(root, 'reviews');
   try { fs.lstatSync(directory); }
@@ -724,11 +950,14 @@ export function readNativeArtReviews(projectDir, runRef) {
     } catch { throw new Error('ART_REVIEW_INTEGRITY_FILE'); }
     if (marker.schemaVersion !== 1 || marker.index !== i || marker.sha256 !== sha256(bytes) ||
         receipt.schemaVersion !== 1 || receipt.index !== i ||
-        receipt.projectId !== current.run.projectId || receipt.runId !== runId ||
+        receipt.projectId !== projectId || receipt.runId !== runId ||
         !/^[a-f0-9]{64}$/.test(receipt.runHeadSha256 ?? '') ||
         receipt.prevSha256 !== (previous ?? receipt.runHeadSha256) ||
         receipt.provenance !== 'HOST_OBSERVED' || receipt.modelObserved !== 'gpt-6-sol' ||
         receipt.visualInputObserved !== true ||
+        (receipt.artRequestSha256 !== undefined &&
+          (receipt.artRequestSha256 !== receipt.runHeadSha256 ||
+            history.some(item => item.artRequestSha256 === receipt.artRequestSha256))) ||
         receipt.hostObservation?.protocolVersion !== 2 || receipt.hostObservation?.source !== 'browser-ui' ||
         receipt.hostObservation?.traceId !== `art-${runId}` ||
         receipt.hostObservation?.selectedModel !== 'gpt-6-sol' || receipt.hostObservation?.reasoning !== 'high' ||
@@ -757,6 +986,13 @@ export function readNativeArtReviews(projectDir, runRef) {
   return history;
 }
 
+/** A separate, append-only artistic ledger. Review receipts do not advance workflow stages. */
+export function readNativeArtReviews(projectDir, runRef) {
+  const project = canonicalPhysicalDirectory(projectDir);
+  const current = readNativeRun(project, runRef);
+  return readArtReceiptEntries(project, current.run.runId, current.run.projectId);
+}
+
 /** Atomically commit a witnessed review; refuse stale inputs and foreign filesystem entries. */
 export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, report) {
   const source = inspectNativeProject(projectDir);
@@ -779,11 +1015,17 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
       typeof report.summary !== 'string' || report.summary.length > 3000 ||
       !Array.isArray(report.findings) || report.findings.length > 12 ||
       !report.image || !report.brief || !Array.isArray(report.sources) ||
-      report.sources.length !== 4) throw new Error('ART_REVIEW_INVALID');
+      report.sources.length !== 4 ||
+      !/^[a-f0-9]{64}$/.test(report.artRequestSha256 ?? '')) throw new Error('ART_REVIEW_INVALID');
   return withLock(source.project, source, () => {
     const current = readNativeRun(source.project, runRef);
     if (current.headSha256 !== expectedHeadSha256 || current.pendingExecutor || current.terminal ||
-        !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status)) throw new Error('ART_REVIEW_STALE');
+        current.status !== 'ART_REVIEW_PENDING' ||
+        current.pendingArtReview !== report.artRequestSha256 ||
+        JSON.stringify(current.pendingArtRequest) !== JSON.stringify({
+          image: report.image, brief: report.brief, sources: report.sources,
+          modelObserved: 'gpt-6-sol',
+        })) throw new Error('ART_REVIEW_STALE');
     const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED')?.manual;
     if (!imported || imported.output.outputPath !== report.image.path ||
         imported.output.outputSha256 !== report.image.sha256 ||
@@ -793,6 +1035,9 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
     verifyStoredImage(source.project, current.run.runId, imported.output);
     verifyDraftInputs(source.project, [report.brief, ...report.sources]);
     const history = readNativeArtReviews(source.project, current.run.runId);
+    if (history.some(item => item.artRequestSha256 === report.artRequestSha256)) {
+      throw new Error('ART_REVIEW_REQUEST_ALREADY_RECORDED');
+    }
     if (history.some(item => item.verdict === 'PASS_ART')) throw new Error('ART_ALREADY_ACCEPTED');
     if (history.filter(item => item.verdict === 'REWORK').length >= 2) throw new Error('ART_REWORK_LIMIT');
     if (history.some(item => JSON.stringify(item.image) !== JSON.stringify(report.image) ||
@@ -805,12 +1050,15 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
       runId: current.run.runId, runHeadSha256: expectedHeadSha256,
       prevSha256: history.length ? sha256(serial(history.at(-1))) : expectedHeadSha256,
       at: new Date().toISOString(), provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
-      visualInputObserved: true, hostObservation: report.hostObservation, image: report.image, brief: report.brief,
+      visualInputObserved: true, artRequestSha256: report.artRequestSha256,
+      hostObservation: report.hostObservation, image: report.image, brief: report.brief,
       sources: report.sources, verdict: report.verdict, reasonCode: report.reasonCode,
       summary: report.summary, findings: report.findings };
     checkedRunDir(source.project, current.run.runId);
     withinDirectory(current.run.runId, false, () => withinDirectory('reviews', true, () => {
-      if (fs.readdirSync('.').length !== index * 2 - 2) throw new Error('ART_REVIEW_INTEGRITY_SEQUENCE');
+      if (fs.readdirSync('.').length !== index * 2 - 2) {
+        throw new Error('ART_REVIEW_INTEGRITY_SEQUENCE');
+      }
       const prefix = String(index).padStart(6, '0');
       const bytes = serial(receipt);
       const marker = serial({ schemaVersion: 1, index, sha256: sha256(bytes) });
@@ -833,7 +1081,8 @@ export function planNativeEvent(projectDir, runRef, input) {
   const source = inspectNativeProject(project);
   if (current.terminal) throw new Error('NATIVE_TERMINAL_RUN');
   if (!input || !['CHECKPOINT', 'ACTION_REQUESTED', 'EXECUTION_RESULT', 'DRAFT_IMPORTED',
-    'IMAGE_IMPORTED', 'NARRATIVE_REVIEW_REQUESTED', 'NARRATIVE_REVIEW_RESULT'].includes(input.kind)) {
+    'IMAGE_IMPORTED', 'NARRATIVE_REVIEW_REQUESTED', 'NARRATIVE_REVIEW_RESULT',
+    'ART_REVIEW_REQUESTED', 'ART_REVIEW_RESULT'].includes(input.kind)) {
     throw new Error('NATIVE_EVENT_KIND_INVALID');
   }
   if (input.stage !== current.nextStage) throw new Error(`NATIVE_INVALID_STAGE: expected ${current.nextStage}`);
@@ -843,6 +1092,9 @@ export function planNativeEvent(projectDir, runRef, input) {
   let manual = null;
   if (current.pendingNarrativeReview && input.kind !== 'NARRATIVE_REVIEW_RESULT') {
     throw new Error('NATIVE_NARRATIVE_REVIEW_PENDING');
+  }
+  if (current.pendingArtReview && input.kind !== 'ART_REVIEW_RESULT') {
+    throw new Error('NATIVE_ART_REVIEW_PENDING');
   }
   if (input.kind === 'CHECKPOINT') {
     if (current.pendingExecutor || current.pendingNarrativeReview) throw new Error('NATIVE_EXECUTOR_PENDING_RESULT');
@@ -884,6 +1136,21 @@ export function planNativeEvent(projectDir, runRef, input) {
     }
     validateNarrativeResult(input.reviewResult, current.pendingNarrativeRequest,
       readBoundText(project, current.pendingNarrativeRequest.draft));
+  } else if (input.kind === 'ART_REVIEW_REQUESTED') {
+    if (current.pendingExecutor || current.pendingNarrativeReview ||
+        !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status)) {
+      throw new Error('NATIVE_ART_REVIEW_ALREADY_PENDING');
+    }
+    validateArtRequest(input.artReview, current);
+    const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED').manual;
+    verifyStoredImage(project, current.run.runId, imported.output);
+    verifyDraftInputs(project, [input.artReview.brief, ...input.artReview.sources]);
+  } else if (input.kind === 'ART_REVIEW_RESULT') {
+    if (!current.pendingArtReview || input.artRequestSha256 !== current.pendingArtReview) {
+      throw new Error('NATIVE_ART_REVIEW_RESULT_WITHOUT_REQUEST');
+    }
+    validateArtResult(input.artReviewResult);
+    verifyArtResultReceipt(project, current.run.runId, current.pendingArtReview, input.artReviewResult);
   } else if (input.kind === 'IMAGE_IMPORTED') {
     if (current.pendingExecutor || !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status) ||
         current.events.some(event => event.kind === 'IMAGE_IMPORTED')) throw new Error('NATIVE_IMAGE_IMPORT_DUPLICATE');
@@ -927,6 +1194,11 @@ export function planNativeEvent(projectDir, runRef, input) {
     event.reviewResult = input.reviewResult;
     event.reviewRequestSha256 = current.pendingNarrativeReview;
   }
+  if (input.kind === 'ART_REVIEW_REQUESTED') event.artReview = input.artReview;
+  if (input.kind === 'ART_REVIEW_RESULT') {
+    event.artReviewResult = input.artReviewResult;
+    event.artRequestSha256 = current.pendingArtReview;
+  }
   return { status: 'READY', kind: 'NATIVE_EVENT', project, runId: current.run.runId,
     source, expectedHeadSha256: current.headSha256, event,
     fingerprint: sha256(serial(event)), writes: [
@@ -954,6 +1226,7 @@ export function commitNativeEvent(plan) {
     if (current.headSha256 !== plan.expectedHeadSha256 ||
         current.nextStage !== plan.event.stage || plan.event.index !== current.events.length + 1 ||
         (current.pendingNarrativeReview && plan.event.kind !== 'NARRATIVE_REVIEW_RESULT') ||
+        (current.pendingArtReview && plan.event.kind !== 'ART_REVIEW_RESULT') ||
         (plan.event.kind === 'ACTION_REQUESTED' && ['WAITING_FOR_EVIDENCE', 'EXECUTED_UNVERIFIED'].includes(current.status)) ||
         (plan.event.kind === 'ACTION_REQUESTED' && plan.event.executor === 'web-dev' &&
           plan.event.request?.taskKind === 'episode-script' && !!episodeDraftOfRun(current)) ||
@@ -965,7 +1238,9 @@ export function commitNativeEvent(plan) {
           !['codex', 'web-dev', 'image-gen'].includes(current.pendingExecutor) ||
           plan.event.requestSha256 !== current.pendingRequestSha256)) ||
         (plan.event.kind === 'NARRATIVE_REVIEW_RESULT' &&
-          plan.event.reviewRequestSha256 !== current.pendingNarrativeReview)) {
+          plan.event.reviewRequestSha256 !== current.pendingNarrativeReview) ||
+        (plan.event.kind === 'ART_REVIEW_RESULT' &&
+          plan.event.artRequestSha256 !== current.pendingArtReview)) {
       throw new Error('NATIVE_STALE_EVENT_CONFLICT');
     }
     const fresh = verifyNativeSource(plan.source);
@@ -1026,6 +1301,27 @@ export function commitNativeEvent(plan) {
       validateNarrativeResult(plan.event.reviewResult, current.pendingNarrativeRequest,
         readBoundText(plan.project, current.pendingNarrativeRequest.draft));
     }
+    if (plan.event.kind === 'ART_REVIEW_REQUESTED') {
+      if (current.pendingExecutor || current.pendingNarrativeReview || current.pendingArtReview ||
+          !['ACTIVE', 'EXECUTION_FAILED'].includes(current.status)) {
+        throw new Error('NATIVE_ART_REVIEW_ALREADY_PENDING');
+      }
+      validateArtRequest(plan.event.artReview, current);
+      const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED').manual;
+      verifyStoredImage(plan.project, current.run.runId, imported.output);
+      verifyDraftInputs(plan.project, [plan.event.artReview.brief, ...plan.event.artReview.sources]);
+    }
+    if (plan.event.kind === 'ART_REVIEW_RESULT') {
+      if (!current.pendingArtReview) throw new Error('NATIVE_ART_REVIEW_RESULT_WITHOUT_REQUEST');
+      validateArtResult(plan.event.artReviewResult);
+      if (plan.event.artReviewResult.code === 'ART_REVIEW_INTERRUPTED' &&
+          readNativeArtReviews(plan.project, current.run.runId).some(item =>
+            item.artRequestSha256 === current.pendingArtReview)) {
+        throw new Error('NATIVE_ART_REVIEW_RESULT_STALE');
+      }
+      verifyArtResultReceipt(plan.project, current.run.runId, current.pendingArtReview,
+        plan.event.artReviewResult);
+    }
     for (const artifact of plan.event.artifacts) {
       const snapshot = snapshotArtifact(plan.project, artifact.path);
       if (snapshot.sha256 !== artifact.sha256 || snapshot.size !== artifact.size) {
@@ -1039,18 +1335,29 @@ export function commitNativeEvent(plan) {
       const receiptBytes = serial({ schemaVersion: 1, index: plan.event.index, eventSha256: sha256(eventBytes) });
       const tmpEvent = `.pending-${crypto.randomBytes(12).toString('hex')}`;
       const tmpReceipt = `.pending-${crypto.randomBytes(12).toString('hex')}`;
-      const eventFd = fs.openSync(tmpEvent, EXCLUSIVE, 0o600);
-      try { fs.writeFileSync(eventFd, eventBytes); } finally { fs.closeSync(eventFd); }
+      const durableArtEvent = ['ART_REVIEW_REQUESTED', 'ART_REVIEW_RESULT'].includes(plan.event.kind);
       try {
+        const eventFd = fs.openSync(tmpEvent, EXCLUSIVE, 0o600);
+        try { fs.writeFileSync(eventFd, eventBytes); if (durableArtEvent) flushNativeFile(eventFd); }
+        finally { fs.closeSync(eventFd); }
         const receiptFd = fs.openSync(tmpReceipt, EXCLUSIVE, 0o600);
-        try { fs.writeFileSync(receiptFd, receiptBytes); } finally { fs.closeSync(receiptFd); }
+        try { fs.writeFileSync(receiptFd, receiptBytes); if (durableArtEvent) flushNativeFile(receiptFd); }
+        finally { fs.closeSync(receiptFd); }
         fs.linkSync(tmpEvent, `${prefix}.json`);
         // Commit marker published last: an interrupted event is never accepted.
         fs.linkSync(tmpReceipt, `${prefix}.commit.json`);
-      } catch { throw new Error('NATIVE_EVENT_CONFLICT'); }
+        // Complete the visible commit pair before any Web DEV turn. Sudden
+        // power loss may lose directory metadata; crash remnants are recovered
+        // explicitly and uncertain host outcomes are never retried silently.
+        fs.unlinkSync(tmpEvent);
+        fs.unlinkSync(tmpReceipt);
+      } catch (error) {
+        if (error.message === 'NATIVE_STORAGE_DURABILITY_UNVERIFIED') throw error;
+        throw new Error('NATIVE_EVENT_CONFLICT');
+      }
       finally {
         // Only unique temporary files created by this operation may be removed.
-        fs.unlinkSync(tmpEvent);
+        if (fs.existsSync(tmpEvent)) fs.unlinkSync(tmpEvent);
         if (fs.existsSync(tmpReceipt)) fs.unlinkSync(tmpReceipt);
       }
     }));

@@ -118,7 +118,9 @@ export function planDevDraft(projectDir, options = {}, { discover = () => null }
   // A brief alone does not demonstrate access to the project's story/character/style context.
   // Without selected source references, leave art authoring to the primary task model's session.
   const artContextReady = coverageComplete && (taskKind !== 'art-concept' || contextReviewed);
-  const verified = isVerifiedCapability(cap, 'webDev') && artContextReady;
+  const visualOnlyV2 = isVerifiedCapability(cap, 'webDev') &&
+    ownData(cap, 'browserObservationV2Available') === true;
+  const verified = isVerifiedCapability(cap, 'webDev') && artContextReady && !visualOnlyV2;
   const details = {
     engine: 'ludory-ai', operation: 'draft', project, runId: resolvedRun, taskKind,
     sourceBinding: projectSource, runHeadSha256: current.headSha256,
@@ -131,7 +133,8 @@ export function planDevDraft(projectDir, options = {}, { discover = () => null }
     selectedRoute: verified ? 'web-dev' : 'manual',
     reasonCode: verified ? 'DEV_ROUTE_VERIFIED' : !coverageComplete
       ? 'DEV_ART_CONTEXT_INSUFFICIENT' : !artContextReady
-        ? 'DEV_ART_CONTEXT_REVIEW_REQUIRED' : 'DEV_ROUTE_UNVERIFIED',
+        ? 'DEV_ART_CONTEXT_REVIEW_REQUIRED' : visualOnlyV2
+          ? 'DEV_TEXT_V2_UNSUPPORTED' : 'DEV_ROUTE_UNVERIFIED',
     ...(verified && { modelObserved: ownData(cap, 'modelObserved') }),
     nextAction: { kind: verified ? 'REVIEW_DRAFT_ROUTE' : 'MANUAL_HANDOFF', executable: false },
     manualPacket,

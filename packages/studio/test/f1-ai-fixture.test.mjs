@@ -1,0 +1,45 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { runFreshAiFixture } from './helpers/f1-ai-fixture.mjs';
+
+test('a fresh Studio game reports native AI readiness and honest host blockers without touching a foreign tree', async t => {
+  const receipt = await runFreshAiFixture(t);
+  assert.equal(receipt.create.status, 'APPLIED');
+  assert.equal(receipt.doctor.status, 'OK');
+  assert.equal(receipt.doctor.sourceHead, null);
+  assert.equal(receipt.frozenRoute.status, 'BLOCKED');
+  assert.equal(receipt.frozenRoute.reasonCode, 'AI_ROUTING_STUDIO_GAME_REQUIRED');
+  assert.equal(receipt.routeEpisode.selectedRoute, 'manual');
+  assert.equal(receipt.routeEpisode.status, 'NEEDS_USER_ACTION');
+  assert.equal(receipt.routeImage.status, 'NEEDS_AGENT_ACTION');
+  assert.equal(receipt.routeImage.selectedRoute, 'codex-imagegen');
+  assert.equal(receipt.routeImage.modelObserved, null);
+  assert.equal(receipt.startPreview.status, 'READY');
+  assert.equal(receipt.previewRunCreated, false);
+  assert.equal(receipt.startApplied.status, 'APPLIED');
+  assert.equal(receipt.status.nativeStatus, 'ACTIVE');
+  assert.equal(receipt.next.nextAction.kind, 'PERFORM_STAGE');
+  assert.equal(receipt.continuePreview.status, 'READY');
+  assert.equal(receipt.image.status, 'NEEDS_AGENT_ACTION');
+  assert.equal(receipt.imageApply.status, 'NEEDS_AGENT_ACTION');
+  assert.match(receipt.image.manualPacket.prompt, /Icelandic lighthouse at sunset/);
+  assert.equal(receipt.image.brief.sha256,
+    crypto.createHash('sha256').update(fs.readFileSync(path.join(receipt.project, 'scene-brief.md'))).digest('hex'));
+  assert.equal(receipt.draft.status, 'NEEDS_USER_ACTION');
+  assert.equal(receipt.narrative.status, 'BLOCKED');
+  assert.equal(receipt.narrative.reasonCode, 'REVIEW_EPISODE_DRAFT_REQUIRED');
+  assert.equal(receipt.art.reasonCode, 'ART_IMAGE_NOT_IMPORTED');
+  assert.equal(receipt.recover.status, 'BLOCKED');
+  assert.match(receipt.recover.conflicts.join(' '), /NATIVE_RECOVERY_NO_PENDING_EXECUTOR/);
+  assert.deepEqual(receipt.image.writes, []);
+  assert.deepEqual(receipt.draft.writes, []);
+  assert.equal(receipt.eventsAfterHandoffs, 0);
+  assert.equal(receipt.quality?.status === 'PASS', false);
+  assert.equal(receipt.hostInvocations, 0);
+  assert.equal(fs.readFileSync(path.join(receipt.foreign, 'owner-data.txt'), 'utf8'), 'owner data\n');
+  assert.equal(fs.existsSync(path.join(receipt.foreign, '.ludory')), false);
+  assert.equal(receipt.foreignHashAfter, receipt.foreignHashBefore);
+});

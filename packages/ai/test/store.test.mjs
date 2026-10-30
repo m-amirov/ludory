@@ -3,8 +3,185 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { nativeProject, runGit } from './helpers/project.mjs';
-import { planNewRun, commitNewRun, readNativeRun, planNativeEvent, commitNativeEvent, listNativeRuns } from '../src/store.mjs';
+import { planNewRun, commitNewRun, readNativeRun, planNativeEvent, commitNativeEvent, listNativeRuns,
+  inspectNativeStorageRecovery, applyNativeStorageRecovery } from '../src/store.mjs';
+
+test('interrupted journal remnants require confirmation and are quarantined without losing bytes', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const events = path.join(project, '.ludory', 'ai', 'runs', run.run.runId, 'events');
+  const pending = path.join(events, '.pending-1234567890abcdef12345678');
+  const bytes = Buffer.from('uncommitted journal bytes');
+  fs.writeFileSync(pending, bytes);
+  const lock = path.join(project, '.ludory', 'ai', '.lock');
+  fs.writeFileSync(lock, '999999999\n');
+  const preview = inspectNativeStorageRecovery(project, run.run.runId);
+  assert.equal(preview.status, 'NEEDS_CONFIRMATION');
+  assert.equal(preview.entries.length, 2);
+  assert.throws(() => applyNativeStorageRecovery(preview), /CONFIRMATION_REQUIRED/);
+  const recovered = applyNativeStorageRecovery(preview, { confirmNoExecutor: true });
+  assert.equal(recovered.status, 'RECOVERED');
+  assert.equal(fs.existsSync(pending), false);
+  assert.equal(fs.existsSync(lock), false);
+  assert.deepEqual(fs.readFileSync(recovered.quarantinedFiles.find(x => x.endsWith('event-pending-1234567890abcdef12345678'))), bytes);
+  assert.equal(readNativeRun(project, run.run.runId).integrity.ok, true);
+});
+
+test('only an uncommitted final event may be quarantined; completed journal remains immutable', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const events = path.join(project, '.ludory', 'ai', 'runs', run.run.runId, 'events');
+  const orphan = path.join(events, '000001.json');
+  fs.writeFileSync(orphan, 'interrupted publication');
+  const preview = inspectNativeStorageRecovery(project, run.run.runId);
+  assert.equal(preview.entries.length, 1);
+  assert.equal(preview.entries[0].label, 'event-000001.json');
+  applyNativeStorageRecovery(preview, { confirmNoExecutor: true });
+  assert.equal(readNativeRun(project, run.run.runId).events.length, 0);
+  const plan = planNativeEvent(project, run.run.runId, {
+    kind: 'CHECKPOINT', stage: 'EVIDENCE_COLLECTED', outcome: 'CONTINUE', artifacts: ['src/main.js'],
+  });
+  commitNativeEvent(plan);
+  fs.writeFileSync(path.join(events, '000002.json'), 'partial');
+  fs.writeFileSync(path.join(events, '000003.json'), 'suspicious later event');
+  assert.throws(() => inspectNativeStorageRecovery(project, run.run.runId), /UNKNOWN_EVENT|SEQUENCE/);
+});
+
+test('recovery refuses a live lock, changed evidence and foreign journal entries', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const lock = path.join(project, '.ludory', 'ai', '.lock');
+  fs.writeFileSync(lock, `${process.pid}\n`);
+  assert.throws(() => inspectNativeStorageRecovery(project, run.run.runId), /EXECUTOR_MAY_BE_ACTIVE/);
+  fs.unlinkSync(lock);
+  const events = path.join(project, '.ludory', 'ai', 'runs', run.run.runId, 'events');
+  const pending = path.join(events, '.pending-1234567890abcdef12345678');
+  fs.writeFileSync(pending, 'first');
+  const preview = inspectNativeStorageRecovery(project, run.run.runId);
+  fs.writeFileSync(pending, 'second');
+  assert.throws(() => applyNativeStorageRecovery(preview, { confirmNoExecutor: true }), /STALE_PLAN/);
+  assert.equal(fs.readFileSync(pending, 'utf8'), 'second');
+  fs.writeFileSync(path.join(events, 'surprise.txt'), 'other owner');
+  assert.throws(() => inspectNativeStorageRecovery(project, run.run.runId), /UNKNOWN_EVENT_ENTRY/);
+});
+
+test('orphaned artistic review receipt is quarantined without discarding committed journal', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const reviews = path.join(project, '.ludory', 'ai', 'runs', run.run.runId, 'reviews');
+  fs.mkdirSync(reviews);
+  fs.writeFileSync(path.join(reviews, '000001.json'), 'interrupted observed receipt');
+  const preview = inspectNativeStorageRecovery(project, run.run.runId);
+  assert.deepEqual(preview.entries.map(x => x.label), ['review-000001.json']);
+  const output = applyNativeStorageRecovery(preview, { confirmNoExecutor: true });
+  assert.equal(fs.readFileSync(output.quarantinedFiles.find(x => x.endsWith('review-000001.json')), 'utf8'),
+    'interrupted observed receipt');
+  assert.equal(fs.readdirSync(reviews).filter(name => !name.startsWith('.recovered-')).length, 0);
+  assert.equal(readNativeRun(project, run.run.runId).integrity.ok, true);
+});
+
+test('recovery never follows a substituted event directory outside its pinned source', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const dir = path.join(project, '.ludory', 'ai', 'runs', run.run.runId, 'events');
+  fs.writeFileSync(path.join(dir, '.pending-1234567890abcdef12345678'), 'owned');
+  const preview = inspectNativeStorageRecovery(project, run.run.runId);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-recovery-outside-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(outside, '.pending-1234567890abcdef12345678'), 'outside-user');
+  const originalLink = fs.linkSync;
+  const originalRename = fs.renameSync;
+  let swapped = false;
+  fs.linkSync = function (from, to) {
+    if (!swapped && String(to).includes('.recovered-') && String(from).includes('.pending-')) {
+      swapped = true;
+      originalRename.call(fs, dir, `${dir}-original`);
+      fs.symlinkSync(outside, dir, 'dir');
+    }
+    return originalLink.call(fs, from, to);
+  };
+  try { assert.throws(() => applyNativeStorageRecovery(preview, { confirmNoExecutor: true })); }
+  finally { fs.linkSync = originalLink; }
+  assert.equal(swapped, true);
+  assert.equal(fs.readFileSync(path.join(outside, '.pending-1234567890abcdef12345678'), 'utf8'),
+    'outside-user');
+});
+
+test('recovery uses a relative parent hardlink instead of an unsafe destination path', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const events = path.join(project, '.ludory', 'ai', 'runs', run.run.runId, 'events');
+  fs.writeFileSync(path.join(events, '.pending-1234567890abcdef12345678'), 'owned');
+  const preview = inspectNativeStorageRecovery(project, run.run.runId);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-recovery-destination-'));
+  t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(outside, 'event-pending-1234567890abcdef12345678'), 'user-owned');
+  const original = fs.linkSync;
+  let unsafeDestination = false, witnessed = false;
+  fs.linkSync = function (from, to) {
+    if (String(from).includes('.pending-')) {
+      witnessed = true;
+      if (!/^\.\.\/\.recovered-[a-f0-9]{24}-event-pending-/.test(String(to))) unsafeDestination = true;
+    }
+    return original.call(fs, from, to);
+  };
+  try { applyNativeStorageRecovery(preview, { confirmNoExecutor: true }); }
+  finally { fs.linkSync = original; }
+  assert.equal(witnessed, true);
+  assert.equal(unsafeDestination, false, 'destination must stay relative to the pinned source directory');
+  assert.equal(fs.readFileSync(path.join(outside, 'event-pending-1234567890abcdef12345678'), 'utf8'), 'user-owned');
+});
+
+test('a forged recovered filename cannot hide a previously committed event pair', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  commitNativeEvent(planNativeEvent(project, run.run.runId, {
+    kind: 'CHECKPOINT', stage: 'EVIDENCE_COLLECTED', outcome: 'CONTINUE', artifacts: ['src/main.js'],
+  }));
+  const events = path.join(project, '.ludory', 'ai', 'runs', run.run.runId, 'events');
+  for (const name of ['000001.json', '000001.commit.json']) {
+    fs.renameSync(path.join(events, name), path.join(events,
+      `.recovered-aaaaaaaaaaaaaaaaaaaaaaaa-event-${name}`));
+  }
+  assert.throws(() => readNativeRun(project, run.run.runId), /INTEGRITY|FOREIGN|RECOVERY/);
+});
+
+test('SIGKILL between event link and commit marker leaves a recoverable uncommitted tail', t => {
+  const project = nativeProject(t);
+  const run = commitNewRun(newRun(project));
+  const storeUrl = new URL('../src/store.mjs', import.meta.url).href;
+  const child = `
+    import fs from 'node:fs';
+    import { planNativeEvent, commitNativeEvent } from ${JSON.stringify(storeUrl)};
+    const [project, runId] = process.argv.slice(1);
+    const plan = planNativeEvent(project, runId, {
+      kind: 'CHECKPOINT', stage: 'EVIDENCE_COLLECTED', outcome: 'CONTINUE', artifacts: ['src/main.js'],
+    });
+    const original = fs.linkSync;
+    fs.linkSync = function(source, target) {
+      original.call(fs, source, target);
+      if (String(target).endsWith('000001.json')) process.kill(process.pid, 'SIGKILL');
+    };
+    commitNativeEvent(plan);
+  `;
+  const killed = spawnSync(process.execPath, ['--input-type=module', '-e', child, project, run.run.runId],
+    { encoding: 'utf8', timeout: 10000 });
+  assert.ok(killed.signal === 'SIGKILL' || (process.platform === 'win32' && killed.status !== 0),
+    `worker did not terminate: ${killed.stderr}`);
+  assert.equal(fs.existsSync(path.join(project, '.ludory', 'ai', 'runs', run.run.runId,
+    'events', '000001.json')), true, 'worker must have linked the uncommitted event before termination');
+  assert.throws(() => readNativeRun(project, run.run.runId), /NATIVE_INTEGRITY/);
+  const preview = inspectNativeStorageRecovery(project, run.run.runId);
+  assert.equal(preview.status, 'NEEDS_CONFIRMATION');
+  assert.ok(preview.entries.some(x => x.label === 'event-000001.json'));
+  assert.ok(preview.entries.some(x => x.label === 'lock'));
+  const restored = applyNativeStorageRecovery(preview, { confirmNoExecutor: true });
+  assert.equal(restored.status, 'RECOVERED');
+  assert.equal(readNativeRun(project, run.run.runId).events.length, 0);
+  assert.equal(fs.existsSync(restored.quarantinedFiles.find(x => x.endsWith('event-000001.json'))), true);
+});
 
 const scope = { target: 'EP3 QA', inScope: ['src/main.js'], outOfScope: [],
   acceptanceContract: 'all checks', mutationBoundary: 'only report evidence' };

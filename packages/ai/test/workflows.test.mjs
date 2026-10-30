@@ -193,6 +193,28 @@ test('interrupted Codex execution requires explicit recovery confirmation and pr
   assert.equal(planWorkflow(project, 'continue', { run: id, executor: 'codex' }).status, 'READY');
 });
 
+test('lost external result does not restart Codex, replay recovery, or overwrite dirty game files', t => {
+  const project = nativeProject(t);
+  markNewStudioGame(project);
+  const note = path.join(project, 'untracked-owner-note.txt');
+  fs.writeFileSync(note, 'owner draft must survive\n');
+  const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;
+  const planned = planWorkflow(project, 'continue', { run: id, executor: 'codex' });
+  const source = path.join(project, 'src', 'main.js');
+  fs.writeFileSync(source, '// interrupted partial edit\n');
+  commitNativeEvent(planned.nativePlan); // Lost parent after durable request, before result.
+  assert.equal(readNativeRun(project, id).pendingExecutor, 'codex');
+  assert.equal(planWorkflow(project, 'continue', { run: id, executor: 'codex' }).status, 'BLOCKED');
+  const confirm = planWorkflow(project, 'recover', { run: id, confirmNoExecutor: true });
+  assert.equal(executeWorkflow(planWorkflow(project, 'recover', { run: id }), { apply: true }).status, 'BLOCKED');
+  const finished = executeWorkflow(confirm, { apply: true });
+  assert.equal(finished.nativeStatus, 'EXECUTION_FAILED');
+  assert.equal(readNativeRun(project, id).events.at(-1).result.code, 'EXECUTOR_INTERRUPTED');
+  assert.throws(() => executeWorkflow(confirm, { apply: true }), /STALE|CONFLICT|PENDING|REQUEST/);
+  assert.equal(fs.readFileSync(source, 'utf8'), '// interrupted partial edit\n');
+  assert.equal(fs.readFileSync(note, 'utf8'), 'owner draft must survive\n');
+});
+
 test('executor never starts on a project lacking Studio creation receipt', t => {
   const project = nativeProject(t);
   const id = executeWorkflow(planWorkflow(project, 'start', startOptions), { apply: true }).runId;

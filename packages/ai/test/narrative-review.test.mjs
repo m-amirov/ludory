@@ -12,6 +12,10 @@ import { planDevDraft } from '../src/draft-tasks.mjs';
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const capability = { available: true, reasonCode: 'AVAILABLE', transportVerified: true,
   entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol' };
+const visualOnlyV2 = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
+  modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
+  reasoningRequired: 'high', preflight: { authenticated: true, newChat: true,
+    url: 'https://chatgpt.com/', solAvailable: true } };
 
 function game(t, kind = 'episode-script', draftText = 'S01 Maya accepts Leo. He promises to return. S02 Leo returns and apologizes.') {
   const project = nativeProject(t);
@@ -63,6 +67,16 @@ test('preview of episode-review binds immutable draft and inputs but does not ca
   assert.equal(preview.brief.sha256, digest(fs.readFileSync(path.join(project, 'brief.md'))));
   assert.equal(preview.selectedRoute, 'web-dev');
   assert.equal(readNativeRun(project, run).events.length, before);
+});
+
+test('visual-only v2 browser capability cannot falsely promise an observed text narrative review', async t => {
+  const { project, run } = game(t);
+  const { planNarrativeReview } = await import('../src/narrative-review.mjs');
+  const result = planNarrativeReview(project, { run }, { discover: () => visualOnlyV2 });
+  assert.equal(result.status, 'NEEDS_USER_ACTION');
+  assert.equal(result.reasonCode, 'REVIEW_WEB_TEXT_V2_UNSUPPORTED');
+  assert.equal(result.modelObserved, undefined);
+  assert.equal(readNativeRun(project, run).events.length, 1);
 });
 
 test('review preflight rejects a prompt exceeding the actual 64KiB DEV host bound before writing a request', async t => {

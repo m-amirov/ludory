@@ -52,6 +52,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory workflow continue --project <game-directory> [--run <run-id|latest>] [--executor codex] [--apply] [--json]
   ludory workflow cycle --project <new-studio-game> --test <relative.test.js> [--run <run-id|latest>] [--repairs <0|1|2>] [--apply] [--json]
   ludory workflow recover --project <game-directory> [--run <run-id|latest>] [--confirm-no-executor] [--apply] [--json]
+  ludory workflow recover-storage --project <game-directory> --run <run-id> [--confirm-no-executor] [--apply] [--json]
   ludory workflow checkpoint --project <game-directory> --stage <STAGE> [--run <run-id|latest>] [--artifact <path;path>] [--outcome <CONTINUE|PASS|FAIL|BLOCKED|ESCALATE>] [--apply] [--json]
   ludory helper install [--apply] [--json]
   ludory help
@@ -112,7 +113,7 @@ function argumentsFor(command, argv) {
           : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
             : command === 'workflow-continue' ? [...workflowCommon, '--run', '--executor', '--apply']
               : command === 'workflow-cycle' ? [...workflowCommon, '--run', '--test', '--repairs', '--apply']
-              : command === 'workflow-recover' ? [...workflowCommon, '--run', '--confirm-no-executor', '--apply']
+              : command === 'workflow-recover' || command === 'workflow-recover-storage' ? [...workflowCommon, '--run', '--confirm-no-executor', '--apply']
               : [...workflowCommon, '--run', '--stage', '--artifact', '--outcome', '--apply'])
     : command === 'helper-install' ? new Set(['--apply', '--json'])
     : command === 'components-native' ? new Set(['--json'])
@@ -341,7 +342,7 @@ async function runArtReviewCommand(flags, { out, devHost }) {
     }
   }
   displayWorkflow(result, flags.has('--json'), out);
-  return result.status === 'ESCALATE' ? 3
+  return result.status === 'ESCALATE' || result.status === 'PENDING_RECOVERY' ? 3
     : result.status === 'BLOCKED' || (flags.has('--apply') && result.status === 'NEEDS_USER_ACTION') ? 2 : 0;
 }
 
@@ -443,7 +444,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'workflow') {
       const [operation, ...args] = rest;
-      if (!['doctor', 'route', 'draft', 'draft-import', 'narrative-review', 'image', 'image-import', 'art-review', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
+      if (!['doctor', 'route', 'draft', 'draft-import', 'narrative-review', 'image', 'image-import', 'art-review', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover', 'recover-storage'].includes(operation)) {
         throw new Error(`Unknown workflow operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`workflow-${operation}`, args);
@@ -501,11 +502,20 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       }
       if (operation === 'art-review') {
         return runArtReviewCommand(flags, { out, devHost }).catch(error => {
-          const result = { engine: 'ludory-ai', operation, status: 'FAILED',
-            project: flags.get('--project'), writes: [], conflicts: [error.message] };
-          if (flags.has('--json')) displayWorkflow(result, true, out);
+          let pending = false;
+          try { pending = flags.has('--apply') &&
+            !!readNativeRun(flags.get('--project'), flags.get('--run')).pendingArtReview; }
+          catch { /* An absent valid request is an ordinary failure. */ }
+          const result = pending ? { engine: 'ludory-ai', operation, status: 'PENDING_RECOVERY',
+            project: flags.get('--project'), nativeStatus: 'ART_REVIEW_PENDING',
+            reasonCode: 'ART_REVIEW_OUTCOME_UNKNOWN', writes: [], conflicts: [],
+            warning: 'The browser may still be reviewing or billing. Verify that the old helper is stopped before workflow recover --confirm-no-executor --apply.',
+            nextAction: { kind: 'CONFIRM_REVIEWER_STOPPED', executable: false } }
+            : { engine: 'ludory-ai', operation, status: 'FAILED',
+              project: flags.get('--project'), writes: [], conflicts: [error.message] };
+          if (flags.has('--json') || pending) displayWorkflow(result, flags.has('--json'), out);
           else err(`Ludory: ${error.message}\n`);
-          return 1;
+          return pending ? 3 : 1;
         });
       }
       if (operation === 'route') {

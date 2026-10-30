@@ -75,11 +75,16 @@ export function planTaskRoute(projectDir, options = {}, { discover = discoverTas
     terra: capabilityReason(items.imageTerra, 'imageTerra'),
     sol: capabilityReason(items.imageSol, 'imageSol'),
   } : null;
+  // The pinned v2 helper only witnesses browser turns with an image attachment.
+  // A verified visual route is not evidence that text-only authoring can run.
+  const textOnlyV2 = preferredRoute === 'web-dev' &&
+    isVerifiedCapability(items.webDev, 'webDev') &&
+    ownData(items.webDev, 'browserObservationV2Available') === true;
   let route = null;
   if (preferredRoute === 'codex') {
     if (isVerifiedCapability(items.codex, 'codex')) route = 'codex';
   } else if (preferredRoute === 'web-dev') {
-    if (isVerifiedCapability(items.webDev, 'webDev')) route = 'web-dev';
+    if (!textOnlyV2 && isVerifiedCapability(items.webDev, 'webDev')) route = 'web-dev';
   } else if (taskKind === 'image') {
     if (model === 'terra' && isVerifiedCapability(items.imageTerra, 'imageTerra')) route = 'image-terra';
     else if (model === 'sol' && isVerifiedCapability(items.imageSol, 'imageSol')) route = 'image-sol';
@@ -95,7 +100,8 @@ export function planTaskRoute(projectDir, options = {}, { discover = discoverTas
   }
   const reasonCode = taskKind === 'image'
     ? 'AI_ROUTING_PINNED_MODEL_UNAVAILABLE'
-    : preferredRoute === 'web-dev' ? 'AI_ROUTING_WEB_DEV_UNAVAILABLE' : 'AI_ROUTING_CODEX_UNAVAILABLE';
+    : textOnlyV2 ? 'AI_ROUTING_WEB_TEXT_V2_UNSUPPORTED'
+      : preferredRoute === 'web-dev' ? 'AI_ROUTING_WEB_DEV_UNAVAILABLE' : 'AI_ROUTING_CODEX_UNAVAILABLE';
   const capabilityReasonCode = taskKind === 'image' ? capabilityReasons[model]
     : capabilityReason(items[preferredRoute === 'codex' ? 'codex' : 'webDev'],
       preferredRoute === 'codex' ? 'codex' : 'webDev');

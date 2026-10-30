@@ -89,9 +89,12 @@ export function planNarrativeReview(projectDir, { run = 'latest' } = {}, { disco
     stage: current.nextStage, draft: draft.draft } }; }
   let capability;
   try { capability = discover(source.project); } catch { capability = null; }
-  if (!isVerifiedCapability(capability, 'webDev') || ownData(capability, 'modelObserved') !== 'gpt-6-sol') {
+  const visualOnlyV2 = isVerifiedCapability(capability, 'webDev') &&
+    ownData(capability, 'browserObservationV2Available') === true;
+  if (visualOnlyV2 || !isVerifiedCapability(capability, 'webDev') ||
+      ownData(capability, 'modelObserved') !== 'gpt-6-sol') {
     return { ...base, status: 'NEEDS_USER_ACTION', selectedRoute: 'manual',
-      reasonCode: 'REVIEW_WEB_DEV_UNAVAILABLE', writes: [],
+      reasonCode: visualOnlyV2 ? 'REVIEW_WEB_TEXT_V2_UNSUPPORTED' : 'REVIEW_WEB_DEV_UNAVAILABLE', writes: [],
       nextAction: { kind: 'AWAIT_VERIFIED_REVIEWER', executable: false } };
   }
   return { ...base, modelObserved: 'gpt-6-sol', status: 'READY',

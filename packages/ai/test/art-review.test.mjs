@@ -3,10 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { game } from './helpers/image-game.mjs';
 import { png } from './helpers/images.mjs';
 import { planImageTask, planImageImport, executeImageImport } from '../src/image-tasks.mjs';
 import { planArtReview, verifyArtReviewPlan, interpretArtReview, executeArtReview } from '../src/art-review.mjs';
+import { readNativeRun, readNativeArtReviews, planNativeEvent, commitNativeEvent,
+  recordNativeArtReview } from '../src/store.mjs';
+import { planWorkflow, executeWorkflow } from '../src/workflows.mjs';
 
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const observedWeb = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
@@ -39,6 +43,287 @@ const options = input => ({ run: input.run, image: input.output.outputPath,
   sources: input.source, contextReviewed: true });
 const discovered = { discover: () => observedWeb };
 
+function witnessedArt(plan) {
+  const traceId = `art-${plan.runId}`;
+  const hostObservation = { protocolVersion: 2, source: 'browser-ui', traceId,
+    selectedModel: 'gpt-6-sol', reasoning: 'high',
+    image: { ref: plan.image.ref, sha256: plan.image.sha256, bytes: plan.image.size },
+    upload: { creationRequestObserved: true, processingRequestObserved: true,
+      processingRequestKind: 'process_upload_stream', processingEvent: 'file.processing.completed',
+      processingCompleted: true, visibleAttachmentChip: true } };
+  return { status: 'HOST_OBSERVED', routeObserved: 'web-dev', modelObserved: 'gpt-6-sol',
+    imageInputObserved: true, traceId, imageRef: plan.image.ref, imageSha256: plan.image.sha256,
+    imageBytes: plan.image.size, hostObservation,
+    text: JSON.stringify({ schemaVersion: 1, imageVisible: true, imageSha256: plan.image.sha256,
+      verdict: 'PASS_ART', summary: 'Scene matches source.', findings: [] }) };
+}
+
+test('a timed-out art host leaves durable intent and never silently resubmits a paid review', async t => {
+  const item = await imported(t);
+  const plan = planArtReview(item.project, options(item), discovered);
+  let calls = 0;
+  const host = { probe: async () => observedWeb, turn: async () => {
+    calls++;
+    throw new Error('SIMULATED_HOST_TIMEOUT_AFTER_SUBMIT');
+  } };
+  await assert.rejects(executeArtReview(plan, { apply: true, host }), /SIMULATED_HOST_TIMEOUT_AFTER_SUBMIT/);
+  const pending = readNativeRun(item.project, item.run);
+  assert.match(pending.pendingArtReview ?? '', /^[a-f0-9]{64}$/);
+  assert.equal(pending.events.at(-1).kind, 'ART_REVIEW_REQUESTED');
+  assert.equal(pending.status, 'ART_REVIEW_PENDING');
+  assert.equal(readNativeArtReviews(item.project, item.run).length, 0);
+  const repeated = planArtReview(item.project, options(item), discovered);
+  assert.equal(repeated.status, 'BLOCKED');
+  assert.equal(repeated.reasonCode, 'ART_REVIEW_PENDING');
+  await executeArtReview(repeated, { apply: true, host });
+  assert.equal(calls, 1, 'no implicit second paid browser submission');
+});
+
+test('SIGKILL while publishing witnessed review receipt requires storage recovery before workflow recovery', async t => {
+  const item = await imported(t);
+  const plan = planArtReview(item.project, options(item), discovered);
+  const moduleUrl = new URL('../src/art-review.mjs', import.meta.url).href;
+  const child = `
+    import fs from 'node:fs';
+    import { executeArtReview } from ${JSON.stringify(moduleUrl)};
+    const plan = JSON.parse(process.argv[1]);
+    const capability = JSON.parse(process.argv[2]);
+    const original = fs.openSync;
+    fs.openSync = function(file, ...args) {
+      if (String(file) === '000001.commit.json' && process.cwd().endsWith('reviews')) {
+        process.kill(process.pid, 'SIGKILL');
+      }
+      return original.call(fs, file, ...args);
+    };
+    const observed = ${witnessedArt.toString()}(plan);
+    await executeArtReview(plan, { apply: true, host: {
+      probe: async () => capability, turn: async () => observed,
+    } });
+  `;
+  const childResult = spawnSync(process.execPath,
+    ['--input-type=module', '-e', child, JSON.stringify(plan), JSON.stringify(observedWeb)],
+    { encoding: 'utf8', timeout: 15000 });
+  assert.ok(childResult.signal === 'SIGKILL' || (process.platform === 'win32' && childResult.status !== 0),
+    childResult.stderr);
+  const reviewDir = path.join(item.project, '.ludory', 'ai', 'runs', item.run, 'reviews');
+  assert.equal(fs.existsSync(path.join(reviewDir, '000001.json')), true);
+  assert.equal(fs.existsSync(path.join(reviewDir, '000001.commit.json')), false);
+  assert.throws(() => readNativeArtReviews(item.project, item.run), /ART_REVIEW_INTEGRITY_SEQUENCE/);
+  const recovery = planWorkflow(item.project, 'recover-storage', { run: item.run, confirmNoExecutor: true });
+  assert.equal(recovery.status, 'NEEDS_CONFIRMATION');
+  assert.ok(recovery.inventory.entries.some(x => x.label === 'review-000001.json'));
+  const restored = executeWorkflow(recovery, { apply: true });
+  assert.equal(restored.status, 'RECOVERED');
+  const interrupted = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
+  assert.equal(interrupted.status, 'READY');
+  assert.equal(executeWorkflow(interrupted, { apply: true }).status, 'APPLIED');
+});
+
+test('intent publication requires flushed event and marker without a directory fsync dependency', async t => {
+  const item = await imported(t);
+  const plan = planArtReview(item.project, options(item), discovered);
+  const originalFsync = fs.fsyncSync;
+  let fileFlushes = 0;
+  let directoryFlushes = 0;
+  let calls = 0;
+  fs.fsyncSync = fd => {
+    if (fs.fstatSync(fd).isDirectory()) {
+      directoryFlushes++;
+      const error = new Error('SIMULATED_DIRECTORY_FSYNC_FAILURE');
+      error.code = 'EIO';
+      throw error;
+    }
+    fileFlushes++;
+    return originalFsync(fd);
+  };
+  try {
+    await assert.rejects(executeArtReview(plan, { apply: true, host: {
+      probe: async () => observedWeb,
+      turn: async () => { calls++; throw new Error('SIMULATED_HOST_TIMEOUT'); },
+    } }), /SIMULATED_HOST_TIMEOUT/);
+  } finally { fs.fsyncSync = originalFsync; }
+  assert.ok(fileFlushes >= 2, 'both art request data and marker must be flushed');
+  assert.equal(directoryFlushes, 0, 'ordinary Web DEV workflow must not require directory fsync');
+  assert.equal(calls, 1, 'request must be recorded before attempting the host call');
+  const replay = planArtReview(item.project, options(item), discovered);
+  assert.equal(replay.status, 'BLOCKED', 'uncertain host result remains pending without implicit retry');
+});
+
+test('failures at each intent publication boundary prohibit the external host call', async t => {
+  for (const boundary of ['event-file-flush', 'marker-file-flush', 'first-link', 'commit-link']) {
+    await t.test(boundary, async sub => {
+      const item = await imported(sub);
+      const plan = planArtReview(item.project, options(item), discovered);
+      const originalFsync = fs.fsyncSync;
+      const originalLink = fs.linkSync;
+      let flushed = 0;
+      let linked = 0;
+      let calls = 0;
+      fs.fsyncSync = fd => {
+        if (!fs.fstatSync(fd).isDirectory() && ++flushed ===
+            (boundary === 'event-file-flush' ? 1 : boundary === 'marker-file-flush' ? 2 : -1)) {
+          throw new Error('INJECTED_NATIVE_WRITE_FAILURE');
+        }
+        return originalFsync(fd);
+      };
+      fs.linkSync = (...args) => {
+        if (++linked === (boundary === 'first-link' ? 1 : boundary === 'commit-link' ? 2 : -1)) {
+          throw new Error('INJECTED_NATIVE_LINK_FAILURE');
+        }
+        return originalLink(...args);
+      };
+      try {
+        await assert.rejects(executeArtReview(plan, { apply: true, host: {
+          probe: async () => observedWeb,
+          turn: async () => { calls++; throw new Error('UNEXPECTED_PAID_HOST_TURN'); },
+        } }), /NATIVE_STORAGE_DURABILITY_UNVERIFIED|NATIVE_EVENT_CONFLICT/);
+      } finally {
+        fs.fsyncSync = originalFsync;
+        fs.linkSync = originalLink;
+      }
+      assert.equal(calls, 0, `${boundary} failure must prohibit the browser turn`);
+      if (boundary === 'commit-link') {
+        assert.throws(() => readNativeRun(item.project, item.run), /NATIVE_INTEGRITY_EVENT_RECEIPT_MISSING/);
+        assert.equal(planArtReview(item.project, options(item), discovered).status, 'BLOCKED');
+      } else {
+        assert.equal(readNativeRun(item.project, item.run).pendingArtReview, null);
+      }
+    });
+  }
+});
+
+test('owner-confirmed recovery closes pending visual intent without touching partial owner edits', async t => {
+  const item = await imported(t);
+  const original = planArtReview(item.project, options(item), discovered);
+  await assert.rejects(executeArtReview(original, { apply: true, host: {
+    probe: async () => observedWeb, turn: async () => { throw new Error('HELPER_TIMED_OUT'); },
+  } }), /HELPER_TIMED_OUT/);
+  fs.writeFileSync(path.join(item.project, 'owner-note.txt'), 'preserve this untracked note');
+  fs.writeFileSync(path.join(item.project, 'scene.md'), 'Owner edited while review may be running');
+  const preview = planWorkflow(item.project, 'recover', { run: item.run });
+  assert.equal(preview.status, 'READY');
+  assert.equal(preview.nativePlan.event.kind, 'ART_REVIEW_RESULT');
+  assert.equal(preview.nativePlan.event.artReviewResult.code, 'ART_REVIEW_INTERRUPTED');
+  const noConfirm = executeWorkflow(preview, { apply: true });
+  assert.equal(noConfirm.status, 'BLOCKED');
+  assert.match(noConfirm.conflicts.join(' '), /NATIVE_RECOVERY_CONFIRMATION_REQUIRED/);
+  assert.match(readNativeRun(item.project, item.run).pendingArtReview, /^[a-f0-9]{64}$/);
+  const confirmed = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
+  const recovered = executeWorkflow(confirmed, { apply: true });
+  assert.equal(recovered.status, 'APPLIED');
+  assert.equal(readNativeRun(item.project, item.run).pendingArtReview, null);
+  assert.equal(readNativeArtReviews(item.project, item.run).length, 0);
+  assert.equal(fs.readFileSync(path.join(item.project, 'owner-note.txt'), 'utf8'), 'preserve this untracked note');
+  assert.equal(fs.readFileSync(path.join(item.project, 'scene.md'), 'utf8'),
+    'Owner edited while review may be running');
+});
+
+test('recover preserves a witnessed art receipt when the final native event was lost', async t => {
+  const item = await imported(t);
+  const original = planArtReview(item.project, options(item), discovered);
+  const requested = commitNativeEvent(planNativeEvent(item.project, item.run, {
+    kind: 'ART_REVIEW_REQUESTED', stage: original.stage,
+    artReview: { image: original.image, brief: original.brief, sources: original.sources,
+      modelObserved: 'gpt-6-sol' },
+  }));
+  const report = witnessedArt(original);
+  const receipt = recordNativeArtReview(item.project, item.run, requested.headSha256, {
+    provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', visualInputObserved: true,
+    artRequestSha256: requested.pendingArtReview, verdict: 'PASS_ART',
+    reasonCode: 'ART_REPORT_STRUCTURED', summary: 'Scene matches source.', findings: [],
+    hostObservation: report.hostObservation, image: original.image,
+    brief: original.brief, sources: original.sources,
+  });
+  const candidate = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
+  assert.equal(candidate.status, 'READY');
+  assert.equal(candidate.nativePlan.event.artReviewResult.code, 'ART_REVIEW_OBSERVED');
+  assert.equal(candidate.nativePlan.event.artReviewResult.receiptSha256, receipt.receiptSha256);
+  assert.equal(executeWorkflow(candidate, { apply: true }).status, 'APPLIED');
+  assert.equal(readNativeRun(item.project, item.run).pendingArtReview, null);
+  assert.equal(readNativeArtReviews(item.project, item.run)[0].verdict, 'PASS_ART');
+  assert.equal(planArtReview(item.project, options(item), discovered).reasonCode, 'ART_ALREADY_ACCEPTED');
+});
+
+test('stale interrupted-recovery plan cannot override a newly committed witnessed receipt', async t => {
+  const item = await imported(t);
+  const original = planArtReview(item.project, options(item), discovered);
+  const requested = commitNativeEvent(planNativeEvent(item.project, item.run, {
+    kind: 'ART_REVIEW_REQUESTED', stage: original.stage,
+    artReview: { image: original.image, brief: original.brief, sources: original.sources,
+      modelObserved: 'gpt-6-sol' },
+  }));
+  const stale = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
+  assert.equal(stale.nativePlan.event.artReviewResult.code, 'ART_REVIEW_INTERRUPTED');
+  const witness = witnessedArt(original);
+  recordNativeArtReview(item.project, item.run, requested.headSha256, {
+    provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', visualInputObserved: true,
+    artRequestSha256: requested.pendingArtReview, verdict: 'PASS_ART',
+    reasonCode: 'ART_REPORT_STRUCTURED', summary: 'Scene matches source.', findings: [],
+    hostObservation: witness.hostObservation, image: original.image,
+    brief: original.brief, sources: original.sources,
+  });
+  assert.throws(() => executeWorkflow(stale, { apply: true }), /NATIVE_ART_REVIEW_RESULT_STALE/);
+  assert.equal(readNativeRun(item.project, item.run).pendingArtReview, requested.pendingArtReview);
+  const fresh = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
+  assert.equal(fresh.nativePlan.event.artReviewResult.code, 'ART_REVIEW_OBSERVED');
+  assert.equal(executeWorkflow(fresh, { apply: true }).status, 'APPLIED');
+});
+
+test('the same pending visual request cannot produce two REWORK receipts', async t => {
+  const item = await imported(t);
+  const original = planArtReview(item.project, options(item), discovered);
+  const requested = commitNativeEvent(planNativeEvent(item.project, item.run, {
+    kind: 'ART_REVIEW_REQUESTED', stage: original.stage,
+    artReview: { image: original.image, brief: original.brief, sources: original.sources,
+      modelObserved: 'gpt-6-sol' },
+  }));
+  const report = { provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
+    visualInputObserved: true, artRequestSha256: requested.pendingArtReview,
+    verdict: 'REWORK', reasonCode: 'ART_REPORT_STRUCTURED',
+    summary: 'Wrong location.', findings: [{ severity: 'P1', category: 'location',
+      description: 'Wrong coast.', evidence: 'Cliff is missing.' }],
+    hostObservation: witnessedArt(original).hostObservation,
+    image: original.image, brief: original.brief, sources: original.sources };
+  recordNativeArtReview(item.project, item.run, requested.headSha256, report);
+  assert.throws(() => recordNativeArtReview(item.project, item.run, requested.headSha256, report),
+    /ART_REVIEW_REQUEST_ALREADY_RECORDED/);
+  assert.equal(readNativeArtReviews(item.project, item.run).length, 1);
+});
+
+test('old art host response cannot commit a review after owner has recovered the request', async t => {
+  const item = await imported(t);
+  const original = planArtReview(item.project, options(item), discovered);
+  let started, finish;
+  const entered = new Promise(resolve => { started = resolve; });
+  const held = new Promise(resolve => { finish = resolve; });
+  const execution = executeArtReview(original, { apply: true, host: {
+    probe: async () => observedWeb,
+    turn: async () => { started(); await held; return witnessedArt(original); },
+  } });
+  await entered;
+  assert.match(readNativeRun(item.project, item.run).pendingArtReview, /^[a-f0-9]{64}$/);
+  const recovery = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
+  assert.equal(executeWorkflow(recovery, { apply: true }).status, 'APPLIED');
+  finish();
+  await assert.rejects(execution, /ART_REVIEW_STALE/);
+  assert.equal(readNativeRun(item.project, item.run).pendingArtReview, null);
+  assert.equal(readNativeArtReviews(item.project, item.run).length, 0);
+});
+
+test('missing art receipts after a witnessed result cannot make a paid review appear new', async t => {
+  const item = await imported(t);
+  const original = planArtReview(item.project, options(item), discovered);
+  const observed = await executeArtReview(original, { apply: true, host: {
+    probe: async () => observedWeb, turn: async () => witnessedArt(original),
+  } });
+  assert.equal(observed.verdict, 'PASS_ART');
+  const directory = path.join(item.project, '.ludory', 'ai', 'runs', item.run, 'reviews');
+  fs.renameSync(directory, path.join(item.project, 'moved-review-receipts'));
+  const repeated = planArtReview(item.project, options(item), discovered);
+  assert.equal(repeated.status, 'BLOCKED');
+  assert.equal(repeated.reasonCode, 'ART_RUN_UNAVAILABLE');
+});
+
 test('art review preview only accepts a recorded original and carries exact image/source hashes without writes', async t => {
   const item = await imported(t);
   const runDir = path.join(item.project, '.ludory', 'ai', 'runs', item.run);
@@ -64,6 +349,32 @@ test('art review requires explicit context and verified Web image route', async 
     { discover: () => ({ ...observedWeb, modelRouteAvailable: 'chatgpt-web/gpt-5.6-sol' }) }).status, 'NEEDS_USER_ACTION');
   assert.equal(planArtReview(item.project, options(item),
     { discover: () => ({ ...observedWeb, browserObservationV2Available: false }) }).status, 'NEEDS_USER_ACTION');
+});
+
+test('inherited or accessor-supplied v2 host preflight cannot authorize a paid browser turn', async t => {
+  const item = await imported(t);
+  const legacy = { available: true, reasonCode: 'AVAILABLE', transportVerified: true,
+    entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol' };
+  const inherited = Object.assign(Object.create({ browserObservationV2Available: true,
+    routeAvailable: 'web-dev', modelRouteAvailable: 'chatgpt-web/gpt-6-sol', reasoningRequired: 'high',
+    preflight: observedWeb.preflight }), legacy);
+  let accessorReads = 0;
+  const accessors = { ...legacy };
+  for (const key of ['browserObservationV2Available', 'routeAvailable', 'modelRouteAvailable',
+    'reasoningRequired', 'preflight']) Object.defineProperty(accessors, key, {
+    enumerable: true, get() { accessorReads++; return observedWeb[key]; },
+  });
+  for (const forged of [inherited, accessors]) {
+    const preview = planArtReview(item.project, options(item), { discover: () => forged });
+    assert.equal(preview.status, 'NEEDS_USER_ACTION');
+    let calls = 0;
+    await executeArtReview(preview, { apply: true, host: {
+      probe: async () => forged, turn: async () => { calls++; return witnessedArt(preview); },
+    } });
+    assert.equal(calls, 0);
+    assert.equal(readNativeRun(item.project, item.run).pendingArtReview, null);
+  }
+  assert.equal(accessorReads, 0, 'preflight must not invoke untrusted accessor properties');
 });
 
 test('art review refuses unimported candidates, image corruption, linked text and edited context before the host', async t => {
@@ -158,6 +469,8 @@ test('art review blocks declared host fields without a matching browser observat
       imageSha256: sha(png), imageBytes: images[0].bytes.length, text: JSON.stringify({ schemaVersion: 1, imageSha256: sha(png),
         imageVisible: true, verdict: 'PASS_ART', summary: 'Declared only.', findings: [] }) }),
   } });
-  assert.equal(result.status, 'BLOCKED');
+  assert.equal(result.status, 'PENDING_RECOVERY');
   assert.equal(result.reasonCode, 'ART_VISUAL_ATTESTATION_MISSING');
+  assert.match(readNativeRun(item.project, item.run).pendingArtReview, /^[a-f0-9]{64}$/);
+  assert.equal(readNativeArtReviews(item.project, item.run).length, 0);
 });

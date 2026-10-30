@@ -7,7 +7,7 @@ import { runCli } from '../src/cli.mjs';
 import { game } from '../../ai/test/helpers/image-game.mjs';
 import { png } from '../../ai/test/helpers/images.mjs';
 import { planImageTask, planImageImport, executeImageImport } from '../../ai/src/image-tasks.mjs';
-import { readNativeArtReviews } from '../../ai/src/store.mjs';
+import { readNativeArtReviews, readNativeRun } from '../../ai/src/store.mjs';
 
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const capability = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
@@ -61,6 +61,39 @@ function host(verdict = 'PASS_ART', findings = [], mutate = () => {}) {
     } };
   return { instance, get calls() { return calls; } };
 }
+
+test('CLI reports uncertain visual timeout as pending recovery and never starts a second host turn', async t => {
+  const item = await setup(t);
+  let calls = 0;
+  const broken = { probe: async () => capability, close: async () => {},
+    turn: async () => { calls++; throw new Error('BROWSER_TIMED_OUT'); } };
+  const first = await cli([...item.args, '--apply'], { devHost: () => broken });
+  assert.equal(first.code, 3);
+  assert.equal(first.result.status, 'PENDING_RECOVERY');
+  assert.equal(first.result.reasonCode, 'ART_REVIEW_OUTCOME_UNKNOWN');
+  assert.match(readNativeRun(item.project, item.run).pendingArtReview, /^[a-f0-9]{64}$/);
+  const second = await cli([...item.args, '--apply'], { devHost: () => broken });
+  assert.equal(second.code, 2);
+  assert.equal(second.result.reasonCode, 'ART_REVIEW_PENDING');
+  assert.equal(calls, 1);
+});
+
+test('CLI storage recovery requires explicit stop confirmation and preserves orphan bytes', async t => {
+  const item = await setup(t);
+  const events = path.join(item.project, '.ludory', 'ai', 'runs', item.run, 'events');
+  const orphan = path.join(events, '.pending-1234567890abcdef12345678');
+  fs.writeFileSync(orphan, 'crash bytes');
+  const args = ['workflow', 'recover-storage', '--project', item.project, '--run', item.run, '--json'];
+  const preview = await cli(args);
+  assert.equal(preview.result.status, 'NEEDS_CONFIRMATION');
+  const blocked = await cli([...args, '--apply']);
+  assert.equal(blocked.code, 2);
+  assert.equal(fs.existsSync(orphan), true);
+  const fixed = await cli([...args, '--confirm-no-executor', '--apply']);
+  assert.equal(fixed.result.status, 'RECOVERED');
+  assert.equal(fs.existsSync(orphan), false);
+  assert.equal(fs.readFileSync(fixed.result.quarantinedFiles.find(x => x.endsWith('event-pending-1234567890abcdef12345678')), 'utf8'), 'crash bytes');
+});
 
 test('art-review dry-run does not launch Web host or mutate candidate/run', async t => {
   const item = await setup(t);
@@ -141,7 +174,10 @@ test('receipt tampering, unsafe reviews directory and post-turn source edits fai
   assert.equal(first.code, 0);
   const file = path.join(item.project, '.ludory', 'ai', 'runs', item.run, 'reviews', '000001.json');
   fs.writeFileSync(file, JSON.stringify({ invalid: true }));
-  assert.throws(() => readNativeArtReviews(item.project, item.run), /ART_REVIEW_INTEGRITY/);
+  // With cross-ledger replay checks, corruption is detected at the native
+  // result boundary before the standalone artistic ledger can be returned.
+  assert.throws(() => readNativeArtReviews(item.project, item.run),
+    /ART_REVIEW_INTEGRITY|NATIVE_INTEGRITY_ART_REVIEW_RESULT/);
   const blocked = await cli([...item.args, '--apply'], { devHost: () => host().instance });
   assert.notEqual(blocked.code, 0);
   // Separate project for a storage-link attack; no existing receipt is overwritten.

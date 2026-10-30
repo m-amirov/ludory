@@ -73,6 +73,39 @@ const verifiedTerra = { available: true, transportVerified: true,
 const verifiedSol = { available: true, transportVerified: true,
   entitlementVerified: true, modelObserved: 'gpt-6-sol', imageGenCallable: true };
 
+test('Web DEV v2 route verifies browser preflight but never promises unsupported text-only turns', t => {
+  const project = freshStudioGame(t);
+  const v2 = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
+    modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
+    reasoningRequired: 'high', preflight: { authenticated: true, newChat: true,
+      url: 'https://chatgpt.com/', solAvailable: true } };
+  for (const taskKind of ['episode-script', 'art-concept']) {
+    const preview = planTaskRoute(project, { taskKind }, {
+      discover: () => ({ webDev: v2 }),
+    });
+    assert.equal(preview.status, 'NEEDS_USER_ACTION');
+    assert.equal(preview.reasonCode, 'AI_ROUTING_WEB_TEXT_V2_UNSUPPORTED');
+  }
+  for (const [label, preflight] of [
+    ['no browser preflight', {}],
+    ['unauthenticated', { ...v2.preflight, authenticated: false }],
+    ['reused chat', { ...v2.preflight, newChat: false }],
+    ['missing Sol entitlement', { ...v2.preflight, solAvailable: false }],
+    ['missing browser URL', { ...v2.preflight, url: '' }],
+    ['accessor-supplied authentication', Object.defineProperty({ ...v2.preflight },
+      'authenticated', { get() { return true; }, enumerable: true })],
+  ]) {
+    const cap = discoverTaskCapabilities(project, { taskKind: 'episode-script',
+      hostProbe: () => ({ webDev: { ...v2, preflight } }) });
+    assert.equal(cap.webDev.available, false, label);
+    const result = planTaskRoute(project, { taskKind: 'episode-script' }, {
+      discover: () => ({ webDev: { ...v2, preflight } }),
+    });
+    assert.equal(result.status, 'NEEDS_USER_ACTION', label);
+    assert.equal(result.selectedRoute, 'manual', label);
+  }
+});
+
 test('Codex preflight checks only availability and can make mechanics route ready', t => {
   const project = freshStudioGame(t);
   const capabilities = discoverTaskCapabilities(project, {
