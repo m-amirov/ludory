@@ -52,6 +52,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory workflow continue --project <game-directory> [--run <run-id|latest>] [--executor codex] [--apply] [--json]
   ludory workflow cycle --project <new-studio-game> --test <relative.test.js> [--run <run-id|latest>] [--repairs <0|1|2>] [--apply] [--json]
   ludory workflow recover --project <game-directory> [--run <run-id|latest>] [--confirm-no-executor] [--apply] [--json]
+  ludory workflow recover-storage --project <game-directory> --run <run-id> [--confirm-no-executor] [--apply] [--json]
   ludory workflow checkpoint --project <game-directory> --stage <STAGE> [--run <run-id|latest>] [--artifact <path;path>] [--outcome <CONTINUE|PASS|FAIL|BLOCKED|ESCALATE>] [--apply] [--json]
   ludory helper install [--apply] [--json]
   ludory help
@@ -112,7 +113,7 @@ function argumentsFor(command, argv) {
           : command === 'workflow-start' ? [...workflowCommon, '--pipeline', '--target', '--in-scope', '--acceptance', '--mutation-boundary', '--out-of-scope', '--apply']
             : command === 'workflow-continue' ? [...workflowCommon, '--run', '--executor', '--apply']
               : command === 'workflow-cycle' ? [...workflowCommon, '--run', '--test', '--repairs', '--apply']
-              : command === 'workflow-recover' ? [...workflowCommon, '--run', '--confirm-no-executor', '--apply']
+              : command === 'workflow-recover' || command === 'workflow-recover-storage' ? [...workflowCommon, '--run', '--confirm-no-executor', '--apply']
               : [...workflowCommon, '--run', '--stage', '--artifact', '--outcome', '--apply'])
     : command === 'helper-install' ? new Set(['--apply', '--json'])
     : command === 'components-native' ? new Set(['--json'])
@@ -443,7 +444,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'workflow') {
       const [operation, ...args] = rest;
-      if (!['doctor', 'route', 'draft', 'draft-import', 'narrative-review', 'image', 'image-import', 'art-review', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover'].includes(operation)) {
+      if (!['doctor', 'route', 'draft', 'draft-import', 'narrative-review', 'image', 'image-import', 'art-review', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover', 'recover-storage'].includes(operation)) {
         throw new Error(`Unknown workflow operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`workflow-${operation}`, args);

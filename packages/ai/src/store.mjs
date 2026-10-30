@@ -47,6 +47,79 @@ function flushNativeFile(fd) {
   catch { throw new Error('NATIVE_STORAGE_DURABILITY_UNVERIFIED'); }
 }
 
+/** Read-only inventory of narrowly recognized crash remnants. Never infer that
+ * an external reviewer has stopped merely because a local lock is stale. */
+export function inspectNativeStorageRecovery(projectDir, runId) {
+  const project = canonicalPhysicalDirectory(projectDir);
+  if (!RUN_ID.test(runId) || runId.includes('..')) throw new Error('NATIVE_RECOVERY_RUN_INVALID');
+  const runDir = checkedRunDir(project, runId);
+  const aiDir = path.join(project, '.ludory', 'ai');
+  const eventsDir = path.join(runDir, 'events');
+  const entries = [];
+  const collect = (file, label) => {
+    const st = fs.lstatSync(file);
+    if (!st.isFile() || st.isSymbolicLink() || st.size > 4 * 1024 * 1024) {
+      throw new Error('NATIVE_RECOVERY_UNSAFE_ENTRY');
+    }
+    const bytes = fs.readFileSync(file);
+    entries.push({ file, label, sha256: sha256(bytes), dev: st.dev, ino: st.ino, size: st.size });
+  };
+  const lock = path.join(aiDir, '.lock');
+  if (fs.existsSync(lock)) {
+    collect(lock, 'lock');
+    const raw = fs.readFileSync(lock, 'utf8');
+    if (!/^[1-9]\d*\n$/.test(raw)) throw new Error('NATIVE_RECOVERY_LOCK_UNKNOWN');
+    const pid = Number(raw.trim());
+    if (!Number.isSafeInteger(pid)) throw new Error('NATIVE_RECOVERY_LOCK_UNKNOWN');
+    try { process.kill(pid, 0); throw new Error('NATIVE_RECOVERY_EXECUTOR_MAY_BE_ACTIVE'); }
+    catch (error) { if (error.code !== 'ESRCH') throw error; }
+  }
+  const indexed = new Map();
+  for (const name of fs.readdirSync(eventsDir)) {
+    if (/^\.pending-[a-f0-9]{24}$/.test(name)) collect(path.join(eventsDir, name), `event-${name.slice(1)}`);
+    else if (!/^\d{6}(?:\.commit)?\.json$/.test(name)) throw new Error('NATIVE_RECOVERY_UNKNOWN_EVENT_ENTRY');
+    else {
+      const index = Number(name.slice(0, 6));
+      if (!indexed.has(index)) indexed.set(index, {});
+      indexed.get(index)[name.endsWith('.commit.json') ? 'marker' : 'event'] = name;
+    }
+  }
+  const ordered = [...indexed].sort((a, b) => a[0] - b[0]);
+  for (let offset = 0; offset < ordered.length; offset++) {
+    const [index, pair] = ordered[offset];
+    if (index !== offset + 1) throw new Error('NATIVE_RECOVERY_EVENT_SEQUENCE');
+    if (!pair.event || !pair.marker) {
+      if (offset !== ordered.length - 1) throw new Error('NATIVE_RECOVERY_EVENT_SEQUENCE');
+      collect(path.join(eventsDir, pair.event ?? pair.marker), `event-${pair.event ?? pair.marker}`);
+      continue;
+    }
+    const { data: marker } = readJsonBounded(path.join(eventsDir, pair.marker));
+    const { bytes } = readJsonBounded(path.join(eventsDir, pair.event));
+    if (marker.index !== index || marker.eventSha256 !== sha256(bytes)) {
+      throw new Error('NATIVE_RECOVERY_COMMITTED_EVENT_INVALID');
+    }
+  }
+  return { kind: 'NATIVE_STORAGE_RECOVERY', status: entries.length ? 'NEEDS_CONFIRMATION' : 'CLEAN',
+    project, runId, entries };
+}
+
+export function applyNativeStorageRecovery(preview, { confirmNoExecutor = false } = {}) {
+  if (!confirmNoExecutor) throw new Error('NATIVE_RECOVERY_CONFIRMATION_REQUIRED');
+  if (preview?.kind !== 'NATIVE_STORAGE_RECOVERY') throw new Error('NATIVE_RECOVERY_PLAN_INVALID');
+  const fresh = inspectNativeStorageRecovery(preview.project, preview.runId);
+  if (JSON.stringify(fresh.entries) !== JSON.stringify(preview.entries)) {
+    throw new Error('NATIVE_RECOVERY_STALE_PLAN');
+  }
+  if (!fresh.entries.length) return { status: 'CLEAN', quarantine: null };
+  const quarantine = path.join(preview.project, '.ludory', `recovery-${crypto.randomBytes(12).toString('hex')}`);
+  fs.mkdirSync(quarantine, { mode: 0o700 });
+  for (const entry of fresh.entries) {
+    const target = path.join(quarantine, entry.label);
+    fs.renameSync(entry.file, target);
+  }
+  return { status: 'RECOVERED', quarantine, moved: fresh.entries.length };
+}
+
 function validateArtRequest(request, current) {
   const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED')?.manual;
   if (!imported || !request || typeof request !== 'object' || Array.isArray(request) ||

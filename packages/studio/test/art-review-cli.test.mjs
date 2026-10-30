@@ -78,6 +78,23 @@ test('CLI reports uncertain visual timeout as pending recovery and never starts 
   assert.equal(calls, 1);
 });
 
+test('CLI storage recovery requires explicit stop confirmation and preserves orphan bytes', async t => {
+  const item = await setup(t);
+  const events = path.join(item.project, '.ludory', 'ai', 'runs', item.run, 'events');
+  const orphan = path.join(events, '.pending-1234567890abcdef12345678');
+  fs.writeFileSync(orphan, 'crash bytes');
+  const args = ['workflow', 'recover-storage', '--project', item.project, '--run', item.run, '--json'];
+  const preview = await cli(args);
+  assert.equal(preview.result.status, 'NEEDS_CONFIRMATION');
+  const blocked = await cli([...args, '--apply']);
+  assert.equal(blocked.code, 2);
+  assert.equal(fs.existsSync(orphan), true);
+  const fixed = await cli([...args, '--confirm-no-executor', '--apply']);
+  assert.equal(fixed.result.status, 'RECOVERED');
+  assert.equal(fs.existsSync(orphan), false);
+  assert.equal(fs.readFileSync(path.join(fixed.result.quarantine, 'event-pending-1234567890abcdef12345678'), 'utf8'), 'crash bytes');
+});
+
 test('art-review dry-run does not launch Web host or mutate candidate/run', async t => {
   const item = await setup(t);
   const before = fs.readdirSync(path.join(item.project, '.ludory', 'ai', 'runs', item.run)).sort();

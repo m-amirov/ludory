@@ -4,6 +4,14 @@
 
 An independent visual-review browser submission may complete after its caller times out. Prevent an implicit second billable browser turn without losing user files, valid source-bound review receipts or legacy run compatibility.
 
+Web DEV is free in the owner's workflow. References to billable turns in the original design are historical risk wording: the actual invariant is **no duplicate or ambiguous reviewer execution**, independent of price.
+
+## Approved crash-journal recovery extension
+
+`workflow recover-storage --run <id>` inventories recognized orphan `.pending-*` files, a single final uncommitted event/marker, and a dead process lock. A preview makes no changes; `--confirm-no-executor --apply` rechecks byte hashes and inode identity and moves only recognized remnants into a unique project-local `.ludory/recovery-*` quarantine. An active/uncertain PID, non-tail partial event, unexpected filename or modified snapshot must block. Complete committed event pairs remain immutable. This operation never invokes Web DEV and does not close a pending host request: run ordinary witnessed/interrupt recovery separately.
+
+Linux process-termination fault injection, Windows/NTFS durability, concurrent writer attack resistance and real Web DEV visual evidence remain separate gates before merge. Neither local recovery tests nor free Web DEV imply Release PASS.
+
 ## Approaches
 
 1. **Chosen — existing native event ledger.** Append a source/run-bound `ART_REVIEW_REQUESTED` event before `host.turn` and a terminal `ART_REVIEW_RESULT` after writing a witnessed review receipt. Pending state blocks every subsequent mutation except explicit recovery. Uses the existing append-only hash chain, transaction lock and `workflow recover --confirm-no-executor`; no second filesystem authority or status store.

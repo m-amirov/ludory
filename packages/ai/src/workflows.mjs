@@ -4,12 +4,12 @@ import crypto from 'node:crypto';
 import { inspectNativeProject, verifyNativeSource } from './source.mjs';
 import { getPipeline } from './pipelines.mjs';
 import { planNewRun, commitNewRun, readNativeRun, listNativeRuns, readNativeArtReviews,
-  planNativeEvent, commitNativeEvent } from './store.mjs';
+  planNativeEvent, commitNativeEvent, inspectNativeStorageRecovery, applyNativeStorageRecovery } from './store.mjs';
 import { prepareCodexExecution, checkCodexAvailable, runCodexExecution, hasStudioCreationReceipt,
   EMPTY_TRANSCRIPT_SHA256 } from './executor.mjs';
 import { blockedNarrativeVerdict } from './narrative-review-contract.mjs';
 
-const OPERATIONS = new Set(['doctor', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover']);
+const OPERATIONS = new Set(['doctor', 'status', 'next', 'start', 'continue', 'cycle', 'checkpoint', 'recover', 'recover-storage']);
 const READ_ONLY = new Set(['doctor', 'status', 'next']);
 const cryptoHashArtReceipt = receipt => crypto.createHash('sha256')
   .update(`${JSON.stringify(receipt, null, 2)}\n`).digest('hex');
@@ -19,6 +19,7 @@ const OPTS = {
   start: ['pipeline', 'target', 'inScope', 'outOfScope', 'acceptance', 'mutationBoundary'],
   checkpoint: ['run', 'stage', 'artifact', 'outcome'],
   recover: ['run', 'confirmNoExecutor'],
+  'recover-storage': ['run', 'confirmNoExecutor'],
 };
 
 function text(value, label) {
@@ -110,6 +111,13 @@ export function planWorkflow(projectDir, operation, options = {}) {
   }
   const source = inspectNativeProject(projectDir);
   const project = source.project;
+  if (operation === 'recover-storage') {
+    const inventory = inspectNativeStorageRecovery(project, options.run);
+    return { engine: 'ludory-ai', project, operation, status: inventory.status,
+      writes: inventory.entries.map(x => x.file), conflicts: [], runId: inventory.runId,
+      inventory, confirmNoExecutor: options.confirmNoExecutor === true,
+      warning: 'Stop and verify all old executors before moving crash remnants into a recoverable quarantine. Never retry external host turns automatically.' };
+  }
   if (operation === 'doctor') {
     return { engine: 'ludory-ai', project, operation, status: 'OK', writes: [],
       conflicts: [], manifestId: source.manifest.id, sourceHead: source.gitHead,
@@ -256,8 +264,14 @@ export function planWorkflow(projectDir, operation, options = {}) {
 }
 
 export function executeWorkflow(plan, { apply = false, executor } = {}) {
-  if (!plan || !OPERATIONS.has(plan.operation) || !['OK', 'READY', 'BLOCKED'].includes(plan.status)) {
+  if (!plan || !OPERATIONS.has(plan.operation) || !['OK', 'READY', 'BLOCKED', 'NEEDS_CONFIRMATION', 'CLEAN'].includes(plan.status)) {
     throw new Error('Invalid native workflow plan');
+  }
+  if (plan.operation === 'recover-storage') {
+    if (!apply || plan.status === 'CLEAN') return plan;
+    if (!plan.confirmNoExecutor) return { ...plan, status: 'BLOCKED', reasonCode: 'NATIVE_RECOVERY_CONFIRMATION_REQUIRED' };
+    const recovered = applyNativeStorageRecovery(plan.inventory, { confirmNoExecutor: true });
+    return { ...plan, inventory: undefined, ...recovered };
   }
   if (apply && READ_ONLY.has(plan.operation)) throw new Error('Native read-only workflow does not accept --apply');
   if (plan.status !== 'READY' || !apply) return plan;
