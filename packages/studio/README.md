@@ -113,7 +113,7 @@ physical-path checks. Original file inodes are retained under
 editor may still hold an open file descriptor. Do not delete these archives
 until edits through old handles have been reconciled; newer component status
 also depends on the archived ownership chain. Stage files and receipts are
-flushed with `fsync` on writable file descriptors. On POSIX, affected directory
+flushed with `fsync` on writable file descriptors. On Linux, affected directory
 entries are also `fsync`ed, and errors block apply. Node does not reliably
 support directory `fsync` on Windows, so this additional directory flush is
 not attempted there; NTFS power-loss durability of directory entry changes is
@@ -123,8 +123,13 @@ the lock and archive remain for human recovery; inspect `backup-index.json`,
 affected paths and any quarantine entries before correcting state. On Windows,
 all archive slots are flat files (`new-0`, `backup-0`, `quarantine-0`, etc.)
 under a Win32-native protected archive directory because NTFS permits moving
-some normally-open child directories; on POSIX, use the `new/`, `backup/`,
-`quarantine/` directories. Windows apply requires a native N-API module built
+some normally-open child directories; on Linux, use the `new/`, `backup/`,
+`quarantine/` directories. Archive writes on Linux are anchored to the held
+archive directory descriptor even if its visible name changes. On macOS and
+other unsupported hosts, `components update --apply` fails before lock or
+archive creation because Node does not provide an equivalent safe directory
+pin for this transaction; read-only previews remain available. Windows apply
+requires a native N-API module built
 with `npm run build:windows-pin` (Node 22.9+ for node-gyp 12.4, MSVC build
 tools including Visual Studio 2026). The general Ludory runtime permits older
 Node 22 releases, but Windows native component apply does not. The

@@ -458,8 +458,8 @@ function heldDirectory(directory, visibleAnchor = directory) {
     (fs.constants.O_NOFOLLOW || 0));
   const st = fs.fstatSync(fd);
   if (!st.isDirectory()) { fs.closeSync(fd); throw new Error(`Unsafe transaction directory: ${directory}`); }
-  // Node lacks an openat API. Linux gives a race-resistant equivalent through
-  // the open directory descriptor; other hosts must retain identity checks.
+  // Node lacks an openat API. Only Linux supplies the descriptor-relative
+  // path used by component apply; unsupported POSIX hosts fail closed.
   return { fd, anchor: process.platform === 'linux' ? `/proc/self/fd/${fd}` : visibleAnchor,
     stat: () => fs.fstatSync(fd, { bigint: true }), close: () => fs.closeSync(fd) };
 }
@@ -519,6 +519,11 @@ function withAnchoredParent(project, name, rootIdentity, operation) {
 
 /** Guarded synchronous multi-file update. The backup survives any failed rollback. */
 export function applyComponentPlan(plan) {
+  // Linux resolves writes via held /proc directory descriptors; Windows uses
+  // native no-delete-share directory handles. Other hosts have neither guard.
+  if (!['linux', 'win32'].includes(process.platform)) {
+    throw new Error(`Unsupported component apply platform: ${process.platform}`);
+  }
   if (!plan || plan.mode !== 'component-update' || plan.status !== 'READY') {
     throw new Error('Only a READY component update plan may be applied');
   }
@@ -633,21 +638,29 @@ export function applyComponentPlan(plan) {
       retainedBackup = stage;
       const stageHandle = heldDirectory(stageWithinCwd, anchoredStage);
       held.push(stageHandle);
+      const pinnedStage = stageHandle.stat();
+      if (`${pinnedStage.dev}:${pinnedStage.ino}` !== stageIdentity) {
+        throw new Error('Component archive identity changed before stage pin');
+      }
       guardDirectory(stageHandle, stage);
+      // A held project root does not pin the *archive basename*: Linux can
+      // rename that archive and replace its name with a symlink at any time.
+      // All stage writes must resolve relative to the stage's own open inode.
+      const stageWriteRoot = flatArchive ? stageWithinCwd : stageHandle.anchor;
       if (!flatArchive) {
-        for (const dirname of ['new', 'backup', 'quarantine']) fs.mkdirSync(path.join(stageWithinCwd, dirname));
+        for (const dirname of ['new', 'backup', 'quarantine']) fs.mkdirSync(path.join(stageWriteRoot, dirname));
       }
       directories = Object.fromEntries(['new', 'backup', 'quarantine'].map(dirname => {
         const handle = flatArchive
           ? heldDirectory(stageWithinCwd, anchoredStage)
-          : heldDirectory(path.join(stageWithinCwd, dirname), path.join(anchoredStage, dirname));
+          : heldDirectory(path.join(stageWriteRoot, dirname), path.join(anchoredStage, dirname));
         held.push(handle);
         return [dirname, handle];
       }));
       directoryPaths = Object.fromEntries(Object.entries(directories).map(([key, item]) => [key, item.anchor]));
       stageSlot = (kind, index, pinned = false) => flatArchive
         ? path.join(pinned ? stageWithinCwd : anchoredStage, `${kind}-${index}`)
-        : path.join(pinned ? path.join(stageWithinCwd, kind) : directoryPaths[kind], String(index));
+        : path.join(directoryPaths[kind], String(index));
       for (const [i, name] of [...changes, stateName].entries()) {
         const isState = name === stateName;
         const bytes = isState ? fresh._snapshot.nextStateBytes : fresh._snapshot.assets.get(name);
@@ -667,7 +680,7 @@ export function applyComponentPlan(plan) {
 
       // Record recovery metadata before any game publication, in the same
       // original archive inode as the newly staged asset bytes.
-      fs.writeFileSync(path.join(stageWithinCwd, 'backup-index.json'), `${JSON.stringify({
+      fs.writeFileSync(path.join(stageWriteRoot, 'backup-index.json'), `${JSON.stringify({
         schemaVersion: 1,
         entries: staged.map((item, index) => ({
           path: item.name,
@@ -676,14 +689,14 @@ export function applyComponentPlan(plan) {
         })),
       }, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
       const stateSlot = staged.findIndex(item => item.isState);
-      fs.writeFileSync(path.join(stageWithinCwd, transitionName), encode({
+      fs.writeFileSync(path.join(stageWriteRoot, transitionName), encode({
         schemaVersion: 1,
         beforeSha256: installed.sha256,
         afterSha256: hash(fresh._snapshot.nextStateBytes),
         backupSlot: flatArchive ? `backup-${stateSlot}` : `backup/${stateSlot}`,
       }), { flag: 'wx', mode: 0o600 });
-      syncFile(path.join(stageWithinCwd, 'backup-index.json'));
-      syncFile(path.join(stageWithinCwd, transitionName));
+      syncFile(path.join(stageWriteRoot, 'backup-index.json'));
+      syncFile(path.join(stageWriteRoot, transitionName));
       for (const item of Object.values(directories)) syncDirectory(item.fd);
       syncDirectory(stageHandle.fd);
       syncDirectory(rootHandle.fd);

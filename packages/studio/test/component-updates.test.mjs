@@ -792,6 +792,50 @@ test('swapped backup archive cannot move an original into an external directory'
   assert.equal(fs.existsSync(path.join(outside, 'backup', '1')), false);
 });
 
+test('Linux stage-name substitution after pinning cannot write any archive bytes outside the project', t => {
+  if (process.platform !== 'linux') return t.skip('Linux descriptor-relative stage race only');
+  const f = fixture(t);
+  version2(f);
+  const outside = path.join(f.root, 'outside-stage-owner');
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'author.txt'), 'keep this file\n');
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const originalMkdir = fs.mkdirSync;
+  let swapped = false;
+  fs.mkdirSync = function (dirname, ...args) {
+    if (!swapped && transactionPath(dirname) && anchoredBasename(dirname, 'new')) {
+      const archive = fs.readdirSync(f.project).find(name => name.startsWith('.ludory-components-backup-'));
+      assert.ok(archive, 'Pinned stage archive must exist before injection');
+      const visibleStage = path.join(f.project, archive);
+      fs.renameSync(visibleStage, `${visibleStage}-held`);
+      fs.symlinkSync(outside, visibleStage, 'dir');
+      swapped = true;
+    }
+    return originalMkdir.call(this, dirname, ...args);
+  };
+  try { assert.throws(() => applyComponentPlan(plan), /changed|unsafe|identity|directory|symbolic|finalization|ENOENT/i); }
+  finally { fs.mkdirSync = originalMkdir; }
+  assert.equal(swapped, true, 'Test must reach the post-pin, pre-stage-write window');
+  assert.deepEqual(fs.readdirSync(outside), ['author.txt'], 'No external archive subdirectories or metadata may be created');
+  assert.equal(fs.readFileSync(path.join(outside, 'author.txt'), 'utf8'), 'keep this file\n');
+  assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 1;\n');
+});
+
+test('component apply rejects unsupported POSIX hosts before taking a lock or changing any bytes', t => {
+  const f = fixture(t);
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const previousState = fs.readFileSync(f.state);
+  Object.defineProperty(process, 'platform', { ...platform, value: 'darwin' });
+  try { assert.throws(() => applyComponentPlan(plan), /unsupported.*platform|platform.*unsupported/i); }
+  finally { Object.defineProperty(process, 'platform', platform); }
+  assert.deepEqual(fs.readFileSync(f.state), previousState);
+  assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 1;\n');
+  assert.equal(fs.existsSync(path.join(f.project, '.ludory-components.lock')), false);
+  assert.deepEqual(fs.readdirSync(f.project).filter(name => name.startsWith('.ludory-components-backup-')), []);
+});
+
 test('swapped project root during lock creation never creates a lock in the replacement', t => {
   const f = fixture(t);
   version2(f);
