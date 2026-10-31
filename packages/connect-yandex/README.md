@@ -3,7 +3,8 @@
 Independent Yandex Games SDK adapter for **new** LUDORY games. C1 provides
 loading, initialization, availability detection and bounded errors. C2 adds a
 standalone Runtime lifecycle bridge. C3 provides opt-in Player cloud storage.
-Ads, a Yandex build and live platform acceptance remain separate C4–C5 stages.
+C4 adds explicit fullscreen and rewarded ads. A Yandex build and live platform
+acceptance remain separate C5 stages.
 
 ## C1 usage
 
@@ -107,6 +108,61 @@ remain pending. The adapter does not pretend to cancel an outstanding remote
 write or declare a late/unknown write successful; games should surface a
 pending-operation state and let users retry after a confirmed failure.
 
+## C4 advertising (explicit opt-in)
+
+```js
+import { createYandexAds, createYandexLifecycle } from '@ludory/connect-yandex';
+
+// After `connector.initialize()` and with an existing Runtime host:
+const lifecycle = createYandexLifecycle({ sdk, host });
+lifecycle.attach();
+const ads = createYandexAds({ sdk, host, lifecycle });
+
+// Call only from a game-authorized placement/interaction, never from a render loop.
+try {
+  await ads.showFullscreen(); // resolves { shown: true } after onOpen and onClose(true)
+} catch (error) {
+  // Handle CAPABILITY_UNAVAILABLE, ADS_NOT_SHOWN or ADS_FAILED visibly.
+}
+
+try {
+  const result = await ads.showRewarded();
+  if (result.rewarded) {
+    // Grant the reward exactly once for THIS completed attempt.
+  }
+} catch (error) {
+  // No reward on failure or a completed no-show.
+}
+
+// At game teardown: ads.destroy(); lifecycle.detach();
+```
+
+SDK methods are called only by explicit `showFullscreen()` / `showRewarded()`.
+The adapter pauses Runtime on `onOpen`, and releases only its own pause reason
+on terminal SDK callbacks or `destroy()`. Manual menu pause must still call
+`lifecycle.setManualPaused(true)`; an ad's close never overrides the menu flag,
+SDK pause, hidden page or `canResume()` veto. Only one ad attempt can be active
+per adapter. Concurrent or destroyed calls reject with `ADS_FAILED`.
+
+`onClose(wasShown: false)` rejects with `ADS_NOT_SHOWN`; `onError`, invalid
+ordering, and detached lifecycle reject with `ADS_FAILED`. `onClose(true)`
+requires an observed `onOpen`; `showRewarded()` returns `{ shown: true,
+rewarded: false }` unless **that same attempt** observed `onRewarded` after
+`onOpen` and before a shown close. Duplicate/late callbacks cannot grant extra
+rewards. Only the game may actually grant/persist the reward after checking
+`result.rewarded`, with its own idempotency and persistence policy.
+Each ad attempt is bound to one lifecycle attachment; events from a previous
+`detach()`/`attach()` cycle cannot credit a reward or pause the new session.
+
+The owner must choose compliant ad placements, privacy/consent behavior and
+game-specific cooldowns. Yandex controls fullscreen frequency; a method
+returning (even a fulfilled Promise) does not prove the ad was displayed.
+The adapter deliberately does not invent a timeout or retry if the SDK leaves
+callbacks pending. The game must present a pending state and allow explicit
+teardown rather than silently treating a pending attempt as a no-show.
+Fake-SDK tests show only `SDK_CONTRACT_PASS`, **not** live ad inventory,
+consent compliance, Yandex approval or Release PASS.
+
 ## Acceptance boundaries
 
 - `node --test packages/connect-yandex/test/*.test.mjs` validates fake SDK/DOM
@@ -115,12 +171,14 @@ pending-operation state and let users retry after a confirmed failure.
   Playwright smoke uses Chromium, Firefox, Android Chromium emulation and iPhone
   WebKit emulation; it is a **browser SDK contract test**, not a physical-device
   or hosted-Yandex test.
-- Physical devices, live cloud storage, ads and a live Yandex draft are separate
-  gates. Fake-SDK tests never imply `YANDEX_LIVE_PASS`.
+- Physical devices, live cloud storage, **live ad delivery** and a live Yandex
+  draft are separate gates. Fake-SDK tests never imply `YANDEX_LIVE_PASS`.
 - No CEOS/Starter Kit migration and no modification of existing game projects.
 
 Official documentation: https://yandex.ru/dev/games/doc/ru/sdk/sdk-about.html
 Lifecycle documentation: https://yandex.ru/dev/games/doc/ru/sdk/sdk-game-events
 and https://yandex.ru/dev/games/doc/ru/sdk/sdk-events (checked 2026-10-29).
 Player data documentation: https://yandex.ru/dev/games/doc/ru/sdk/sdk-player
+(checked 2026-10-31).
+Advertising: https://yandex.ru/dev/games/doc/ru/sdk/sdk-adv
 (checked 2026-10-31).

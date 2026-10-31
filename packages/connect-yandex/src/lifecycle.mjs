@@ -326,9 +326,31 @@ export function createYandexLifecycle({
     manualPaused = value;
   }
 
+  function acquireAdPause() {
+    if (!attached) throw errorFor('LIFECYCLE_FAILED', 'Cannot acquire ad pause on a detached lifecycle');
+    const previousStatus = host.getStatus();
+    if (previousStatus !== 'RUNNING' && previousStatus !== 'PAUSED') {
+      throw errorFor('LIFECYCLE_FAILED', 'Runtime must be running or paused before acquiring ad pause');
+    }
+    const token = Symbol('ad-pause');
+    const leaseGeneration = generation;
+    onPause(token);
+    if (!attached || generation !== leaseGeneration || host.getStatus() !== 'PAUSED') {
+      pauseReasons.delete(token);
+      throw errorFor('LIFECYCLE_FAILED', 'Runtime did not pause for an open advertisement');
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (attached && generation === leaseGeneration) onResume(token);
+    };
+  }
+
   return Object.freeze({
-    attach, detach, markReady, setManualPaused,
+    attach, detach, markReady, setManualPaused, acquireAdPause,
     getStatus: () => attached ? 'ATTACHED' : 'DETACHED',
+    getAttachmentToken: () => attached ? generation : null,
     getLastError: () => lastError,
   });
 }
