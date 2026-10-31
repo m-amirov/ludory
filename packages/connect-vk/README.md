@@ -11,3 +11,21 @@ const advertised = await connector.probeCapabilities();
 ```
 
 `DECLARED_SUPPORTED` is only a capability advertisement. Contract tests using a fake Bridge are not live VK acceptance. V2/V3/V4 implement storage/lifecycle, ads and isolated bundle respectively.
+
+## V2: lifecycle and bounded VK cloud storage
+
+Use the injected Bridge returned from `createVkConnector.initialize()`.
+
+```js
+import { createVkLifecycle, createVkStorage } from '@ludory/connect-vk';
+const lifecycle = createVkLifecycle({ bridge: initialized, host, audio });
+lifecycle.attach(); // VKWebAppViewHide/ViewRestore and optional visibility/page events
+const storage = createVkStorage({ bridge: initialized, namespace: 'my-game' });
+// Runtime host: storage.load(key), storage.save(key, envelope), storage.clear(key)
+```
+
+Lifecycle only resumes pauses it acquired. A manual pause or a second active visibility reason prevents resume. `setManualPaused(true|false)` must accompany game-owned pause controls. `detach()` removes listeners but does **not** resume the Runtime.
+
+VK Storage is isolated from Yandex Player/localStorage. Names are `ludory_<game-slug>_v1_<key>`, with safe VK Bridge ASCII keys. Runtime persistence envelope V1 is validated **before** write. A single value is limited to **3800 UTF-8 bytes**, deliberately below the documented VK 4096-byte ceiling; large save states are rejected with `STORAGE_SAVE_FAILED` rather than chunked or silently truncated. A truncated/invalid remote JSON read reports `STORAGE_CORRUPT`. A write or clear must be explicitly acknowledged by VK. Operations are serialized, including concurrent save/load/clear, to preserve the order of operations.
+
+Contract tests with a fake Bridge only certify local behavior. Live VK Games storage, app lifecycle, Android devices and ads remain **NOT_RUN**; there is no SDK loading, upload or publication operation in V2.
