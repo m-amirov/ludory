@@ -3,3 +3,4 @@ export { detectYandexCapabilities } from './capabilities.mjs';
 export { loadYandexSdkScript } from './sdk-loader.mjs';
 export { createYandexConnector } from './connector.mjs';
 export { createYandexLifecycle } from './lifecycle.mjs';
+export { createYandexPlayerStorage } from './player-storage.mjs';

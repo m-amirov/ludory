@@ -5,6 +5,7 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "exports": { ".": "./src/index.mjs" },
+  "dependencies": { "@ludory/runtime": "0.1.0" },
   "files": ["src", "README.md"],
   "sideEffects": false,
   "license": "UNLICENSED"

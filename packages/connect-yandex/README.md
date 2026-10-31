@@ -2,8 +2,8 @@
 
 Independent Yandex Games SDK adapter for **new** LUDORY games. C1 provides
 loading, initialization, availability detection and bounded errors. C2 adds a
-standalone Runtime lifecycle bridge. Cloud saves, ads, a Yandex build and live
-platform acceptance remain separate C3–C5 stages.
+standalone Runtime lifecycle bridge. C3 provides opt-in Player cloud storage.
+Ads, a Yandex build and live platform acceptance remain separate C4–C5 stages.
 
 ## C1 usage
 
@@ -69,6 +69,44 @@ autoplay restrictions and user mute remain managed by Runtime audio.
 SDK markers are optional, observable integration operations, not Release proof.
 `getLastError()` preserves `CAPABILITY_UNAVAILABLE`/`LIFECYCLE_FAILED` diagnostics.
 
+## C3 Player cloud storage
+
+```js
+import { createYandexPlayerStorage } from '@ludory/connect-yandex';
+
+// Use after the connector has initialized. The namespace must identify your game.
+const storage = createYandexPlayerStorage({
+  namespace: 'my-game',
+  getPlayer: () => sdk.getPlayer(),
+});
+// Pass storage explicitly to createRuntimeHost({ ..., storage, saveKey: 'my-game:manual' }).
+// host.save() and host.restore() remain explicit actions, never automatic.
+```
+
+`RuntimeStorage.load/save/clear` use only `ludory:<game-slug>:v1:<save-key>`;
+`clear` writes a `null` tombstone without changing other SDK keys. `save` passes
+the whole validated Runtime V1 SHA-256 envelope to `player.setData` with
+`flush: true` and awaits SDK completion. `getPlayer` is called lazily; a
+successful Player is cached for the adapter lifetime, whereas failed acquisition
+can be retried by a later explicit action. Writes and reads are ordered.
+
+The SDK allows about 200 KB **total** Player data across every key; this
+adapter conservatively preflights its own keyed JSON UTF-8 record. Other game data can still
+exhaust the quota. Player permission/guest restrictions, network and rate-limit
+failures are exposed as `PLAYER_UNAVAILABLE`, `CLOUD_SAVE_FAILED`,
+`CLOUD_LOAD_FAILED` or `CLOUD_CLEAR_FAILED` with causes. There is **no** silent
+localStorage fallback or cloud/local conflict resolution, no automatic player
+authorization request, and no use of profile identifiers. A game may explicitly
+offer a separate local-storage policy in its entrypoint, outside this adapter.
+
+Namespace format: lowercase game slug, maximum 64 characters. Save keys: safe
+ASCII letters, digits, dash, underscore, dot and colon, maximum 128 characters.
+SDK fake tests verify the contract, **not** real cloud availability in Yandex.
+If a Player SDK Promise never settles, later queued storage operations also
+remain pending. The adapter does not pretend to cancel an outstanding remote
+write or declare a late/unknown write successful; games should surface a
+pending-operation state and let users retry after a confirmed failure.
+
 ## Acceptance boundaries
 
 - `node --test packages/connect-yandex/test/*.test.mjs` validates fake SDK/DOM
@@ -77,10 +115,12 @@ SDK markers are optional, observable integration operations, not Release proof.
   Playwright smoke uses Chromium, Firefox, Android Chromium emulation and iPhone
   WebKit emulation; it is a **browser SDK contract test**, not a physical-device
   or hosted-Yandex test.
-- Physical devices, cloud storage, ads and a live Yandex draft are separate
+- Physical devices, live cloud storage, ads and a live Yandex draft are separate
   gates. Fake-SDK tests never imply `YANDEX_LIVE_PASS`.
 - No CEOS/Starter Kit migration and no modification of existing game projects.
 
 Official documentation: https://yandex.ru/dev/games/doc/ru/sdk/sdk-about.html
 Lifecycle documentation: https://yandex.ru/dev/games/doc/ru/sdk/sdk-game-events
 and https://yandex.ru/dev/games/doc/ru/sdk/sdk-events (checked 2026-10-29).
+Player data documentation: https://yandex.ru/dev/games/doc/ru/sdk/sdk-player
+(checked 2026-10-31).
