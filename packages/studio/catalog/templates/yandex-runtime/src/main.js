@@ -8,7 +8,36 @@ const score = document.querySelector('#score');
 const status = document.querySelector('#status');
 const errorLabel = document.querySelector('#error');
 const buttons = [...document.querySelectorAll('#controls button')];
-const beep = 'data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YRAAAACAgICAgICAgICAgICAgICAgICAgA==';
+const beep = (() => {
+  // Self-contained, audible 300 ms PCM tone; never requires a remote asset or the platform SDK.
+  const sampleRate = 8000;
+  const frames = 2400;
+  const bytes = new Uint8Array(44 + frames);
+  const header = new DataView(bytes.buffer);
+  const ascii = (offset, label) => {
+    for (let i = 0; i < label.length; i++) bytes[offset + i] = label.charCodeAt(i);
+  };
+  ascii(0, 'RIFF');
+  header.setUint32(4, 36 + frames, true);
+  ascii(8, 'WAVE');
+  ascii(12, 'fmt ');
+  header.setUint32(16, 16, true);
+  header.setUint16(20, 1, true);
+  header.setUint16(22, 1, true);
+  header.setUint32(24, sampleRate, true);
+  header.setUint32(28, sampleRate, true);
+  header.setUint16(32, 1, true);
+  header.setUint16(34, 8, true);
+  ascii(36, 'data');
+  header.setUint32(40, frames, true);
+  for (let i = 0; i < frames; i++) {
+    const envelope = Math.min(1, i / 200, (frames - i - 1) / 200);
+    bytes[44 + i] = Math.round(128 + 32 * envelope * Math.sin(2 * Math.PI * 660 * i / sampleRate));
+  }
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:audio/wav;base64,${btoa(binary)}`;
+})();
 
 function report(error, action = 'bootstrap') {
   status.dataset.lastOperation = `${action}:error`;

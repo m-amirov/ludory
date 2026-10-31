@@ -189,6 +189,19 @@ test('Yandex candidate rejects inert, commented, duplicate or misplaced SDK scri
   }
 });
 
+test('Yandex candidate rejects base tags that redirect SDK and game module resolution', async t => {
+  const { root, zip } = project(t);
+  const filename = path.join(root, 'index.html');
+  const original = fs.readFileSync(filename, 'utf8');
+  for (const base of ['<base href="https://other.example/">', '<base href="//other.example/">',
+    '<base href="/other/">', '<base href="./other/">']) {
+    fs.writeFileSync(filename, original.replace('<head>', `<head>\n  ${base}`));
+    await assert.rejects(() => buildYandexCandidate({ projectDir: root, outputZip: zip }),
+      /base|url|script|sdk/i, `accepted a script-redirecting ${base}`);
+    assert.equal(fs.existsSync(zip), false);
+  }
+});
+
 test('Yandex candidate rejects foreign SDK and copied sdk.js, even if not in the file list', async t => {
   const { root, zip } = project(t);
   const entry = path.join(root, 'src/main.js');

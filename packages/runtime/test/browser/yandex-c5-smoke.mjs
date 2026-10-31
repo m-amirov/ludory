@@ -18,14 +18,14 @@ const fakeSdk = String.raw`
   const ads = [];
   const audio = [];
   const state = {
-    calls, handlers, ads, audio, playerDenied: false, lastFlush: null,
+    calls, handlers, ads, audio, audioSources: [], playerDenied: false, lastFlush: null,
     emit(name) { for (const fn of handlers.get(name) ?? []) fn(); },
     get cloud() { return JSON.parse(localStorage.getItem('__c5_cloud') || '{}'); },
     set cloud(value) { localStorage.setItem('__c5_cloud', JSON.stringify(value)); },
   };
   globalThis.__sdkTest = state;
   globalThis.Audio = class {
-    constructor(source) { this.src = source; this.currentTime = 0; this.paused = true; this.volume = 1; this.muted = false; }
+    constructor(source) { this.src = source; state.audioSources.push(source); this.currentTime = 0; this.paused = true; this.volume = 1; this.muted = false; }
     addEventListener() {}
     removeEventListener() {}
     play() { this.paused = false; audio.push('play'); return Promise.resolve(); }
@@ -138,6 +138,21 @@ async function runVariant(fixture, url) {
     await page.waitForFunction(() => Number(document.querySelector('#score').textContent) === 1);
     await page.locator('#sound').click();
     await waitOperation(page, 'sound');
+    const wav = await page.evaluate(() => {
+      const source = window.__sdkTest.audioSources.at(-1);
+      if (!source?.startsWith('data:audio/wav;base64,')) return null;
+      const bytes = Uint8Array.from(atob(source.split(',')[1]), char => char.charCodeAt(0));
+      const header = new DataView(bytes.buffer);
+      const sampleRate = header.getUint32(24, true);
+      const count = header.getUint32(40, true);
+      const values = [...bytes.slice(44, 44 + count)];
+      return { sampleRate, durationMs: count / sampleRate * 1000,
+        complete: bytes.length === 44 + count, dynamic: new Set(values).size };
+    });
+    assert.ok(wav && wav.complete, 'Sound must contain a complete playable PCM WAV');
+    assert.equal(wav.sampleRate, 8000);
+    assert.ok(wav.durationMs >= 200, 'Sound demo must last long enough to be audible');
+    assert.ok(wav.dynamic >= 8, 'Sound demo must contain a non-silent waveform');
     const audioBefore = await page.evaluate(() => window.__sdkTest.audio.filter(x => x === 'pause').length);
 
     await page.locator('#pause').click();

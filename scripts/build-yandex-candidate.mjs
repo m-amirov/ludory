@@ -36,12 +36,15 @@ function validateHtmlSdk(html) {
   const head = htmlElement?.childNodes.find(node => node.tagName === 'head');
   const body = htmlElement?.childNodes.find(node => node.tagName === 'body');
   const scripts = [];
+  let baseElements = 0;
   function visit(node) {
     if (node.tagName === 'script') scripts.push(node);
+    if (node.tagName === 'base') baseElements++;
     for (const child of node.childNodes ?? []) visit(child);
     if (node.content) visit(node.content); // A template script is inert, but must still be counted/rejected.
   }
   visit(document);
+  if (baseElements) throw new Error('Yandex candidate forbids HTML base tags that alter script URL resolution');
   if (scripts.length !== 2) throw new Error('Yandex candidate requires exactly two executable script elements');
   const [sdk, game] = scripts;
   const sdkAttrs = Object.fromEntries(sdk.attrs.map(attr => [attr.name, attr.value]));
