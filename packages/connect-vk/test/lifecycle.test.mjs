@@ -172,6 +172,21 @@ test('reentrant detach during host.pause does not revive stale pause ownership',
   assert.equal(f.status, 'PAUSED');
 });
 
+test('restore delivered synchronously during host.pause releases the acquired pause', () => {
+  const f = fixture();
+  f.host.subscribe(event => {
+    if (event.type === 'status' && event.status === 'PAUSED') {
+      f.bridge.emit('VKWebAppViewRestore');
+    }
+  });
+  const lifecycle = createVkLifecycle(f);
+  lifecycle.attach();
+  f.bridge.emit('VKWebAppViewHide');
+  assert.equal(f.status, 'RUNNING');
+  assert.deepEqual(f.trace, ['pause', 'audio:pause', 'resume', 'audio:resume']);
+  assert.equal(lifecycle.getLastError(), null);
+});
+
 
 test('synchronous canResume detach never resumes a stale Runtime generation', () => {
   const f = fixture();

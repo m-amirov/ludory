@@ -34,6 +34,8 @@ export function createVkLifecycle({ bridge, host, audio, canResume,
       if (host.getStatus() !== 'PAUSED') throw new Error('Runtime did not pause');
       ownsPause = true;
       audioCall(() => audio?.pauseAll(), 'VK audio pause failed');
+      // A synchronous Runtime subscriber may have restored the view during pause().
+      if (reasons.size === 0) attemptResume();
     } catch (error) { record('VK hide failed to pause Runtime', error); }
   }
   function attemptResume() {
