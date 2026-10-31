@@ -30,7 +30,7 @@ test('VK save/load/clear uses game namespace without localStorage fallback', asy
   const storage = createVkStorage({ bridge: f.bridge, namespace: 'new-game' });
   await storage.save('slot_1', record());
   assert.equal(f.calls[0][0], 'VKWebAppStorageSet');
-  assert.equal(f.calls[0][1].key, 'ludory_new_game_v1_slot_1');
+  assert.equal(f.calls[0][1].key, 'ludory_8_new_game_v1_slot_1');
   assert.deepEqual(await storage.load('slot_1'), record());
   await storage.clear('slot_1');
   assert.equal(await storage.load('slot_1'), null);
@@ -48,9 +48,9 @@ test('empty VK key array means missing while malformed response is a failure', a
 
 test('malformed and oversized remote VK JSON never becomes a valid save', async () => {
   const f = fixture(), storage = createVkStorage({ bridge: f.bridge, namespace: 'demo' });
-  f.items.set('ludory_demo_v1_slot', '{"formatVersion":1,');
+  f.items.set('ludory_4_demo_v1_slot', '{"formatVersion":1,');
   await assert.rejects(storage.load('slot'), code('STORAGE_CORRUPT'));
-  f.items.set('ludory_demo_v1_slot', 'Ж'.repeat(2000));
+  f.items.set('ludory_4_demo_v1_slot', 'Ж'.repeat(2000));
   await assert.rejects(storage.load('slot'), code('STORAGE_CORRUPT'));
 });
 
@@ -94,4 +94,17 @@ test('Bridge rejects, non-promises and unacknowledged writes remain failures', a
   await assert.rejects(denied.clear('slot'), code('STORAGE_CLEAR_FAILED'));
   const nonPromise = createVkStorage({ bridge: { send: () => ({ result: true }) }, namespace: 'demo' });
   await assert.rejects(nonPromise.save('slot', record()), code('STORAGE_SAVE_FAILED'));
+});
+
+
+test('namespace and key encoding is injective across distinct games', async () => {
+  const f = fixture();
+  const a = createVkStorage({ bridge: f.bridge, namespace: 'a' });
+  const b = createVkStorage({ bridge: f.bridge, namespace: 'a-v1-b' });
+  await a.save('b_v1_c', record(111));
+  await b.save('c', record(222));
+  assert.equal((await a.load('b_v1_c')).snapshot.state.score, 111);
+  assert.equal((await b.load('c')).snapshot.state.score, 222);
+  await b.clear('c');
+  assert.equal((await a.load('b_v1_c')).snapshot.state.score, 111);
 });

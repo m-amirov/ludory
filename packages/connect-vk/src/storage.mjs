@@ -16,7 +16,7 @@ export function createVkStorage({ bridge, namespace } = {}) {
   const scoped = key => {
     if (typeof key !== 'string' || key.length > 40 || !keyPattern.test(key))
       throw new TypeError('storage key must be safe ASCII up to 40 chars');
-    const name = 'ludory_' + namespace.replaceAll('-', '_') + '_v1_' + key;
+    const name = 'ludory_' + namespace.length + '_' + namespace.replaceAll('-', '_') + '_v1_' + key;
     if (name.length > 100) throw new TypeError('VK key exceeds 100 characters');
     return name;
   };

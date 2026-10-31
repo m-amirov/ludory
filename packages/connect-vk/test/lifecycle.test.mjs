@@ -5,6 +5,8 @@ import { createVkLifecycle } from '../src/lifecycle.mjs';
 function fixture(status = 'RUNNING') {
   const listeners = new Set();
   const trace = [];
+  const statusListeners = new Set();
+  const emitStatus = () => { for (const fn of [...statusListeners]) fn({ type: 'status', status }); };
   const bridge = {
     subscribe(fn) { listeners.add(fn); },
     unsubscribe(fn) { listeners.delete(fn); },
@@ -13,8 +15,10 @@ function fixture(status = 'RUNNING') {
   };
   const host = {
     getStatus: () => status,
-    pause() { trace.push('pause'); status = 'PAUSED'; },
-    resume() { trace.push('resume'); status = 'RUNNING'; },
+    subscribe(fn) { statusListeners.add(fn); return () => statusListeners.delete(fn); },
+    start() { trace.push('start'); status = 'RUNNING'; emitStatus(); },
+    pause() { trace.push('pause'); status = 'PAUSED'; emitStatus(); },
+    resume() { trace.push('resume'); status = 'RUNNING'; emitStatus(); },
   };
   const audio = {
     pauseAll() { trace.push('audio:pause'); },
@@ -119,4 +123,51 @@ test('invalid lifecycle inputs are rejected before subscribing', () => {
   assert.throws(() => createVkLifecycle({ ...f, bridge: {} }), TypeError);
   assert.throws(() => createVkLifecycle({ ...f, host: {} }), TypeError);
   assert.throws(() => createVkLifecycle({ ...f, canResume: 0 }), TypeError);
+});
+
+
+test('active VK hide reason pauses a Runtime that starts later', () => {
+  const f = fixture('READY'), lifecycle = createVkLifecycle(f);
+  lifecycle.attach();
+  f.bridge.emit('VKWebAppViewHide');
+  f.host.start();
+  assert.equal(f.status, 'PAUSED');
+  assert.deepEqual(f.trace, ['start', 'pause', 'audio:pause']);
+  lifecycle.detach();
+});
+
+test('external host resume is re-paused while the VK view remains hidden', () => {
+  const f = fixture(), lifecycle = createVkLifecycle(f);
+  lifecycle.attach();
+  f.bridge.emit('VKWebAppViewHide');
+  f.host.resume();
+  assert.equal(f.status, 'PAUSED');
+  assert.equal(f.trace.filter(action => action === 'pause').length, 2);
+});
+
+test('async canResume rejection is observed, does not cause unhandled rejection', async () => {
+  const f = fixture(), lifecycle = createVkLifecycle({
+    ...f, canResume: async () => { throw new Error('denied'); },
+  });
+  lifecycle.attach();
+  f.bridge.emit('VKWebAppViewHide');
+  f.bridge.emit('VKWebAppViewRestore');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.status, 'PAUSED');
+  assert.equal(lifecycle.getLastError().code, 'LIFECYCLE_FAILED');
+});
+
+test('reentrant detach during host.pause does not revive stale pause ownership', () => {
+  const f = fixture();
+  let lifecycle;
+  const pause = f.host.pause;
+  f.host.pause = () => { pause(); lifecycle.detach(); };
+  lifecycle = createVkLifecycle(f);
+  lifecycle.attach();
+  f.bridge.emit('VKWebAppViewHide');
+  assert.equal(lifecycle.getStatus(), 'DETACHED');
+  assert.deepEqual(f.trace, ['pause']);
+  lifecycle.attach();
+  f.bridge.emit('VKWebAppViewRestore');
+  assert.equal(f.status, 'PAUSED');
 });

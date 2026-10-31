@@ -7,7 +7,7 @@ export function createVkLifecycle({ bridge, host, audio, canResume,
   windowObject = globalThis.window, documentObject = globalThis.document } = {}) {
   if (!bridge || typeof bridge.subscribe !== 'function' || typeof bridge.unsubscribe !== 'function')
     throw new TypeError('VK Bridge must expose subscribe/unsubscribe');
-  if (!host || ['getStatus', 'pause', 'resume'].some(key => typeof host[key] !== 'function'))
+  if (!host || ['getStatus', 'pause', 'resume', 'subscribe'].some(key => typeof host[key] !== 'function'))
     throw new TypeError('Runtime host must expose getStatus/pause/resume');
   if (audio !== undefined && ['pauseAll', 'resumeAll'].some(key => typeof audio?.[key] !== 'function'))
     throw new TypeError('Audio must expose pauseAll/resumeAll');
@@ -16,6 +16,7 @@ export function createVkLifecycle({ bridge, host, audio, canResume,
 
   let attached = false, generation = 0, ownsPause = false, manualPaused = false, lastError = null;
   let onBridge;
+  let unlistenHost;
   let listeners = [];
   const reasons = new Set();
   const record = (message, cause) => { lastError = failure(message, cause); };
@@ -26,8 +27,10 @@ export function createVkLifecycle({ bridge, host, audio, canResume,
 
   function enforcePause() {
     if (!attached || reasons.size === 0 || host.getStatus() !== 'RUNNING') return;
+    const token = generation;
     try {
       host.pause();
+      if (!attached || generation !== token) return;
       if (host.getStatus() !== 'PAUSED') throw new Error('Runtime did not pause');
       ownsPause = true;
       audioCall(() => audio?.pauseAll(), 'VK audio pause failed');
@@ -39,8 +42,13 @@ export function createVkLifecycle({ bridge, host, audio, canResume,
     try {
       const allowed = canResume?.();
       if (allowed === false) return;
-      if (allowed?.then) throw new TypeError('canResume must be synchronous');
+      if (allowed?.then) {
+        Promise.resolve(allowed).catch(error => record('Async canResume rejected', error));
+        throw new TypeError('canResume must be synchronous');
+      }
+      const token = generation;
       host.resume();
+      if (!attached || generation !== token) return;
       if (host.getStatus() !== 'RUNNING') throw new Error('Runtime did not resume');
       ownsPause = false;
       audioCall(() => audio?.resumeAll(), 'VK audio resume failed');
@@ -62,6 +70,20 @@ export function createVkLifecycle({ bridge, host, audio, canResume,
     try { bridge.subscribe(onBridge); }
     catch (error) { onBridge = undefined; record('VK Bridge subscription failed', error); return false; }
     attached = true;
+    try {
+      unlistenHost = host.subscribe(event => {
+        if (attached && generation === token && event?.type === 'status') enforcePause();
+      });
+      if (typeof unlistenHost !== 'function') throw new TypeError('Runtime subscribe must return unsubscribe');
+    } catch (error) {
+      attached = false;
+      generation++;
+      try { bridge.unsubscribe(onBridge); } catch { /* preserve original error */ }
+      onBridge = undefined;
+      unlistenHost = undefined;
+      record('Runtime status subscription failed', error);
+      return false;
+    }
     const add = (target, type, fn) => {
       if (!target || typeof target.addEventListener !== 'function' ||
           typeof target.removeEventListener !== 'function') return;
@@ -81,6 +103,8 @@ export function createVkLifecycle({ bridge, host, audio, canResume,
     if (!attached) return;
     attached = false;
     generation++;
+    try { unlistenHost?.(); } catch (error) { record('Runtime unsubscribe failed', error); }
+    unlistenHost = undefined;
     try { bridge.unsubscribe(onBridge); }
     catch (error) { record('VK Bridge unsubscribe failed', error); }
     for (const [target, type, fn] of listeners) {

@@ -23,3 +23,6 @@
 - Existing 9 V1 tests, full `npm test`, `npm run check`, Windows/Linux Node 22/24 CI and browser R6 regression on the final SHA.
 - No actual VK Bridge session, VK console, mobile device, account, ad inventory or Release PASS has been tested.
 - V3 adds VK ad adapter and negative reward tests. V4 adds a separate VK target entrypoint, package and desktop/mobile browser smoke. `FRAMEWORK_CODE_READY` for VK is **not** achieved by V2 alone.
+
+## Independent review hardening
+The lifecycle now subscribes to Runtime status changes and re-enforces active pause reasons on newly RUNNING hosts. A synchronous detach during Runtime pause cannot reacquire ownership due to generation checks, and a rejected async `canResume` is explicitly observed. VK keys include an unambiguous namespace length prefix to prevent cross-game collisions. These changes have additional regression tests; no existing user save migration is required because V2 has never been merged.
