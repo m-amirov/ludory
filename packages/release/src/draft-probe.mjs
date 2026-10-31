@@ -90,6 +90,7 @@ export function finalizeDraftObservation(prepared, observed) {
   const { report, files } = prepared;
   if (report.reasonCode !== 'AWAIT_OWNER_AUTHORIZED_BROWSER' || !files.length) return report;
   if (!observed || observed.frameLinked !== true || observed.ready !== true ||
+      observed.sdkReady !== true || observed.bootstrapError !== false ||
       observed.filesVerified !== files.length || observed.browser !== 'chromium') {
     return { ...report, status: 'BLOCKED', reasonCode: 'R3_BROWSER_OBSERVATION_INCOMPLETE' };
   }
@@ -107,7 +108,7 @@ export function draftFailureReport(error) {
   const code = typeof error?.code === 'string' ? error.code
     : typeof error?.message === 'string' && error.message.startsWith('R3_')
       ? error.message : 'R3_OBSERVATION_ERROR';
-  const integrityFailure = ['R3_SERVED_BYTES_MISMATCH', 'R3_ASSET_TOO_LARGE',
+  const integrityFailure = ['R3_SDK_BOOTSTRAP_FAILED', 'R3_SERVED_BYTES_MISMATCH', 'R3_ASSET_TOO_LARGE',
     'R3_FILE_SET_INVALID', 'R3_ASSET_ESCAPE'].includes(code);
   return { schemaVersion: 1, kind: 'yandex-r3-draft-probe',
     status: integrityFailure ? 'FAIL' : 'BLOCKED', reasonCode: code,

@@ -63,9 +63,18 @@ async function observe(prepared) {
       for (const frame of page.frames()) {
         if (frame === page.mainFrame()) continue;
         try {
+          if (await frame.locator('#status[data-last-operation="bootstrap:error"]').count() > 0) {
+            throw new Error('R3_SDK_BOOTSTRAP_FAILED');
+          }
           if (await frame.locator('#game[data-mounted="true"]').count() > 0 &&
-              await frame.locator('#status[data-host="READY"]').count() > 0) { gameFrame = frame; break; }
-        } catch { /* Cross-origin and unloading frames are not proof. */ }
+              await frame.locator('#status[data-host="READY"][data-sdk-ready="true"]:not([data-error-code])').count() > 0) {
+            gameFrame = frame;
+            break;
+          }
+        } catch (error) {
+          if (error?.message === 'R3_SDK_BOOTSTRAP_FAILED') throw error;
+          // Cross-origin and unloading frames are not proof.
+        }
       }
       if (!gameFrame) await page.waitForTimeout(200);
     }
@@ -75,7 +84,15 @@ async function observe(prepared) {
     const root = new URL('.', frameUrl);
     validateGameBase(root.href); // Reject owner-controlled localhost / arbitrary hosts.
     const count = await verifyServedCandidate(prepared.files, root.href, hashRemoteFile);
-    return finalizeDraftObservation(prepared, { frameLinked: true, ready: true, browser: 'chromium', filesVerified: count });
+    // Recheck after potentially slow network hashing; READY may precede a failed SDK bootstrap.
+    const bootstrap = await gameFrame.locator('#status').evaluate(element => ({
+      ready: element.dataset.host === 'READY',
+      sdkReady: element.dataset.sdkReady === 'true',
+      bootstrapError: element.dataset.lastOperation === 'bootstrap:error' || !!element.dataset.errorCode,
+    }));
+    if (bootstrap.bootstrapError) throw new Error('R3_SDK_BOOTSTRAP_FAILED');
+    return finalizeDraftObservation(prepared, { frameLinked: true, ...bootstrap,
+      browser: 'chromium', filesVerified: count });
   } finally { await browser.close(); }
 }
 

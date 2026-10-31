@@ -40,6 +40,7 @@ const beep = (() => {
 })();
 
 function report(error, action = 'bootstrap') {
+  if (action === 'bootstrap') delete status.dataset.sdkReady;
   status.dataset.lastOperation = `${action}:error`;
   status.dataset.errorCode = error?.code ?? 'ERROR';
   errorLabel.textContent = `${error?.code ?? 'ERROR'}: ${error?.message ?? String(error)}`;
@@ -152,6 +153,8 @@ async function boot() {
       void connector.destroy();
     });
   });
+  // Only observable after host initialization, LoadingAPI.ready and UI wiring succeeded.
+  status.dataset.sdkReady = 'true';
 }
 
 void boot().catch(error => report(error));

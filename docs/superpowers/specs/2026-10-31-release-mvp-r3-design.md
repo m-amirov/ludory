@@ -18,3 +18,7 @@ node yandex-r3-observe.mjs --archive /tmp/candidate.zip --receipt /tmp/receipt.j
 \`\`\`
 
 The default read-only plan cannot certify hosting. Even \`--execute\` may fail when the real draft needs an authenticated account. R3 is an incremental witness, not final platform acceptance or release authority.
+
+## SDK bootstrap completion signal (R3 review hardening)
+
+The shipped Yandex runtime sets `#status[data-sdk-ready="true"]` only after Runtime host initialization, `LoadingAPI.ready()` success and bootstrap UI wiring. A bootstrap error clears this signal and records `bootstrap:error`. The R3 browser must require this signal in addition to `READY` and verify it again after hashing all remotely hosted assets. An observed bootstrap failure is `FAIL/R3_SDK_BOOTSTRAP_FAILED`, never `CAPTURED_UNVERIFIED`.

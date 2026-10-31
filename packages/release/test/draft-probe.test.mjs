@@ -54,16 +54,24 @@ test('independent transport verifies every file by size and SHA without acceptin
 });
 
 test('R3 browser observations never produce Release PASS, even with all bytes and READY', () => {
-  const observed = finalizeDraftObservation(prepared, { frameLinked: true, ready: true,
+  const observed = finalizeDraftObservation(prepared, { frameLinked: true, ready: true, sdkReady: true, bootstrapError: false,
     filesVerified: 1, browser: 'chromium' });
   assert.equal(observed.status, 'CAPTURED_UNVERIFIED');
   assert.equal(observed.releaseReady, false);
   assert.equal(observed.publicationAllowed, false);
   assert.ok(observed.browserChecks.every(check => check.status === 'OBSERVED'));
   assert.notEqual(observed.browserChecks[0].status, 'PASS');
-  for (const evidence of [null, { frameLinked: false, ready: true, filesVerified: 1, browser: 'chromium' },
-    { frameLinked: true, ready: true, filesVerified: 0, browser: 'chromium' },
-    { frameLinked: true, ready: true, filesVerified: 1, browser: 'firefox' }]) {
+  for (const evidence of [null, { frameLinked: false, ready: true, sdkReady: true,
+      bootstrapError: false, filesVerified: 1, browser: 'chromium' },
+    { frameLinked: true, ready: true, sdkReady: false,
+      bootstrapError: false, filesVerified: 1, browser: 'chromium' },
+    { frameLinked: true, ready: true, sdkReady: true,
+      bootstrapError: true, filesVerified: 1, browser: 'chromium' },
+    { frameLinked: true, ready: true, sdkReady: true, filesVerified: 1, browser: 'chromium' },
+    { frameLinked: true, ready: true, sdkReady: true,
+      bootstrapError: false, filesVerified: 0, browser: 'chromium' },
+    { frameLinked: true, ready: true, sdkReady: true,
+      bootstrapError: false, filesVerified: 1, browser: 'firefox' }]) {
     const result = finalizeDraftObservation(prepared, evidence);
     assert.equal(result.status, 'BLOCKED');
     assert.equal(result.releaseReady, false);
@@ -76,7 +84,8 @@ test('invalid URL is rejected before any local Release or network dependency', (
 });
 
 test('observed asset integrity violations FAIL while inaccessible Draft stays BLOCKED', () => {
-  for (const code of ['R3_SERVED_BYTES_MISMATCH', 'R3_ASSET_TOO_LARGE', 'R3_FILE_SET_INVALID']) {
+  for (const code of ['R3_SDK_BOOTSTRAP_FAILED', 'R3_SERVED_BYTES_MISMATCH',
+    'R3_ASSET_TOO_LARGE', 'R3_FILE_SET_INVALID']) {
     const report = draftFailureReport(Object.assign(new Error(code), { code }));
     assert.equal(report.status, 'FAIL');
     assert.equal(report.reasonCode, code);

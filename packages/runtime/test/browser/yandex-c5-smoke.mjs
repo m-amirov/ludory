@@ -125,6 +125,7 @@ async function runVariant(fixture, url) {
   try {
     await page.goto(url, { waitUntil: 'load' });
     await waitStatus(page, 'READY');
+    await page.locator('#status[data-sdk-ready="true"]:not([data-error-code])').waitFor();
     const initial = await page.evaluate(() => ({ calls: [...window.__sdkTest.calls], mounted: document.querySelector('#game').dataset.mounted }));
     assert.deepEqual(initial.calls, ['sdk:init', 'loading:ready']);
     assert.equal(initial.mounted, 'true');
@@ -243,6 +244,25 @@ async function runVariant(fixture, url) {
       assert.equal(await missing.locator('#start').isDisabled(), true);
       assert.deepEqual(missingErrors, []);
     } finally { await missing.close(); }
+    // Regression: Runtime READY is reached before LoadingAPI.ready completes.
+    // An SDK ready failure must never be accepted as R3 platform bootstrap success.
+    if (fixture.name === 'Chromium desktop') {
+      const sdkError = await context.newPage();
+      try {
+        const failingSdk = fakeSdk.replace("calls.push('loading:ready');",
+          "throw new Error('fixture LoadingAPI.ready failed');");
+        assert.notEqual(failingSdk, fakeSdk);
+        await sdkError.route('**/sdk.js', route => route.fulfill({
+          status: 200, contentType: 'text/javascript; charset=utf-8', body: failingSdk,
+        }));
+        await sdkError.goto(url, { waitUntil: 'load' });
+        await waitOperation(sdkError, 'bootstrap', 'error');
+        assert.equal(await sdkError.locator('#status').getAttribute('data-host'), 'READY');
+        assert.equal(await sdkError.locator('#status').getAttribute('data-sdk-ready'), null);
+        assert.equal(await sdkError.locator('#status[data-sdk-ready="true"]').count(), 0);
+        assert.equal(await sdkError.locator('#start').isDisabled(), true);
+      } finally { await sdkError.close(); }
+    }
     assert.deepEqual(errors, []);
     return { browser: fixture.name, engine: fixture.browserType.name(), emulated: fixture.emulated,
       phase: 'complete', status: 'SDK_CONTRACT_PASS' };
