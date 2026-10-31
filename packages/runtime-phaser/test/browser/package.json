@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "smoke": "node smoke.mjs"
+    "smoke": "node smoke.mjs && node yandex-c5-phaser-smoke.mjs",
+    "smoke:yandex-c5": "node yandex-c5-phaser-smoke.mjs"
   },
   "devDependencies": {
     "phaser": "3.90.0",
