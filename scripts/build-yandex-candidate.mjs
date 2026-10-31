@@ -162,14 +162,17 @@ function outsideProject(project, output) {
   if (!inputStat.isDirectory() || inputStat.isSymbolicLink()) {
     throw new Error('Yandex game root must not be a symbolic link');
   }
-  const root = fs.realpathSync(project);
+  // Match Studio host trust's native physical path representation on Windows.
+  const root = fs.realpathSync.native(project);
   const stat = fs.lstatSync(root);
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Yandex game root must be a real directory');
   const parent = path.dirname(output);
   const parentStat = fs.lstatSync(parent);
   if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) throw new Error('Yandex output parent must be a real directory');
-  const outputParent = fs.realpathSync(parent);
-  if (outputParent === root || outputParent.startsWith(`${root}${path.sep}`)) {
+  const outputParent = fs.realpathSync.native(parent);
+  const relative = path.relative(root, outputParent);
+  if (relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))) {
     throw new Error('Yandex output archive must be outside the game project');
   }
   if (fs.existsSync(output)) throw new Error('Yandex candidate output already exists; refusing overwrite');

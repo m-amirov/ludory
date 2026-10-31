@@ -52,6 +52,54 @@ test('Yandex candidate bytes and entry hashes reproduce and contain no developer
   }
 });
 
+test('Yandex candidate uses canonical physical paths when ordinary realpath differs from native', async t => {
+  const { root, zip } = project(t);
+  const canonical = fs.realpathSync.native(root);
+  const alternateSpelling = `${root}${path.sep}..${path.sep}${path.basename(root)}`;
+  assert.equal(fs.statSync(alternateSpelling).ino, fs.statSync(root).ino);
+
+  const original = fs.realpathSync;
+  const divergentRealpath = (...args) => {
+    if (path.resolve(args[0]) === root) return alternateSpelling;
+    return original(...args);
+  };
+  divergentRealpath.native = original.native;
+  fs.realpathSync = divergentRealpath;
+  try {
+    const candidate = await buildYandexCandidate({ projectDir: root, outputZip: zip });
+    assert.equal(candidate.archivePath, path.resolve(zip));
+    assert.ok(candidate.files.some(file => file.path === 'index.html'));
+    assert.ok(fs.existsSync(zip));
+    assert.equal(fs.realpathSync.native(root), canonical);
+  } finally {
+    fs.realpathSync = original;
+  }
+});
+
+test('Yandex candidate rejects output inside the game even with divergent realpath spellings', async t => {
+  const { root } = project(t);
+  const insideZip = path.join(root, 'inside.zip');
+  const sibling = path.join(path.dirname(root), 'alias-segment');
+  fs.mkdirSync(sibling);
+  const alias = `${sibling}${path.sep}..${path.sep}${path.basename(root)}`;
+  assert.equal(fs.statSync(alias).ino, fs.statSync(root).ino);
+  const original = fs.realpathSync;
+  let rootLookups = 0;
+  const divergentRealpath = (...args) => {
+    if (path.resolve(args[0]) === root && ++rootLookups === 2) return alias;
+    return original(...args);
+  };
+  divergentRealpath.native = original.native;
+  fs.realpathSync = divergentRealpath;
+  try {
+    await assert.rejects(() => buildYandexCandidate({ projectDir: root, outputZip: insideZip }),
+      /outside|project/i);
+    assert.equal(fs.existsSync(insideZip), false);
+  } finally {
+    fs.realpathSync = original;
+  }
+});
+
 test('Yandex candidate refuses existing output and protects its bytes', async t => {
   const { root, zip } = project(t);
   fs.writeFileSync(zip, 'user-owned ZIP');
