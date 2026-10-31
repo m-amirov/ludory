@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { defineGame } from '@ludory/core';
+import { checkYandexRelease } from '@ludory/release';
 import { inspectProject, planInit, planMigration, applyPlan } from './projects.mjs';
 import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
@@ -38,6 +39,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory quality check --project <new-studio-game> [--tier <quick|deep>] [--apply] [--json]
   ludory quality status --project <new-studio-game> [--json]
   ludory quality evidence --project <new-studio-game> [--run <quality-id|latest>] [--json]
+  ludory release check --archive <candidate.zip> --receipt <build-receipt.json> --sdk-evidence <yandex-c5-contract.json> --rights <rights.json> [--json]
   ludory workflow doctor --project <game-directory> [--json]
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--context-reviewed] [--apply] [--json]
@@ -90,7 +92,8 @@ Codex tool telemetry is not independent QA and cannot establish Release PASS.
 Codex workspace-write may edit game files; in-scope paths are instructions, not enforced allowlists.
 Without --executor, continue --apply still records a manual action request only.
 workflow recover previews a failed interrupted result and requires --confirm-no-executor --apply.
-Independent release PASS verification is not implemented.
+Release R1 only checks local Yandex ZIP/hash, fake-SDK C5 evidence and rights declarations read-only.
+PASS_LOCAL never grants independent rights clearance, real Yandex SDK approval or publication authority.
 Native development workflow accepts dirty or unversioned projects; Release verification is separate.
 The legacy metadata-only migrate command requires clean Git and Starter Kit game-spec.yaml schema 2;
 do not run it against frozen existing games. CEOS history import is not planned.
@@ -103,6 +106,7 @@ function argumentsFor(command, argv) {
     ? new Set(command === 'quality-enable' ? [...common, '--apply']
       : command === 'quality-check' ? [...common, '--tier', '--apply']
         : command === 'quality-evidence' ? [...common, '--run'] : common)
+    : command === 'release-check' ? new Set(['--archive', '--receipt', '--sdk-evidence', '--rights', '--json'])
     : command.startsWith('workflow-')
     ? new Set(command === 'workflow-route' ? [...workflowCommon, '--task']
       : command === 'workflow-draft' ? [...workflowCommon, '--run', '--task', '--brief', '--source', '--context-reviewed', '--apply']
@@ -147,8 +151,13 @@ function argumentsFor(command, argv) {
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
     flags.set(key, value);
   }
-  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show'].includes(command) && !flags.get('--project')) {
+  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check'].includes(command) && !flags.get('--project')) {
     throw new Error('--project is required');
+  }
+  if (command === 'release-check') {
+    for (const option of ['--archive', '--receipt', '--sdk-evidence', '--rights']) {
+      if (!flags.has(option)) throw new Error(`${option} is required`);
+    }
   }
   if (command.endsWith('-show') && !flags.get('--name')) throw new Error('--name is required for show');
   if (command === 'profiles-apply' && !flags.get('--name')) throw new Error('--name is required for profiles apply');
@@ -426,6 +435,22 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       out(usage);
       return 0;
     }
+    if (command === 'release') {
+      const [operation, ...args] = rest;
+      if (operation !== 'check') throw new Error(`Unknown release operation: ${operation || '(missing)'}`);
+      const flags = argumentsFor('release-check', args);
+      const result = checkYandexRelease({
+        archivePath: flags.get('--archive'), receiptPath: flags.get('--receipt'),
+        sdkEvidencePath: flags.get('--sdk-evidence'), rightsPath: flags.get('--rights'),
+      });
+      if (flags.has('--json')) out(`${JSON.stringify(result, null, 2)}\n`);
+      else {
+        out(`${result.status} · local Yandex candidate · ${result.candidateSha256 ?? 'unknown SHA'}\n`);
+        for (const gate of result.gates) out(`  ${gate.id}: ${gate.status} (${gate.reasonCode})\n`);
+        out('  release: NOT_READY · publication: NOT_AUTHORIZED\n');
+      }
+      return result.status === 'PASS_LOCAL' ? 0 : result.status === 'BLOCKED' ? 2 : 1;
+    }
     if (command === 'quality') {
       const [operation, ...args] = rest;
       if (!['enable', 'check', 'status', 'evidence'].includes(operation)) {
@@ -654,7 +679,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     display(result, flags.has('--json'), out);
     return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : 0;
   } catch (error) {
-    if (['workflow', 'quality', 'components'].includes(argv[0]) && argv.includes('--json')) {
+    if (['workflow', 'quality', 'components', 'release'].includes(argv[0]) && argv.includes('--json')) {
       const projectIndex = argv.indexOf('--project');
       const result = { mode: `${argv[0]}-${argv[1] ?? 'unknown'}`, project: projectIndex < 0 ? null : (argv[projectIndex + 1] ?? null),
         status: 'FAILED', writes: [], conflicts: [error.message] };

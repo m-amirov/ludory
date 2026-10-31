@@ -1,0 +1,10 @@
+{
+  "name": "@ludory/release",
+  "version": "0.1.0",
+  "description": "Read-only local release verification; never publication authority",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "exports": { ".": "./src/index.mjs" },
+  "license": "UNLICENSED"
+}
