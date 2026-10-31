@@ -3,8 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "smoke": "node smoke.mjs && node yandex-c2-smoke.mjs && node yandex-c5-smoke.mjs",
+    "smoke": "node --check yandex-r3-observe.mjs && node smoke.mjs && node yandex-c2-smoke.mjs && node yandex-c5-smoke.mjs",
     "smoke:yandex-c5": "node yandex-c5-smoke.mjs"
   },
-  "devDependencies": { "playwright": "1.56.1" }
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
 }
