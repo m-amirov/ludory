@@ -2,6 +2,7 @@ export const YANDEX_CONNECT_ERROR_CODES = Object.freeze(Object.fromEntries([
   'SDK_UNAVAILABLE', 'SDK_LOAD_FAILED', 'SDK_INIT_FAILED', 'SDK_TIMEOUT',
   'CAPABILITY_UNAVAILABLE', 'LIFECYCLE_FAILED',
   'PLAYER_UNAVAILABLE', 'CLOUD_SAVE_FAILED', 'CLOUD_LOAD_FAILED', 'CLOUD_CLEAR_FAILED',
+  'ADS_FAILED', 'ADS_NOT_SHOWN',
 ].map(code => [code, code])));
 
 /** Observable Connect-specific error; never claim platform success on failure. */

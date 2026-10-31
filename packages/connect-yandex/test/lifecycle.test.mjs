@@ -300,6 +300,95 @@ test('manual pause during SDK pause cannot auto-resume after flag clears', () =>
   assert.deepEqual(audioCalls, ['pause'], 'platform resume must not restart audio while manual pause holds');
 });
 
+test('ad pause lease pauses once and idempotent release resumes only owned pause', () => {
+  const h = fakeHost('RUNNING');
+  const lifecycle = createYandexLifecycle({ sdk: fakeSdk().sdk, host: h.host });
+  lifecycle.attach();
+  const releaseA = lifecycle.acquireAdPause();
+  const releaseB = lifecycle.acquireAdPause();
+  assert.equal(h.host.getStatus(), 'PAUSED');
+  assert.deepEqual(h.operations, ['pause']);
+  releaseA();
+  releaseA();
+  assert.equal(h.host.getStatus(), 'PAUSED', 'second lease remains active');
+  releaseB();
+  releaseB();
+  assert.equal(h.host.getStatus(), 'RUNNING');
+  assert.deepEqual(h.operations, ['pause', 'resume']);
+});
+
+test('ad lease release respects manual pause made while ad was open', () => {
+  const h = fakeHost('RUNNING');
+  const lifecycle = createYandexLifecycle({ sdk: fakeSdk().sdk, host: h.host });
+  lifecycle.attach();
+  const release = lifecycle.acquireAdPause();
+  lifecycle.setManualPaused(true);
+  release();
+  assert.equal(h.host.getStatus(), 'PAUSED');
+  assert.deepEqual(h.operations, ['pause']);
+  lifecycle.setManualPaused(false);
+  assert.equal(h.host.getStatus(), 'PAUSED', 'clearing manual flag is not an auto-resume');
+});
+
+test('ad lease cannot override other SDK and visibility pause reasons', () => {
+  const h = fakeHost('RUNNING');
+  const sdk = fakeSdk();
+  const documentObject = fakeEventTarget();
+  const lifecycle = createYandexLifecycle({ sdk: sdk.sdk, host: h.host, documentObject });
+  lifecycle.attach();
+  const release = lifecycle.acquireAdPause();
+  sdk.emit('game_api_pause');
+  documentObject.visibilityState = 'hidden';
+  documentObject.emit('visibilitychange');
+  release();
+  assert.equal(h.host.getStatus(), 'PAUSED');
+  sdk.emit('game_api_resume');
+  assert.equal(h.host.getStatus(), 'PAUSED');
+  documentObject.visibilityState = 'visible';
+  documentObject.emit('visibilitychange');
+  assert.equal(h.host.getStatus(), 'RUNNING');
+  assert.deepEqual(h.operations, ['pause', 'resume']);
+});
+
+test('detached ad acquisition fails and stale release after detach and reattach is inert', () => {
+  const h = fakeHost('RUNNING');
+  const lifecycle = createYandexLifecycle({ sdk: fakeSdk().sdk, host: h.host });
+  assert.throws(() => lifecycle.acquireAdPause(), error => error?.code === 'LIFECYCLE_FAILED');
+  lifecycle.attach();
+  const releaseOld = lifecycle.acquireAdPause();
+  lifecycle.detach();
+  h.transition('RUNNING'); // A new host session has started after teardown.
+  lifecycle.attach();
+  const releaseNew = lifecycle.acquireAdPause();
+  releaseOld();
+  assert.equal(h.host.getStatus(), 'PAUSED');
+  releaseNew();
+  assert.equal(h.host.getStatus(), 'RUNNING');
+  lifecycle.detach();
+  assert.throws(() => lifecycle.acquireAdPause(), error => error?.code === 'LIFECYCLE_FAILED');
+});
+
+test('attachment token changes on detach/reattach and cannot be confused with an old session', () => {
+  const lifecycle = createYandexLifecycle({ sdk: fakeSdk().sdk, host: fakeHost().host });
+  assert.equal(lifecycle.getAttachmentToken(), null);
+  lifecycle.attach();
+  const first = lifecycle.getAttachmentToken();
+  assert.notEqual(first, null);
+  lifecycle.detach();
+  assert.equal(lifecycle.getAttachmentToken(), null);
+  lifecycle.attach();
+  assert.notEqual(lifecycle.getAttachmentToken(), first);
+});
+
+test('ad lease rejects a pause that faults the Runtime instead of entering PAUSED', () => {
+  const h = fakeHost('RUNNING');
+  h.host.pause = () => { h.transition('FAULTED'); throw new Error('Runtime faulted during pause'); };
+  const lifecycle = createYandexLifecycle({ sdk: fakeSdk().sdk, host: h.host });
+  lifecycle.attach();
+  assert.throws(() => lifecycle.acquireAdPause(), error => error?.code === 'LIFECYCLE_FAILED');
+  assert.equal(h.host.getStatus(), 'FAULTED');
+});
+
 test('canResume veto and error keep host paused without false gameplay start', () => {
   const h = fakeHost('RUNNING');
   const s = fakeSdk();
