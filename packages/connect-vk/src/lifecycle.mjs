@@ -39,6 +39,7 @@ export function createVkLifecycle({ bridge, host, audio, canResume,
   function attemptResume() {
     if (!attached || reasons.size > 0 || !ownsPause || manualPaused) return;
     if (host.getStatus() !== 'PAUSED') { ownsPause = false; return; }
+    const token = generation;
     try {
       const allowed = canResume?.();
       if (allowed === false) return;
@@ -46,7 +47,9 @@ export function createVkLifecycle({ bridge, host, audio, canResume,
         Promise.resolve(allowed).catch(error => record('Async canResume rejected', error));
         throw new TypeError('canResume must be synchronous');
       }
-      const token = generation;
+      // A synchronous guard can detach us, add a hide reason or change the host.
+      if (!attached || generation !== token || reasons.size > 0 || manualPaused ||
+          !ownsPause || host.getStatus() !== 'PAUSED') return;
       host.resume();
       if (!attached || generation !== token) return;
       if (host.getStatus() !== 'RUNNING') throw new Error('Runtime did not resume');

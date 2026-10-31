@@ -171,3 +171,28 @@ test('reentrant detach during host.pause does not revive stale pause ownership',
   f.bridge.emit('VKWebAppViewRestore');
   assert.equal(f.status, 'PAUSED');
 });
+
+
+test('synchronous canResume detach never resumes a stale Runtime generation', () => {
+  const f = fixture();
+  let lifecycle;
+  lifecycle = createVkLifecycle({ ...f, canResume: () => { lifecycle.detach(); return true; } });
+  lifecycle.attach();
+  f.bridge.emit('VKWebAppViewHide');
+  f.bridge.emit('VKWebAppViewRestore');
+  assert.equal(lifecycle.getStatus(), 'DETACHED');
+  assert.equal(f.status, 'PAUSED');
+  assert.equal(f.trace.includes('resume'), false);
+});
+
+test('synchronous resume guard adding new VK hide reason cannot resume', () => {
+  const f = fixture();
+  const lifecycle = createVkLifecycle({
+    ...f, canResume: () => { f.bridge.emit('VKWebAppViewHide'); return true; },
+  });
+  lifecycle.attach();
+  f.bridge.emit('VKWebAppViewHide');
+  f.bridge.emit('VKWebAppViewRestore');
+  assert.equal(f.status, 'PAUSED');
+  assert.equal(f.trace.includes('resume'), false);
+});

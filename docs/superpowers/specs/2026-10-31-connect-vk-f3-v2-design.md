@@ -26,3 +26,6 @@
 
 ## Independent review hardening
 The lifecycle now subscribes to Runtime status changes and re-enforces active pause reasons on newly RUNNING hosts. A synchronous detach during Runtime pause cannot reacquire ownership due to generation checks, and a rejected async `canResume` is explicitly observed. VK keys include an unambiguous namespace length prefix to prevent cross-game collisions. These changes have additional regression tests; no existing user save migration is required because V2 has never been merged.
+
+## Second review hardening
+Before invoking synchronous `canResume`, the lifecycle snapshots its attachment generation. After the guard returns, it checks generation, `attached`, outstanding pause reasons, manual pause, pause ownership and current host status **before** calling `host.resume()`. Two regressions cover a guard detaching and a guard introducing a new VK hide reason. Missing platform/device evidence remains NOT_RUN.
