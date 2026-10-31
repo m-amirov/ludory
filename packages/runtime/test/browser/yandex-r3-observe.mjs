@@ -4,7 +4,7 @@ import https from 'node:https';
 import { createHash } from 'node:crypto';
 import { chromium } from 'playwright';
 import { prepareDraftProbe, validateGameBase, verifyServedCandidate,
-  finalizeDraftObservation } from '../../../release/src/draft-probe.mjs';
+  finalizeDraftObservation, draftFailureReport } from '../../../release/src/draft-probe.mjs';
 
 function flags(argv) {
   const allowed = new Set(['--archive', '--receipt', '--sdk-evidence', '--rights', '--draft-url', '--execute']);
@@ -87,9 +87,7 @@ try {
   report = args.has('--execute') && prepared.report.reasonCode === 'AWAIT_OWNER_AUTHORIZED_BROWSER'
     ? await observe(prepared) : prepared.report;
 } catch (error) {
-  report = { schemaVersion: 1, kind: 'yandex-r3-draft-probe', status: 'BLOCKED',
-    reasonCode: error.code ?? (String(error.message).startsWith('R3_') ? error.message : 'R3_OBSERVATION_ERROR'),
-    releaseReady: false, publicationAllowed: false };
+  report = draftFailureReport(error);
 }
 console.log(JSON.stringify(report, null, 2));
 if (report.status === 'FAIL') process.exitCode = 1;

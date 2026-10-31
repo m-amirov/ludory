@@ -101,3 +101,15 @@ export function finalizeDraftObservation(prepared, observed) {
       { id: 'loading-api', status: 'OBSERVED', reasonCode: 'RUNTIME_READY_WITH_MATCHED_BYTES' },
     ], releaseReady: false, publicationAllowed: false };
 }
+
+/** Observed byte tampering is a failure, not merely unavailable browser evidence. */
+export function draftFailureReport(error) {
+  const code = typeof error?.code === 'string' ? error.code
+    : typeof error?.message === 'string' && error.message.startsWith('R3_')
+      ? error.message : 'R3_OBSERVATION_ERROR';
+  const integrityFailure = ['R3_SERVED_BYTES_MISMATCH', 'R3_ASSET_TOO_LARGE',
+    'R3_FILE_SET_INVALID', 'R3_ASSET_ESCAPE'].includes(code);
+  return { schemaVersion: 1, kind: 'yandex-r3-draft-probe',
+    status: integrityFailure ? 'FAIL' : 'BLOCKED', reasonCode: code,
+    releaseReady: false, publicationAllowed: false };
+}

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateDraftUrl, validateGameBase, verifyServedCandidate,
-  finalizeDraftObservation, prepareDraftProbe } from '../src/draft-probe.mjs';
+  finalizeDraftObservation, prepareDraftProbe, draftFailureReport } from '../src/draft-probe.mjs';
 
 const hex = 'a'.repeat(64);
 const prepared = {
@@ -73,4 +73,17 @@ test('R3 browser observations never produce Release PASS, even with all bytes an
 test('invalid URL is rejected before any local Release or network dependency', () => {
   assert.throws(() => prepareDraftProbe({ draftUrl: 'https://example.com/games/app/1?draft=true' }),
     /DRAFT_URL_NOT_STRICT/);
+});
+
+test('observed asset integrity violations FAIL while inaccessible Draft stays BLOCKED', () => {
+  for (const code of ['R3_SERVED_BYTES_MISMATCH', 'R3_ASSET_TOO_LARGE', 'R3_FILE_SET_INVALID']) {
+    const report = draftFailureReport(Object.assign(new Error(code), { code }));
+    assert.equal(report.status, 'FAIL');
+    assert.equal(report.reasonCode, code);
+    assert.equal(report.releaseReady, false);
+    assert.equal(report.publicationAllowed, false);
+  }
+  const unavailable = draftFailureReport(new Error('R3_DRAFT_NAVIGATION_FAILED'));
+  assert.equal(unavailable.status, 'BLOCKED');
+  assert.equal(unavailable.releaseReady, false);
 });
