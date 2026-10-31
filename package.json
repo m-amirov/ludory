@@ -11,7 +11,7 @@
   },
   "scripts": {
     "precheck": "npm run check:release",
-    "check:release": "node --check packages/release/src/archive.mjs && node --check packages/release/src/check.mjs && node --check packages/release/src/index.mjs && node --check packages/studio/src/cli.mjs",
+    "check:release": "node --check packages/release/src/archive.mjs && node --check packages/release/src/check.mjs && node --check packages/release/src/plan.mjs && node --check packages/release/src/index.mjs && node --check packages/studio/src/cli.mjs",
     "build:windows-pin": "node-gyp rebuild --directory packages/studio/native",
     "build:runtime-template": "node scripts/build-runtime-template.mjs",
     "build:yandex-template": "node scripts/build-yandex-template.mjs",
