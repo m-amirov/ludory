@@ -5,5 +5,5 @@
   "description": "Minimal browser game without platform SDK dependencies",
   "engine": "web",
   "targets": ["yandex-games", "vk-games"],
-  "templates": ["web-basic", "runtime-basic"]
+  "templates": ["web-basic", "runtime-basic", "yandex-runtime"]
 }

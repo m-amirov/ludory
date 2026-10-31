@@ -4,3 +4,4 @@ coverage/
 /.worktrees/
 packages/studio/native/build/
 packages/runtime-narrative/test/browser/artifacts/
+packages/runtime/test/browser/artifacts/

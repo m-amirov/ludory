@@ -12,6 +12,9 @@ on:
       - 'packages/studio/src/**'
       - 'scripts/build-runtime-template.mjs'
       - 'scripts/build-narrative-template.mjs'
+      - 'scripts/build-yandex-template.mjs'
+      - 'scripts/build-yandex-candidate.mjs'
+      - 'scripts/yandex-c5-evidence.mjs'
       - '.github/workflows/runtime-browser.yml'
       - 'package*.json'
   workflow_dispatch:
@@ -28,6 +31,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run build:runtime-template
       - run: npm run check:narrative-template
+      - run: npm run check:yandex-template
+      - run: npm run check:c5-scripts
       - name: Assert generated browser bundle is committed unchanged
         run: git diff --exit-code -- packages/studio/catalog/templates/runtime-basic/assets/ludory-runtime.js
       - run: npm ci --ignore-scripts
@@ -36,6 +41,15 @@ jobs:
         working-directory: packages/runtime/test/browser
       - run: npm run smoke
         working-directory: packages/runtime/test/browser
+        env:
+          LUDORY_C5_ARTIFACT_DIR: artifacts
+      - name: Upload C5 browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yandex-c5-browser-contract
+          path: packages/runtime/test/browser/artifacts/yandex-c5-contract.json
+          if-no-files-found: error
       - run: npm ci --ignore-scripts
         working-directory: packages/runtime-phaser/test/browser
       - run: npm run smoke

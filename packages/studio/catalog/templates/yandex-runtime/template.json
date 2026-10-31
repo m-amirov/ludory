@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "yandex-runtime",
+  "version": "0.1.0",
+  "description": "Opt-in Yandex Games SDK and Runtime sample; standalone, no VK SDK",
+  "profile": "web-game",
+  "engine": "web",
+  "targets": ["yandex-games"],
+  "files": ["index.html", "src/main.js", "assets/ludory-yandex.js"]
+}

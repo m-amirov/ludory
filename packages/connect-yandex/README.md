@@ -4,7 +4,8 @@ Independent Yandex Games SDK adapter for **new** LUDORY games. C1 provides
 loading, initialization, availability detection and bounded errors. C2 adds a
 standalone Runtime lifecycle bridge. C3 provides opt-in Player cloud storage.
 C4 adds explicit fullscreen and rewarded ads. A Yandex build and live platform
-acceptance remain separate C5 stages.
+acceptance remain separate C5 stages. C5 now provides a generated-game browser
+contract candidate; it does not provide live Yandex or production Release proof.
 
 ## C1 usage
 
@@ -164,6 +165,83 @@ Fake-SDK tests show only `SDK_CONTRACT_PASS`, **not** live ad inventory,
 consent compliance, Yandex approval or Release PASS.
 
 ## Acceptance boundaries
+
+### C5: create and inspect a new Yandex-only browser candidate
+
+Run from the Ludory repository root, with Node >=22 and `npm ci --ignore-scripts`:
+
+```sh
+npm run check:yandex-template
+node packages/studio/bin/ludory.mjs create --project /tmp/ludory-c5-demo --id ludory-c5-demo --title "C5 demo" --lang en --profile web-game --template yandex-runtime --targets yandex-games --apply
+node scripts/build-yandex-candidate.mjs --project /tmp/ludory-c5-demo --output /tmp/ludory-c5-demo.zip
+```
+
+`create` requires an **empty** target directory and creates a separate new-game
+receipt. `build-yandex-candidate` requires a **new output path outside** the
+project directory and refuses overwrites. The packager checks the independent
+host-bound Studio origin registry and original manifest/component receipts;
+copied directories or reconstructed self-signed JSON are not valid provenance.
+Recreate a project through Studio on this machine if host trust is unavailable;
+do not edit host registry files. A pinned HTML5 parser validates actual
+executable script nodes; commented tags, raw-text lookalikes, inert types and
+duplicates cannot stand in for a hosted SDK tag. The archive is deterministic and
+contains the game HTML, JS entry, local Ludory Runtime/Connect bundle,
+manifest and approved media; it does **not** contain Yandex `sdk.js`, test
+fixtures or author/Studio work files. Its CLI prints file hashes and ZIP SHA-256.
+This is a **non-release candidate**, not a verified production/rights package.
+
+The generated `index.html` loads one blocking `<script src="/sdk.js">` in
+`<head>` before the game module. This endpoint is supplied by Yandex hosting.
+Opening the HTML directly as a `file://` URL, or serving it on a plain static
+server without `/sdk.js`, is expected to display an initialization error. For
+local preview use an explicitly configured SDK proxy matching Yandex's
+official local-debug procedure, or run the browser contract tests below; do
+not place a copied `sdk.js` inside the game archive or hide initialization
+errors with a synthetic fallback.
+
+```sh
+cd packages/runtime/test/browser
+npm ci --ignore-scripts
+npx playwright install --with-deps chromium firefox webkit
+LUDORY_C5_ARTIFACT_DIR=artifacts npm run smoke:yandex-c5
+cd ../../../..
+cd packages/runtime-phaser/test/browser
+npm ci --ignore-scripts
+npm run smoke:yandex-c5
+```
+
+The Runtime browser test creates a new Studio game, packs and extracts the
+actual candidate ZIP, then serves it with a **test-only** `/sdk.js`. It checks
+Chromium, Firefox, WebKit, emulated Android and emulated iPhone. It exercises
+real Runtime/Connect initialization, touch, audio, manual/platform/ad pauses,
+optional Player cloud save/restore and ad callbacks. The optional Phaser test
+exercises a real Phaser 3 renderer with the same lifecycle boundary in Chromium
+touch emulation. CI checks the committed bundle and uploads
+`yandex-c5-contract.json` even when a browser run fails. Contract evidence is
+intentionally limited to `SDK_CONTRACT_PASS` / `SDK_CONTRACT_FAIL` and
+`YANDEX_LIVE_NOT_RUN`; **it can never certify platform acceptance or Release**.
+
+### Separate owner-authorized Yandex Console draft
+
+Before any real game release, an owner must explicitly authorize a disposable
+new-game draft in Yandex Console (do not reuse frozen games). Then record:
+
+1. Actual uploaded ZIP SHA-256 and Console draft ID, and network/debug-panel
+   evidence that the hosted `/sdk.js` loaded and `YaGames.init()` succeeded.
+2. LoadingAPI.ready only after real assets/Runtime mount; paired
+   GameplayAPI.start/stop markers on start, pause, tab hide, resume and close.
+3. Real browser/device input, viewport changes, mute/audio pause, and visible
+   handling of SDK capability/network failures.
+4. Explicit Player cloud save/restore including guest refusal and corrupted
+   data handling; explicit ad attempts including no inventory, shown/closed,
+   rewarded and unrewarded outcomes, with no automatic ads or false reward.
+5. Exact Console errors/warnings, applicable platform policies, device matrix,
+   game-specific rights and independent Release checks.
+
+Without that separate authorization and evidence, hosted SDK, real Player,
+inventory, real Android/iOS hardware, Yandex Console and publication remain
+`NOT_RUN` (or `BLOCKED` when an explicit dependency is unavailable). Even an
+approved Console draft is not moderation or release approval.
 
 - `node --test packages/connect-yandex/test/*.test.mjs` validates fake SDK/DOM
   contracts, including cancellation, timeout and double-init races.

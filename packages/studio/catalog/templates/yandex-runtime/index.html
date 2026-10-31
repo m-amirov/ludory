@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ludory Yandex Runtime</title>
+  <style>
+    body { margin: 0; font: 16px system-ui; background: #111827; color: #f8fafc; }
+    main { max-width: 760px; margin: 0 auto; padding: 20px; }
+    #game { height: min(60dvh, 450px); min-height: 220px; display: grid; place-items: center;
+      background: #243b56; border-radius: 12px; touch-action: none; outline-offset: 5px; }
+    #game:focus-visible { outline: 3px solid #7dd3fc; }
+    button { min-height: 44px; padding: 9px 16px; margin: 4px; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    #error { color: #fecaca; overflow-wrap: anywhere; }
+  </style>
+  <script src="/sdk.js"></script>
+</head>
+<body>
+  <main>
+    <h1>Ludory Yandex Runtime</h1>
+    <div id="game" tabindex="0" role="button" aria-label="Tap to score">Tap or press Enter to score</div>
+    <p>Score: <output id="score">0</output></p>
+    <div id="controls">
+      <button id="start" disabled>Start</button>
+      <button id="pause" disabled>Pause</button>
+      <button id="resume" disabled>Resume</button>
+      <button id="save" disabled>Save to Player</button>
+      <button id="restore" disabled>Restore from Player</button>
+      <button id="sound" disabled>Sound</button>
+      <button id="fullscreen-ad" disabled>Fullscreen ad</button>
+      <button id="rewarded-ad" disabled>Rewarded ad</button>
+    </div>
+    <p id="status" role="status">CONNECTING</p>
+    <p id="error" role="alert"></p>
+  </main>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
