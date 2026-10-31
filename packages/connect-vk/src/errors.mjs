@@ -3,6 +3,7 @@ export const VK_CONNECT_ERROR_CODES = Object.freeze([
   'SDK_INIT_FAILED', 'SDK_TIMEOUT', 'SDK_CANCELLED',
   'LIFECYCLE_FAILED', 'STORAGE_LOAD_FAILED', 'STORAGE_SAVE_FAILED',
   'STORAGE_CLEAR_FAILED', 'STORAGE_CORRUPT',
+  'ADS_FAILED', 'ADS_NOT_SHOWN', 'CAPABILITY_UNAVAILABLE',
 ].reduce((acc, code) => ({ ...acc, [code]: code }), {}));
 
 export class VkConnectError extends Error {

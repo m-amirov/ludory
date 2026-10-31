@@ -1,7 +1,7 @@
 {
   "name": "@ludory/connect-vk",
   "version": "0.1.0",
-  "description": "Independent VK Bridge adapter with V1 SDK and V2 Runtime lifecycle/storage contracts",
+  "description": "Independent VK Bridge adapter with SDK, Runtime lifecycle/storage and ads contracts",
   "type": "module",
   "engines": {
     "node": ">=22"

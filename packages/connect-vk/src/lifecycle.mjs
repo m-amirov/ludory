@@ -19,6 +19,7 @@ export function createVkLifecycle({ bridge, host, audio, canResume,
   let unlistenHost;
   let listeners = [];
   const reasons = new Set();
+  const detachSubscribers = new Set();
   const record = (message, cause) => { lastError = failure(message, cause); };
   const audioCall = (fn, message) => {
     try { const result = fn?.(); if (result?.then) Promise.resolve(result).catch(error => record(message, error)); }
@@ -120,6 +121,34 @@ export function createVkLifecycle({ bridge, host, audio, canResume,
     onBridge = undefined;
     reasons.clear();
     ownsPause = false;
+    for (const fn of [...detachSubscribers]) {
+      try { fn(); }
+      catch (error) { record('VK lifecycle detach subscriber failed', error); }
+    }
+  }
+  function acquireAdPause() {
+    if (!attached) throw failure('VK lifecycle must be attached before an advertisement');
+    const token = generation;
+    const reason = Symbol('vk-ad');
+    reasons.add(reason);
+    enforcePause();
+    if (!attached || generation !== token || host.getStatus() !== 'PAUSED') {
+      reasons.delete(reason);
+      throw failure('VK Runtime was not safely paused for advertisement');
+    }
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      if (!attached || generation !== token) return;
+      reasons.delete(reason);
+      attemptResume();
+    };
+  }
+  function subscribeDetach(fn) {
+    if (typeof fn !== 'function') throw new TypeError('Detach subscriber must be a function');
+    detachSubscribers.add(fn);
+    return () => detachSubscribers.delete(fn);
   }
   function setManualPaused(value) {
     if (typeof value !== 'boolean') throw new TypeError('Manual pause must be boolean');
@@ -127,5 +156,6 @@ export function createVkLifecycle({ bridge, host, audio, canResume,
     if (!value) attemptResume();
   }
   return Object.freeze({ attach, detach, setManualPaused,
+    acquireAdPause, subscribeDetach, getAttachmentToken: () => attached ? generation : null,
     getStatus: () => attached ? 'ATTACHED' : 'DETACHED', getLastError: () => lastError });
 }
