@@ -17,6 +17,8 @@
 
 `createVkStorage({bridge, namespace})` exposes async `load(key)`, `save(key, persistedRecord)`, `clear(key)`. Keys are strictly scoped and safe for VK Bridge; validation occurs before SDK writes. Persistence reuses `@ludory/runtime/contracts` `validatePersistedRecordShape`. Writes and clears require an explicit `{result:true}` response. Corrupt JSON is `STORAGE_CORRUPT`. Operations are queued, so concurrent operations cannot overtake an earlier save/clear. Caller uses Runtime hash/identity verification on loaded envelopes; V2 does not claim cloud integrity solely from JSON parsing.
 
+Runtime integration uses the game's slug as `namespace` and its `saveKey` (e.g. `game-id:manual` or `game-id/manual`) directly. The VK adapter encodes UTF-16 key units into an injective ASCII representation, doubling literal underscores and using `_XXXX` for other unsafe characters, with a strict 100-character output bound. This avoids silently rejecting valid Runtime namespace separators or colliding with literal underscore sequences. Test against an actual Runtime host save/restore round trip, not only a storage stub.
+
 ## Acceptance and limits
 
 - 14 V2 contract tests: lost SDK, malformed responses, UTF-8 quota/truncation, malformed save, save/read/clear concurrency, independent pause reasons, manual pause, refusal to resume, subscription cleanup.

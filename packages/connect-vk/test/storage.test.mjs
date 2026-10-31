@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { createRuntimeHost } from '@ludory/runtime';
 import { createVkStorage } from '../src/storage.mjs';
 import { VkConnectError } from '../src/errors.mjs';
 
@@ -30,7 +32,7 @@ test('VK save/load/clear uses game namespace without localStorage fallback', asy
   const storage = createVkStorage({ bridge: f.bridge, namespace: 'new-game' });
   await storage.save('slot_1', record());
   assert.equal(f.calls[0][0], 'VKWebAppStorageSet');
-  assert.equal(f.calls[0][1].key, 'ludory_8_new_game_v1_slot_1');
+  assert.equal(f.calls[0][1].key, 'ludory_8_new_game_v1_slot__1');
   assert.deepEqual(await storage.load('slot_1'), record());
   await storage.clear('slot_1');
   assert.equal(await storage.load('slot_1'), null);
@@ -107,4 +109,48 @@ test('namespace and key encoding is injective across distinct games', async () =
   assert.equal((await b.load('c')).snapshot.state.score, 222);
   await b.clear('c');
   assert.equal((await a.load('b_v1_c')).snapshot.state.score, 111);
+});
+
+test('real Runtime host saves and restores a game-namespaced slot through VK Bridge', async () => {
+  const f = fixture();
+  const storage = createVkStorage({ bridge: f.bridge, namespace: 'test-game' });
+  const game = { schemaVersion: 1, id: 'test-game', version: '1.0.0',
+    title: { en: 'VK persistence test' }, engine: 'web', targets: ['vk-games'] };
+  const createHost = score => createRuntimeHost({
+    game, initialState: { score }, update() {}, storage, saveKey: 'test-game:manual',
+    renderer: { mount() {}, resize() {}, render() {}, unmount() {} },
+    input: { subscribe: () => () => {}, enable() {}, disable() {} },
+    environment: {
+      root: {}, now: () => 0, utcNow: () => '2026-10-31T00:00:00.000Z',
+      digestSha256: async bytes => createHash('sha256').update(bytes).digest('hex'),
+      requestFrame: () => 1, cancelFrame() {}, observeViewport: () => () => {},
+      getViewport: () => ({ width: 640, height: 360, dpr: 1, orientation: 'landscape' }),
+    },
+  });
+  const source = createHost(23);
+  await source.initialize();
+  await source.save();
+  const target = createHost(0);
+  await target.initialize();
+  await target.restore();
+  assert.deepEqual(target.getSnapshot(), source.getSnapshot());
+  assert.equal(f.calls[0][0], 'VKWebAppStorageSet');
+  assert.match(f.calls[0][1].key, /^[A-Za-z0-9_-]+$/);
+  await source.destroy();
+  await target.destroy();
+});
+
+test('encoded Runtime separators cannot collide with literal underscores or each other', async () => {
+  const f = fixture();
+  const storage = createVkStorage({ bridge: f.bridge, namespace: 'demo' });
+  const keys = ['demo:manual', 'demo/manual', 'demo_003Amanual', 'demo_002Fmanual'];
+  for (let index = 0; index < keys.length; index++) {
+    await storage.save(keys[index], record(index + 1));
+  }
+  assert.equal(f.items.size, keys.length);
+  for (let index = 0; index < keys.length; index++) {
+    assert.equal((await storage.load(keys[index])).snapshot.state.score, index + 1);
+  }
+  await storage.clear('demo/manual');
+  assert.equal((await storage.load('demo:manual')).snapshot.state.score, 1);
 });

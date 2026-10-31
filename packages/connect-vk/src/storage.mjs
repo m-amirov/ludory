@@ -4,6 +4,21 @@ import { VkConnectError } from './errors.mjs';
 const MAX_VALUE_BYTES = 3800; // conservative bound below VK's 4096-byte value truncation
 const slug = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const keyPattern = /^[A-Za-z0-9_-]+$/;
+const encodeKey = value => {
+  let encoded = '';
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if ((code >= 48 && code <= 57) || (code >= 65 && code <= 90) ||
+        (code >= 97 && code <= 122) || code === 45) {
+      encoded += value[index];
+    } else if (code === 95) {
+      encoded += '__';
+    } else {
+      encoded += '_' + code.toString(16).toUpperCase().padStart(4, '0');
+    }
+  }
+  return encoded;
+};
 const failure = (code, message, cause) => new VkConnectError(code, {
   message, ...(cause === undefined ? {} : { cause }),
 });
@@ -14,9 +29,11 @@ export function createVkStorage({ bridge, namespace } = {}) {
   if (typeof namespace !== 'string' || namespace.length > 36 || !slug.test(namespace))
     throw new TypeError('namespace must be a lowercase game slug up to 36 chars');
   const scoped = key => {
-    if (typeof key !== 'string' || key.length > 40 || !keyPattern.test(key))
-      throw new TypeError('storage key must be safe ASCII up to 40 chars');
-    const name = 'ludory_' + namespace.length + '_' + namespace.replaceAll('-', '_') + '_v1_' + key;
+    if (typeof key !== 'string' || !key || key.length > 128 ||
+        !(keyPattern.test(key) || key.startsWith(`${namespace}:`) || key.startsWith(`${namespace}/`))) {
+      throw new TypeError('storage key must be a safe ASCII slot or a game-namespaced Runtime key');
+    }
+    const name = 'ludory_' + namespace.length + '_' + namespace.replaceAll('-', '_') + '_v1_' + encodeKey(key);
     if (name.length > 100) throw new TypeError('VK key exceeds 100 characters');
     return name;
   };
