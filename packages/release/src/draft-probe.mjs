@@ -16,9 +16,8 @@ export function validateDraftUrl(text) {
       url.username || url.password || url.port || url.hash ||
       !/^\/games\/app\/[a-zA-Z0-9_-]+\/?$/.test(url.pathname) ||
       url.searchParams.get('draft') !== 'true' ||
-      [...url.searchParams.keys()].some(key => !['draft', 'debug-mode'].includes(key)) ||
-      [...url.searchParams.keys()].some(key => url.searchParams.getAll(key).length !== 1) ||
-      (url.searchParams.has('debug-mode') && url.searchParams.get('debug-mode') !== '16')) {
+      [...url.searchParams.keys()].some(key => key !== 'draft') ||
+      [...url.searchParams.keys()].some(key => url.searchParams.getAll(key).length !== 1)) {
     failed('DRAFT_URL_NOT_STRICT');
   }
   return url;

@@ -20,6 +20,7 @@ test('R3 only accepts strict Yandex draft URL, never local game_url or ordinary 
     'https://yandex.ru/games/app/123',
     'https://yandex.ru/games/app/123?draft=false',
     'https://yandex.ru/games/app/123?draft=true&game_url=https://localhost:8080',
+    'https://yandex.ru/games/app/123?draft=true&debug-mode=16',
     'https://yandex.ru/games/app/123?draft=true&draft=false',
     'https://yandex.ru/games/app/123?draft=true#foo',
   ]) assert.throws(() => validateDraftUrl(url));
