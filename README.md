@@ -11,11 +11,23 @@ LUDORY is a modular toolkit for building and shipping browser games to Yandex Ga
 | Ludory Studio | Projects, profiles, templates, development workflows and project updates | Metadata + scaffolding + profile updates + native AI CLI |
 | Ludory Core | Framework-independent game definition, state and lifecycle | Foundation |
 | Ludory AI | Native workflow state, checkpoints and Codex task execution | Bounded Codex MVP; agent/release parity pending |
-| Ludory Runtime | Engine-neutral Core host, browser lifecycle/input, manual persistence/audio and optional Phaser adapter | R1–R6 in `main`; R7 acceptance review |
-| Ludory Connect | Optional SDK adapters for Yandex Games, VK Games and others | Planned |
-| Ludory Release | Validation, builds, evidence and distribution gates | Planned migration |
+| Ludory Runtime | Engine-neutral Core host, browser lifecycle/input, manual persistence/audio and optional Phaser adapter | R1–R7 in `main` |
+| Ludory Connect | Optional SDK adapters for Yandex Games, VK Games and others | Yandex C1–C5 in `main`; VK pending |
+| Ludory Release | Validation, builds, evidence and distribution gates | R1 local offline candidate; live platform/rights gates pending |
 
 The module map and migration stages are described in [the consolidation roadmap](docs/ROADMAP.md). Design decisions and compatibility limits are documented in [the architecture spec](docs/superpowers/specs/2026-10-24-ludory-foundation-design.md).
+
+## Release R1 — local verification only
+
+For a **new Studio-generated Yandex** candidate, save the JSON returned by `build-yandex-candidate.mjs`, the five-variant C5 browser smoke evidence and a SHA-bound declaration of shipped media. Then run:
+
+```sh
+node packages/studio/bin/ludory.mjs release check --archive /path/to/candidate.zip \
+  --receipt /path/to/build-receipt.json --sdk-evidence /path/to/yandex-c5-contract.json \
+  --rights /path/to/rights.json --json
+```
+
+`PASS_LOCAL` only verifies consistency of the **local** archive, receipt, fake-SDK browser evidence and rights declarations. It cannot attest copyright ownership, verified source signatures, live Yandex Draft, real advertising, physical devices or authorization to publish. `releaseReady` and `publicationAllowed` are always `false`. There is **no upload or publish command**. Format and examples: [Release R1 contract](packages/release/README.md).
 The pinned source baseline is listed in [the source inventory](docs/SOURCE_INVENTORY.md); a [29-group capability matrix](docs/migration/CAPABILITIES.md) and [398-file source closure](docs/migration/source-closure.json) record planned ownership without claiming feature parity.
 
 ## Start with Core
