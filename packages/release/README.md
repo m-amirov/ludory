@@ -2,48 +2,25 @@
 
 Read-only local Yandex candidate verification. No network calls, uploads, publication, moderation or mutation of games/artifacts.
 
-## P3b.1: Verified inert ZIP staging (no browser execution)
+## P3b: opt-in Playwright QA for trusted Ludory candidates
 
-`stageQaCandidate({ target, archivePath, candidateSha256 })` materializes an already
-independently verified Yandex C5 or VK V5 candidate into a private temporary
-directory. This helper reuses Release's canonical stored-ZIP parser, bounds and
-CRC checks, and verifies the exact candidate SHA-256 before writing anything.
-Every staged file is rehashed. `cleanup()` is idempotent and refuses to delete
-a staging directory if its identity has changed. The original ZIP and Studio
-project are never modified.
+`stageQaCandidate({ target, archivePath, candidateSha256 })` copies an
+already-verified C5/V5 candidate to a private temporary directory, after strict
+ZIP/CRC/path validation and a SHA-256 identity check. Each output file is
+rehashed and `cleanup()` is ownership-checked and idempotent. The original
+archive and game project are not modified.
 
-**This function only copies inert bytes.** It does not run the game or a
-browser, does not establish OS/container isolation, and creates no browser
-observation evidence. Do not serve staged content in an unsandboxed browser,
-especially not with Chromium `--no-sandbox`. Until P3b.2's verified,
-network-restricted, credential-free execution environment is implemented,
-the `browser-observation` QA check must remain `BLOCKED/BROWSER_NOT_RUN`.
-No release or moderation permission is implied.
+The upcoming browser runner will use **ordinary Playwright**, without Docker,
+rootless container requirements or any separate OS isolation. It will be opt-in,
+use a fresh browser context and inspect only owner-authorized, trusted builds.
+**Playwright is not a security boundary**: do not use this mode for unknown or
+untrusted third-party JavaScript. Actual SDK, mobile-device, visual review and
+moderation remain outside this stage.
 
-## P3b.2: Deny-by-default browser isolation preflight
-
-`probeQaDockerIsolation({ imageRef })` is a **read-only host capability preflight**,
-not a browser runner. It calls only local `docker info` and `docker image inspect`
-with timeouts. The requested image must be an existing, exact OCI
-`registry/name@sha256:<64-hex>` digest; Docker rootless mode and enforced
-seccomp must be present. Docker Desktop/Windows and missing rootless
-configuration are currently `BLOCKED`. It never pulls an image.
-
-`planQaDockerInvocation({ stage, imageRef, capability })` plans a
-credential-free invocation against a private `stageQaCandidate()` directory:
-`--network=none`, `--read-only`, dropped capabilities, no new privileges,
-bounded processes/memory/CPU and a **single read-only** candidate bind mount.
-It does **not** start this invocation, and the intended
-`/usr/local/bin/ludory-qa-runner` executable is not shipped yet. Both
-functions are preparatory contracts; mock preflight results in unit tests are
-not real container attestation. No browser evidence is produced or accepted
-and P3a's `browser-observation` remains `BLOCKED`.
-
-Before P3b may run game JavaScript, add a digest-pinned reviewed runner
-image, verify isolation in the *actual* run path without accepting caller
-supplied proof objects, strictly bound output evidence to the ZIP SHA, and
-test runtime/host/network isolation. A merely well-formed command-line
-plan is not evidence that isolation succeeded.
+Staging alone does not execute a game or produce browser evidence, so until the
+Playwright runner has actually run, P3a continues to report
+`BLOCKED/BROWSER_NOT_RUN`. None of these steps grant release or publication
+permission.
 
 ## P3a: Read-only pre-moderation QA simulation (Yandex / VK)
 
