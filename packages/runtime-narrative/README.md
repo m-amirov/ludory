@@ -45,7 +45,11 @@ existing callers) or `'portrait'`. New Studio narrative templates explicitly
 pass `'portrait'`; other game genres and earlier renderer integrations remain
 unchanged. On narrow portrait viewports, the opted-in renderer uses scoped
 safe-area padding, readable panel widths and wrapping choice/composer buttons.
-Landscape stays playable with a scrollable fallback; desktop wide layouts keep
+The new Studio interactive shell bounds mobile portrait height to the visual
+viewport, keeping long dialogue, journal and composer scrolling inside the
+narrative region; the compact header remains separately scrollable when very
+large text makes its controls taller than the available space. Landscape stays
+playable with side safe-area gutters and a scrollable fallback; desktop wide layouts keep
 their prior sizing. The rendered section exposes **both**
 `data-mobile-preference="portrait|auto"` (stable author setting) and
 `data-orientation="portrait|landscape"` (measured from the current viewport);
@@ -87,5 +91,6 @@ covered by N2. N3 adds the opt-in Studio game template.
 The N3 smoke (`node packages/runtime-narrative/test/browser/studio-n3-smoke.mjs`
 from the repository root) additionally checks the generated story at 320 px,
 emulated iPhone/Android, 667×375 landscape, tablet and desktop sizes, long
-choice labels, 200% root-font scaling, keyboard-space proxy, Back, rotation, save/reload and `auto`
+choice labels, 200% root-font scaling, a keyboard-space proxy with bounded
+composer/journal scrolling, Back, rotation, save/reload and `auto`
 opt-out. These are emulations, not physical iPhone/WebKit evidence.

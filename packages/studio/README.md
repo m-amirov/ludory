@@ -220,7 +220,10 @@ bundle committed to this repository is current. No existing game is rewritten.
 `<meta name="ludory-mobile-orientation" content="portrait">` in `index.html`.
 It enables the portrait-first layout on narrow, upright viewports, while a
 phone held landscape remains usable and the desktop 1000×720 layout stays
-wide. To opt out **in a newly created game**, change only that meta's
+wide. The new interactive shell keeps long dialogue inside the game scroll
+region rather than expanding the page, including with enlarged text and a
+reduced visual viewport. In landscape, both templates reserve horizontal
+safe-area gutters and retain touch-size controls. To opt out **in a newly created game**, change only that meta's
 `content` to `auto`; the interactive template passes the resulting value to
 the Narrative renderer and the basic template uses it for its local CSS.
 This is an author-controlled UI preference, **not** an OS orientation lock.

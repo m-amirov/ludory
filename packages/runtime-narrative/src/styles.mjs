@@ -27,11 +27,11 @@ export const NARRATIVE_CSS = `
 .ludory-narrative[data-orientation=portrait] .ludory-narrative__actions{flex-direction:column}
 .ludory-narrative[data-orientation=portrait] .ludory-narrative__actions button{width:100%}
 @media (max-width:600px) and (orientation:portrait){
-  .ludory-narrative[data-mobile-preference=portrait]{min-width:0;min-height:0;font-size:max(1rem,16px);padding:max(12px,env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) max(12px,env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));overflow-x:hidden;overflow-y:auto}
+  .ludory-narrative[data-mobile-preference=portrait]{min-width:0;min-height:0;justify-content:flex-start;font-size:max(1rem,16px);padding:max(12px,env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) max(12px,env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px));overflow-x:hidden;overflow-y:auto}
   .ludory-narrative[data-mobile-preference=portrait] .ludory-narrative__panel{min-width:0;max-width:520px;padding:clamp(12px,3.5vw,20px)}
   .ludory-narrative[data-mobile-preference=portrait] h2,.ludory-narrative[data-mobile-preference=portrait] h3{overflow-wrap:anywhere}
-  .ludory-narrative[data-mobile-preference=portrait] .ludory-narrative__actions{min-width:0}
-  .ludory-narrative[data-mobile-preference=portrait] .ludory-narrative__actions button{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+  .ludory-narrative[data-mobile-preference=portrait] .ludory-narrative__actions{min-width:0;flex-direction:column}
+  .ludory-narrative[data-mobile-preference=portrait] .ludory-narrative__actions button{width:100%;max-width:100%;white-space:normal;overflow-wrap:anywhere}
   .ludory-narrative[data-mobile-preference=portrait] .ludory-narrative__toolbar button{min-width:0;overflow-wrap:anywhere}
 }
 @media (prefers-reduced-motion:reduce){.ludory-narrative *{scroll-behavior:auto!important;transition:none!important;animation:none!important}}

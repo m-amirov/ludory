@@ -237,6 +237,17 @@ async function runViewportCase(browserOptions, name, expectedOrientation, browse
       if (!back || back.y < 0 || back.y + back.height > 375) {
         throw new Error(`Landscape scroll starts with toolbar inaccessible: ${JSON.stringify(back)}`);
       }
+      const gutters = await page.evaluate(() => {
+        const padding = selector => {
+          const node = document.querySelector(selector);
+          const style = getComputedStyle(node);
+          return [Number.parseFloat(style.paddingLeft), Number.parseFloat(style.paddingRight)];
+        };
+        return { header: padding('header'), surface: padding('.ludory-narrative') };
+      });
+      if (gutters.header.some(value => value < 24) || gutters.surface.some(value => value < 24)) {
+        throw new Error(`Short landscape needs protective gutters for safe-area fallback: ${JSON.stringify(gutters)}`);
+      }
     }
     if (artifactDirectory) await page.screenshot({ path: path.join(artifactDirectory, `${name}.png`), fullPage: true });
     if (name === 'phone-320-portrait') {
@@ -249,6 +260,30 @@ async function runViewportCase(browserOptions, name, expectedOrientation, browse
     }
     results.push({ name, status: 'PASS', orientation: expectedOrientation, mobilePreference: 'portrait' });
   } finally { await context.close(); await browser.close(); }
+}
+
+async function checkPortraitScroll(page, name) {
+  const geometry = await page.evaluate(() => {
+    const documentRoot = document.documentElement;
+    const surface = document.querySelector('.ludory-narrative');
+    const game = document.querySelector('#game');
+    const actions = document.querySelector('.ludory-narrative__actions');
+    return { documentScrollHeight: documentRoot.scrollHeight, documentClientHeight: documentRoot.clientHeight,
+      documentScrollTop: documentRoot.scrollTop,
+      surfaceScrollHeight: surface.scrollHeight, surfaceClientHeight: surface.clientHeight,
+      surfaceScrollTop: surface.scrollTop,
+      gameHeight: game.getBoundingClientRect().height,
+      surfaceOverflow: getComputedStyle(surface).overflowY,
+      actionDirection: actions ? getComputedStyle(actions).flexDirection : null,
+      gameOrientation: surface.dataset.orientation };
+  });
+  if (geometry.documentScrollHeight > geometry.documentClientHeight + 2 ||
+      geometry.surfaceScrollHeight <= geometry.surfaceClientHeight + 20 ||
+      geometry.gameHeight <= 44 || geometry.surfaceOverflow !== 'auto' ||
+      (geometry.actionDirection !== null && geometry.actionDirection !== 'column')) {
+    throw new Error(`${name}: dialogue scroll must stay inside a bounded game surface: ${JSON.stringify(geometry)}`);
+  }
+  return geometry;
 }
 
 async function runRotationSaveAndOptOut() {
@@ -268,9 +303,24 @@ async function runRotationSaveAndOptOut() {
     await page.keyboard.press('Enter');
     await page.getByText('Я помню, что тебе было нелегко.').waitFor();
     await page.setViewportSize({ width: 320, height: 360 }); // reduced visual viewport / keyboard-space proxy
+    const beforeScroll = await checkPortraitScroll(page, 'short-portrait-composer');
     await page.getByRole('button', { name: 'Отправить' }).scrollIntoViewIfNeeded();
     await page.getByRole('button', { name: 'Отмена' }).scrollIntoViewIfNeeded();
+    const afterScroll = await checkPortraitScroll(page, 'short-portrait-after-scroll');
+    if (afterScroll.surfaceScrollTop <= beforeScroll.surfaceScrollTop || afterScroll.documentScrollTop > 2) {
+      throw new Error(`Composer scroll escaped game surface: ${JSON.stringify({ beforeScroll, afterScroll })}`);
+    }
     await checkVisibleControls(page, 'short-portrait-composer', { minTap: true });
+    await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+    await checkPortraitScroll(page, 'short-portrait-large-text-composer');
+    await page.getByRole('button', { name: 'Отправить' }).scrollIntoViewIfNeeded();
+    await page.getByRole('button', { name: 'Отмена' }).scrollIntoViewIfNeeded();
+    await checkVisibleControls(page, 'short-portrait-large-text', { minTap: true });
+    await page.getByRole('button', { name: 'Журнал' }).click();
+    await page.getByText('Снимок у маяка').waitFor();
+    await checkPortraitScroll(page, 'short-portrait-large-text-journal');
+    await page.getByRole('button', { name: 'Скрыть журнал' }).click();
+    await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
     await page.setViewportSize({ width: 667, height: 375 });
     await page.waitForFunction(() => document.querySelector('.ludory-narrative')?.dataset.orientation === 'landscape');
     await page.locator('#save').click();
@@ -342,6 +392,20 @@ async function runBasicNarrativeTemplate() {
     }
     await first.click();
     await page.getByText('Fireflies guide you home.').waitFor();
+    await page.setViewportSize({ width: 667, height: 375 });
+    const landscape = await page.getByRole('button', { name: 'Start again' }).evaluate(button => ({
+      height: button.getBoundingClientRect().height,
+      minHeight: getComputedStyle(button).minHeight,
+      bodyPaddingLeft: Number.parseFloat(getComputedStyle(document.body).paddingLeft),
+      bodyPaddingRight: Number.parseFloat(getComputedStyle(document.body).paddingRight),
+    }));
+    if (landscape.height < 44 || landscape.minHeight !== '44px' ||
+        landscape.bodyPaddingLeft < 16 || landscape.bodyPaddingRight < 16) {
+      throw new Error(`Basic narrative landscape touch/safe-area fallback failed: ${JSON.stringify(landscape)}`);
+    }
+    await page.getByRole('button', { name: 'Start again' }).click();
+    await page.getByText('The road divides at sunset.').waitFor();
+    await page.setViewportSize({ width: 320, height: 640 });
 
     await page.route(new URL('/', basicServer.url).href, async route => {
       const response = await route.fetch();
