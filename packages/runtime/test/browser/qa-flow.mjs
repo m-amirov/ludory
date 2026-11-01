@@ -65,7 +65,7 @@ export async function runQaFlow(page, flow, { origin, timeoutMs = 10000 } = {}) 
         // No eval or arbitrary user script is executed by the flow contract.
         await page.waitForFunction(({ selector, text }) =>
           [...document.querySelectorAll(selector)].some(el => {
-            if (!el.textContent?.includes(text) || el.closest('[hidden],[aria-hidden="true"]')) return false;
+            if (!el.innerText?.includes(text) || el.closest('[hidden],[aria-hidden="true"]')) return false;
             const style = getComputedStyle(el);
             return style.display !== 'none' && style.visibility !== 'hidden' &&
               style.visibility !== 'collapse' && el.getClientRects().length > 0;
