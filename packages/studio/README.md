@@ -215,6 +215,19 @@ art is only a demo; custom projects must review their own rights, content and
 age ratings. `npm run check:narrative-template` checks that the source-bound
 bundle committed to this repository is current. No existing game is rewritten.
 
+**Mobile reading direction for new novels:** `narrative-basic` and
+`narrative-interactive` (template v1.1.0+) include
+`<meta name="ludory-mobile-orientation" content="portrait">` in `index.html`.
+It enables the portrait-first layout on narrow, upright viewports, while a
+phone held landscape remains usable and the desktop 1000×720 layout stays
+wide. To opt out **in a newly created game**, change only that meta's
+`content` to `auto`; the interactive template passes the resulting value to
+the Narrative renderer and the basic template uses it for its local CSS.
+This is an author-controlled UI preference, **not** an OS orientation lock.
+Yandex/VK console orientation and real-device checks remain manual; do not
+infer their settings from the meta tag. Generic/Phaser templates have no new
+orientation preference, and this update never edits previously created games.
+
 ```sh
 node packages/studio/bin/ludory.mjs profiles list --json
 node packages/studio/bin/ludory.mjs templates show --name narrative-basic

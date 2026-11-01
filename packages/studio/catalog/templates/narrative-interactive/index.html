@@ -15,6 +15,7 @@
     header button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
     #status { margin: 0 auto; max-width: 1000px; color: #e9d6bd; font-size: .86rem; padding: 0 20px; min-height: 1.25rem; }
     #game { min-height: calc(100dvh - 95px); width: 100%; margin: auto; }
+    @media(max-width:900px) { header button { min-height:44px; } }
     @media(max-width: 480px) { header { padding: 9px 12px; } header strong { width: 100%; } header button { font-size: .85rem; } #game { min-height: calc(100dvh - 118px); } }
     @media (max-width:600px) and (orientation:portrait) {
       html[data-mobile-preference=portrait] body { overflow-x:hidden; }
@@ -23,6 +24,10 @@
       html[data-mobile-preference=portrait] header button { min-width:0; flex:1 1 auto; overflow-wrap:anywhere; }
       html[data-mobile-preference=portrait] #status { padding-inline:max(12px,env(safe-area-inset-left,0px)) max(12px,env(safe-area-inset-right,0px)); }
       html[data-mobile-preference=portrait] #game { min-width:0; min-height:calc(100dvh - 150px); }
+    }
+    @media (max-width:900px) and (max-height:450px) and (orientation:landscape) {
+      html[data-mobile-preference=portrait] #game { height:calc(100dvh - 95px); min-height:0; }
+      html[data-mobile-preference=portrait] .ludory-narrative { min-height:0; justify-content:flex-start; overflow-x:hidden; overflow-y:auto; }
     }
   </style>
 </head>

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { chromium, devices } from 'playwright';
+import { chromium, webkit, devices } from 'playwright';
 import { planCreate, applyCreatePlan } from '../../../studio/src/scaffold.mjs';
 import { planPreviewBuild, buildPreview } from '../../../studio/src/preview-build.mjs';
 import { startPreviewServer } from '../../../studio/src/preview-server.mjs';
@@ -183,10 +183,202 @@ async function runInsecureLanSave() {
   } finally { await context.close(); await browser.close(); }
 }
 
+async function checkVisibleControls(page, name, { minTap = false } = {}) {
+  const problems = await page.evaluate(({ minTap }) => {
+    const viewportWidth = document.documentElement.clientWidth;
+    const problems = [];
+    for (const [label, node] of [['document', document.documentElement], ['body', document.body],
+      ['game', document.querySelector('#game')], ['surface', document.querySelector('.ludory-narrative')],
+      ['panel', document.querySelector('.ludory-narrative__panel')]]) {
+      if (node.scrollWidth > node.clientWidth + 2) {
+        const edge = node.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(node).paddingRight);
+        const offenders = [...node.querySelectorAll('*')].filter(child =>
+          child.getBoundingClientRect().right > edge + 2 || child.scrollWidth > child.clientWidth + 2)
+          .slice(0, 3).map(child => `${child.tagName}.${child.className || ''}: ${child.textContent.slice(0, 20)} (${child.scrollWidth}/${child.clientWidth})`);
+        problems.push(`${label} horizontal overflow: ${node.scrollWidth}/${node.clientWidth}; children ${offenders.join(', ')}`);
+      }
+    }
+    for (const button of document.querySelectorAll('header button, .ludory-narrative button')) {
+      const rect = button.getBoundingClientRect();
+      if (rect.width <= 0 || rect.left < -2 || rect.right > viewportWidth + 2) {
+        problems.push(`button outside viewport: ${button.textContent.slice(0, 35)}`);
+      }
+      if (button.scrollWidth > button.clientWidth + 2) problems.push(`button clipped: ${button.textContent.slice(0, 35)}`);
+      if (minTap && rect.height < 44) problems.push(`tap target under 44px: ${button.textContent.slice(0, 35)} (${rect.height})`);
+    }
+    return problems;
+  }, { minTap });
+  if (problems.length) throw new Error(`${name} layout: ${problems.join('; ')}`);
+}
+
+async function runViewportCase(browserOptions, name, expectedOrientation, browserType = chromium) {
+  const browser = await browserType.launch({ headless: true });
+  const context = await browser.newContext(browserOptions);
+  const page = await context.newPage();
+  try {
+    await page.goto(base);
+    await page.getByText('Маяк мигнул трижды.').waitFor();
+    const surface = page.locator('.ludory-narrative');
+    if (await surface.getAttribute('data-mobile-preference') !== 'portrait' ||
+        await page.locator('html').getAttribute('data-mobile-preference') !== 'portrait' ||
+        await surface.getAttribute('data-orientation') !== expectedOrientation) {
+      throw new Error(`${name}: desired preference and actual viewport orientation diverge`);
+    }
+    await checkVisibleControls(page, name, { minTap: browserOptions.isMobile === true });
+    await page.getByRole('button', { name: 'Далее' }).click();
+    const longLabel = 'Очень длинный русский вариант ответа с описанием чувств и последствий выбора — '
+      .repeat(3) + ' An equally long English choice label that must remain tappable and readable.';
+    await page.getByRole('button', { name: 'Сфотографировать огни маяка' }).evaluate((button, value) => {
+      button.textContent = value;
+    }, longLabel);
+    await checkVisibleControls(page, `${name}-long-choice`, { minTap: browserOptions.isMobile === true });
+    if (name === 'phone-667-landscape') {
+      const back = await page.getByRole('button', { name: 'Назад' }).boundingBox();
+      if (!back || back.y < 0 || back.y + back.height > 375) {
+        throw new Error(`Landscape scroll starts with toolbar inaccessible: ${JSON.stringify(back)}`);
+      }
+    }
+    if (artifactDirectory) await page.screenshot({ path: path.join(artifactDirectory, `${name}.png`), fullPage: true });
+    if (name === 'phone-320-portrait') {
+      // The author's root-font scaling stands in for enlarged browser text; it is not a physical pinch-zoom test.
+      await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+      const narrativeFontPx = await surface.evaluate(node => Number.parseFloat(getComputedStyle(node).fontSize));
+      if (narrativeFontPx < 30) throw new Error(`Narrative text ignored 200% root font scaling: ${narrativeFontPx}px`);
+      await checkVisibleControls(page, 'phone-320-large-text', { minTap: true });
+      if (artifactDirectory) await page.screenshot({ path: path.join(artifactDirectory, 'phone-320-large-text.png'), fullPage: true });
+    }
+    results.push({ name, status: 'PASS', orientation: expectedOrientation, mobilePreference: 'portrait' });
+  } finally { await context.close(); await browser.close(); }
+}
+
+async function runRotationSaveAndOptOut() {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 320, height: 640 }, isMobile: true, hasTouch: true });
+  const page = await context.newPage();
+  try {
+    await page.goto(base);
+    await page.getByRole('button', { name: 'Далее' }).click();
+    await page.getByRole('button', { name: 'Сфотографировать огни маяка' }).click();
+    await page.getByRole('button', { name: 'Назад' }).click();
+    await page.getByRole('button', { name: 'Сфотографировать огни маяка' }).waitFor();
+    await page.getByRole('button', { name: 'Сфотографировать огни маяка' }).click();
+    await page.getByRole('button', { name: 'Белая ракушка' }).click();
+    await page.getByText('Смотри, какой сегодня свет.').waitFor();
+    await page.locator('[data-intent="support"]').focus();
+    await page.keyboard.press('Enter');
+    await page.getByText('Я помню, что тебе было нелегко.').waitFor();
+    await page.setViewportSize({ width: 320, height: 360 }); // reduced visual viewport / keyboard-space proxy
+    await page.getByRole('button', { name: 'Отправить' }).scrollIntoViewIfNeeded();
+    await page.getByRole('button', { name: 'Отмена' }).scrollIntoViewIfNeeded();
+    await checkVisibleControls(page, 'short-portrait-composer', { minTap: true });
+    await page.setViewportSize({ width: 667, height: 375 });
+    await page.waitForFunction(() => document.querySelector('.ludory-narrative')?.dataset.orientation === 'landscape');
+    await page.locator('#save').click();
+    await page.getByText('Сохранено').waitFor();
+    const before = await page.evaluate(() => JSON.parse(window.localStorage.getItem(
+      'ludory-narrative-v1:n3-browser-game:narrative-demo')).snapshot.state.narrative);
+    await page.reload();
+    await page.getByText('Смотри, какой сегодня свет.').waitFor();
+    const after = await page.evaluate(() => JSON.parse(window.localStorage.getItem(
+      'ludory-narrative-v1:n3-browser-game:narrative-demo')).snapshot.state.narrative);
+    if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error('Orientation/reload changed the saved scene');
+    await page.setViewportSize({ width: 320, height: 640 });
+    await page.waitForFunction(() => document.querySelector('.ludory-narrative')?.dataset.orientation === 'portrait');
+    await page.getByRole('button', { name: 'Отправить' }).click();
+    await page.getByText('Чуть позже Мира заметила снимок').waitFor();
+    await page.locator('#save').click();
+    await page.getByText('Сохранено').waitFor();
+    results.push({ name: 'rotation-back-save-reload', status: 'PASS', savedSceneStable: true });
+
+    // This simulates an author changing only the new project's metadata to opt out.
+    let optOutResponses = 0;
+    await page.route(new URL('/', base).href, async route => {
+      const response = await route.fetch();
+      const html = (await response.text()).replace('name="ludory-mobile-orientation" content="portrait"',
+        'name="ludory-mobile-orientation" content="auto"');
+      optOutResponses++;
+      await route.fulfill({ response, body: html });
+    });
+    await page.reload();
+    await page.getByText('Чуть позже Мира заметила снимок').waitFor();
+    const optedOut = await page.evaluate(() => ({ meta: document.querySelector('meta[name="ludory-mobile-orientation"]')?.content,
+      html: document.documentElement.dataset.mobilePreference,
+      renderer: document.querySelector('.ludory-narrative')?.dataset.mobilePreference }));
+    if (optOutResponses !== 1 || optedOut.meta !== 'auto' || optedOut.renderer !== 'auto') {
+      throw new Error(`Author opting out did not reach the renderer: intercepted ${optOutResponses}, ${JSON.stringify(optedOut)}`);
+    }
+    await checkVisibleControls(page, 'opt-out-auto');
+    results.push({ name: 'author-auto-opt-out', status: 'PASS', mobilePreference: 'auto' });
+  } finally { await context.close(); await browser.close(); }
+}
+
+async function runBasicNarrativeTemplate() {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-p2-basic-'));
+  let builtBasic;
+  let basicServer;
+  let browser;
+  try {
+    const plan = planCreate(project, { id: 'p2-basic', title: 'Simple Story', lang: 'en',
+      profile: 'narrative-game', template: 'narrative-basic', targets: ['yandex-games'] });
+    if (plan.status !== 'READY') throw new Error(`Simple narrative Studio plan blocked: ${plan.status}`);
+    applyCreatePlan(plan);
+    builtBasic = buildPreview(planPreviewBuild(project));
+    if (builtBasic.status !== 'BUILT') throw new Error(`Simple narrative preview blocked: ${builtBasic.reasonCode}`);
+    basicServer = await startPreviewServer({ root: builtBasic.root, port: 0, buildSha256: builtBasic.buildSha256 });
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({ viewport: { width: 320, height: 640 }, isMobile: true, hasTouch: true });
+    const page = await context.newPage();
+    await page.goto(basicServer.url);
+    await page.getByText('The road divides at sunset.').waitFor();
+    const first = page.getByRole('button', { name: 'Take the forest road' });
+    const responsive = await first.evaluate(button => ({ height: button.getBoundingClientRect().height,
+      minHeight: getComputedStyle(button).minHeight,
+      contentWidth: button.getBoundingClientRect().width,
+      bodyWidth: document.documentElement.clientWidth,
+      preference: document.documentElement.dataset.mobilePreference }));
+    if (responsive.preference !== 'portrait' || responsive.height < 44 || responsive.minHeight !== '44px' ||
+        responsive.contentWidth > responsive.bodyWidth || responsive.contentWidth < 250) {
+      throw new Error(`Basic narrative portrait opt-in failed: ${JSON.stringify(responsive)}`);
+    }
+    await first.click();
+    await page.getByText('Fireflies guide you home.').waitFor();
+
+    await page.route(new URL('/', basicServer.url).href, async route => {
+      const response = await route.fetch();
+      const html = (await response.text()).replace('name="ludory-mobile-orientation" content="portrait"',
+        'name="ludory-mobile-orientation" content="auto"');
+      await route.fulfill({ response, body: html });
+    });
+    await page.reload();
+    await page.getByText('The road divides at sunset.').waitFor();
+    const preference = await page.locator('html').getAttribute('data-mobile-preference');
+    const autoMinHeight = await page.getByRole('button', { name: 'Take the forest road' })
+      .evaluate(button => getComputedStyle(button).minHeight);
+    if (preference !== 'auto' || autoMinHeight === '44px') {
+      throw new Error(`Basic narrative author opt-out failed: ${preference}, ${autoMinHeight}`);
+    }
+    results.push({ name: 'basic-narrative-portrait-and-opt-out', status: 'PASS' });
+    await context.close();
+  } finally {
+    if (browser) await browser.close();
+    if (basicServer) await basicServer.close();
+    builtBasic?.cleanup();
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+}
+
 try {
   await run({ viewport: { width: 1000, height: 720 } }, 'desktop-wide', false);
   await run({ ...devices['Pixel 7'] }, 'android-portrait-emulated', true);
   await runInsecureLanSave();
+  await runViewportCase({ viewport: { width: 320, height: 640 }, isMobile: true, hasTouch: true }, 'phone-320-portrait', 'portrait');
+  await runViewportCase({ ...devices['iPhone 13'] }, 'iphone-portrait-emulated', 'portrait');
+  await runViewportCase({ ...devices['iPhone 13'] }, 'iphone-webkit-portrait-emulated', 'portrait', webkit);
+  await runViewportCase({ viewport: { width: 667, height: 375 }, isMobile: true, hasTouch: true }, 'phone-667-landscape', 'landscape');
+  await runViewportCase({ viewport: { width: 667, height: 375 }, isMobile: true, hasTouch: true }, 'iphone-webkit-landscape', 'landscape', webkit);
+  await runViewportCase({ viewport: { width: 820, height: 1180 }, isMobile: true, hasTouch: true }, 'tablet-portrait', 'portrait');
+  await runRotationSaveAndOptOut();
+  await runBasicNarrativeTemplate();
   const result = { status: 'PASS_N3_STUDIO_BROWSER', results };
   if (artifactDirectory) fs.writeFileSync(path.join(artifactDirectory, 'n3-results.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
