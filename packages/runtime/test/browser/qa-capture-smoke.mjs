@@ -9,7 +9,7 @@ import { captureTrustedCandidate } from './qa-capture.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const targets = ['yandex-games', 'vk-games'];
-function fixture(t, target) {
+function fixture(t, target, { injectedScript = '' } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-qa-capture-smoke-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const project = { schemaVersion: 1, id: 'qa-capture-demo', version: '1.0.0',
@@ -17,7 +17,7 @@ function fixture(t, target) {
   const entries = {
     'index.html': '<!doctype html><html><head><title>QA</title></head><body><main id="game">Ready to capture</main><script src="/src/main.js"></script></body></html>',
     'ludory.project.json': JSON.stringify(project),
-    'src/main.js': 'document.querySelector("#game").dataset.ready = "true";',
+    'src/main.js': 'document.querySelector("#game").dataset.ready = "true";' + injectedScript,
     ...(target === 'yandex-games'
       ? { 'assets/ludory-yandex.js': '// local adapter' }
       : { 'assets/ludory-vk.js': '// local adapter', 'assets/vk-bridge.js': '// bridge',
@@ -75,4 +75,18 @@ test('P3b refuses untrusted, mutated or missing browser inputs before producing 
   const mutated = await captureTrustedCandidate({ ...data, trusted: true });
   assert.equal(mutated.reasonCode, 'QA_CANDIDATE_UNVERIFIED');
   assert.equal(fs.existsSync(data.outputDir), false);
+});
+
+test('P3b browser capture records real console failures and blocked external requests', { timeout: 90000 }, async t => {
+  const data = fixture(t, 'vk-games', {
+    injectedScript: 'console.error("qa-test-visible-error");fetch("https://example.invalid/untrusted.js").catch(() => {});',
+  });
+  t.after(() => fs.rmSync(data.outputDir, { recursive: true, force: true }));
+  const result = await captureTrustedCandidate({ ...data, trusted: true, engine: 'chromium' });
+  assert.equal(result.status, 'ISSUES_FOUND', JSON.stringify(result, null, 2));
+  assert.ok(result.cases.every(item => item.observedIssues?.includes('CONSOLE_OR_HTTP_ERROR')));
+  assert.ok(result.cases.every(item => item.observedIssues?.includes('EXTERNAL_REQUEST_BLOCKED')));
+  assert.ok(result.cases.every(item => item.screenshot?.sha256?.length === 64));
+  assert.equal(result.releaseReady, false);
+  assert.equal(result.publicationAllowed, false);
 });
