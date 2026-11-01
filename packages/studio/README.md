@@ -23,6 +23,29 @@ All commands default to preview; `--apply` exclusively creates a manifest.
 
 Exit codes: `0` for successful read/preview/application; `1` for invalid arguments or operational errors; `2` for an explicit `BLOCKED`/`CONFLICT` plan.
 
+## Fresh local and LAN game preview (new Studio games)
+
+```sh
+# Rebuild the current game into an isolated temporary static distribution and serve on this computer:
+node packages/studio/bin/ludory.mjs preview --project /path/to/new-game
+
+# Explicitly expose only on one private IPv4 adapter for a phone/tablet on the same Wi-Fi:
+node packages/studio/bin/ludory.mjs preview --project /path/to/new-game --lan --port 4173
+
+# Machine-readable startup information with exact build digest:
+node packages/studio/bin/ludory.mjs preview --project /path/to/new-game --target web --json
+```
+
+The command prints `http://127.0.0.1:4173/` for local-only use, or the detected private LAN IP and port with `--lan`. Open that **LAN address** in your phone's browser on the same network. On Windows, allow the local firewall rule for your private network if prompted; guest Wi-Fi/client isolation can block connections. It does **not** configure the firewall, router, public tunnel or UPnP.
+
+Every invocation stages and verifies **fresh current** browser-native HTML/JS, assets and statically detectable referenced local files; a build/validation error stops rather than showing an older game. Dynamically constructed asset URLs cannot be exhaustively checked before launch: test these paths in the browser. Restart the command after source edits (no automatic watch in v1). Press `Ctrl+C` to close the server and delete only its owned temporary output. A port conflict or absent usable private adapter returns `BLOCKED`.
+
+The server exposes only the allowlisted built distribution, never the project root, `.ludory`, `.env`, source maps or ownership receipts. It requires an independently trusted, newly Studio-created project; imported or frozen games cannot be previewed through this command. Only standard browser-loadable static files are supported in v1: TypeScript and bare package imports need a separate build adapter. An author-owned asset inside a public asset directory is considered public on `--lan`.
+
+LAN mode uses ordinary HTTP on a private IP, not HTTPS. Runtime's save checksum has an offline SHA-256 fallback for browsers without Web Crypto on that origin; this protects against accidental save corruption but does **not** encrypt network traffic or make the origin secure.
+
+`--target web` is a platform-neutral preview. A project declaring Yandex/VK targets may select `--target yandex` or `--target vk`, but SDK and ads may require the real host portal. Local preview always reports `sdkEvidence: NOT_RUN` and `platformModeration: NOT_RUN`; it does not publish, submit moderation or certify the game on either platform. Physical-device/network testing is still owner-operated.
+
 ## Migration guarantees and limitations
 
 The legacy metadata `migrate` command is retained for compatibility; the owner has frozen all existing game projects, so do not run it against them during Ludory development. No CEOS state/history importer is planned.

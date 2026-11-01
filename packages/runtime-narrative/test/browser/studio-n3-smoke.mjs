@@ -1,9 +1,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import http from 'node:http';
 import { chromium, devices } from 'playwright';
 import { planCreate, applyCreatePlan } from '../../../studio/src/scaffold.mjs';
+import { planPreviewBuild, buildPreview } from '../../../studio/src/preview-build.mjs';
+import { startPreviewServer } from '../../../studio/src/preview-server.mjs';
 
 const created = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-n3-created-'));
 const options = { id: 'n3-browser-game', version: '0.1.0', title: 'Вечер у маяка', lang: 'ru',
@@ -12,20 +13,12 @@ const preview = planCreate(created, options);
 if (preview.status !== 'READY' || fs.readdirSync(created).length !== 0) throw new Error('Studio preview mutated game or blocked N3');
 const applied = applyCreatePlan(preview);
 if (applied.status !== 'APPLIED') throw new Error('Studio apply did not complete');
-const server = http.createServer((request, response) => {
-  const name = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
-  const target = path.resolve(created, `.${name === '/' ? '/index.html' : name}`);
-  if (!target.startsWith(`${created}${path.sep}`)) return response.writeHead(403).end();
-  fs.readFile(target, (error, data) => {
-    if (error) return response.writeHead(404).end();
-    const ext = path.extname(target);
-    response.writeHead(200, { 'Content-Type': {
-      '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.html': 'text/html',
-    }[ext] ?? 'application/octet-stream' }).end(data);
-  });
-});
-await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
-const base = `http://127.0.0.1:${server.address().port}`;
+const previewBuildPlan = planPreviewBuild(created);
+if (previewBuildPlan.status !== 'READY') throw new Error(`N3 preview source blocked: ${previewBuildPlan.reasonCode}`);
+const built = buildPreview(previewBuildPlan);
+if (built.status !== 'BUILT') throw new Error(`N3 preview build blocked: ${built.reasonCode}`);
+const server = await startPreviewServer({ root: built.root, port: 0, buildSha256: built.buildSha256 });
+const base = server.url;
 const results = [];
 const artifactDirectory = process.env.LUDORY_N3_ARTIFACT_DIR ? path.resolve(process.env.LUDORY_N3_ARTIFACT_DIR) : null;
 if (artifactDirectory) fs.mkdirSync(artifactDirectory, { recursive: true });
@@ -41,7 +34,11 @@ async function run(browserOptions, name, isMobile) {
     if (!request.url().startsWith(base) && !request.url().startsWith('data:')) external.push(request.url());
   });
   try {
-    await page.goto(base);
+    const load = await page.goto(base);
+    if (load?.headers()['x-content-type-options'] !== 'nosniff' ||
+        load?.headers()['cache-control'] !== 'no-store') {
+      throw new Error('N3 browser fixture did not load a protected, fresh preview build');
+    }
     await page.getByText('Маяк мигнул трижды.').waitFor();
     await page.getByRole('button', { name: 'English' }).click();
     await page.getByText('The lighthouse flashed three times.').waitFor();
@@ -163,13 +160,38 @@ async function run(browserOptions, name, isMobile) {
   } finally { await context.close(); await browser.close(); }
 }
 
+async function runInsecureLanSave() {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ ...devices['Pixel 7'] });
+  const page = await context.newPage();
+  try {
+    // Private-IP HTTP origins are not secure contexts. Simulate that browser
+    // restriction while connecting to the localhost-only CI fixture.
+    await page.addInitScript(() => {
+      Object.defineProperty(window.crypto, 'subtle', { configurable: true, value: undefined });
+    });
+    await page.goto(base);
+    if (await page.evaluate(() => typeof window.crypto?.subtle?.digest === 'function')) {
+      throw new Error('LAN insecure-origin test did not remove Web Crypto subtle');
+    }
+    await page.getByRole('button', { name: 'Далее' }).click();
+    await page.locator('#save').click();
+    await page.getByText('Сохранено').waitFor({ timeout: 2_000 });
+    await page.reload();
+    await page.getByText('Сохранение восстановлено').waitFor();
+    results.push({ name: 'android-lan-insecure-save-emulated', status: 'PASS', webCryptoSubtle: false });
+  } finally { await context.close(); await browser.close(); }
+}
+
 try {
   await run({ viewport: { width: 1000, height: 720 } }, 'desktop-wide', false);
   await run({ ...devices['Pixel 7'] }, 'android-portrait-emulated', true);
+  await runInsecureLanSave();
   const result = { status: 'PASS_N3_STUDIO_BROWSER', results };
   if (artifactDirectory) fs.writeFileSync(path.join(artifactDirectory, 'n3-results.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 } finally {
-  await new Promise(resolve => server.close(resolve));
+  await server.close();
+  built.cleanup();
   fs.rmSync(created, { recursive: true, force: true });
 }

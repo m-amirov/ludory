@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "vk-runtime",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Opt-in VK Games Runtime sample with an isolated pinned VK Bridge module; no Yandex SDK",
   "profile": "web-game",
   "engine": "web",

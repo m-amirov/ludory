@@ -1,4 +1,5 @@
 import { RuntimeError } from './errors.mjs';
+import { portableSha256 } from './portable-sha256.mjs';
 
 /** Browser-only adapter factory; importing this module never touches the DOM. */
 export function createBrowserEnvironment({
@@ -26,7 +27,8 @@ export function createBrowserEnvironment({
     utcNow,
     async digestSha256(bytes) {
       if (typeof cryptoObject?.subtle?.digest !== 'function') {
-        throw new RuntimeError('DIGEST_UNAVAILABLE', { message: 'Web Crypto SHA-256 is unavailable' });
+        try { return portableSha256(bytes); }
+        catch (error) { throw new RuntimeError('DIGEST_UNAVAILABLE', { message: 'Portable SHA-256 failed', cause: error }); }
       }
       const hash = await cryptoObject.subtle.digest('SHA-256', bytes);
       return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
