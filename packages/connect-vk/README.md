@@ -10,7 +10,7 @@ const { bridge: initialized, livePlatformVerified } = await connector.initialize
 const advertised = await connector.probeCapabilities();
 ```
 
-`DECLARED_SUPPORTED` is only a capability advertisement. Contract tests using a fake Bridge are not live VK acceptance. V2 adds storage/lifecycle, V3 adds ads; isolated VK bundle/entrypoint is reserved for V4.
+`DECLARED_SUPPORTED` is only a capability advertisement. Contract tests using a fake Bridge are not live VK acceptance. V2 adds storage/lifecycle, V3 adds ads; V4 adds the opt-in isolated Studio runtime template.
 
 ## V2: lifecycle and bounded VK cloud storage
 
@@ -57,3 +57,24 @@ lifecycle.detach();
 The adapter leases a scoped Runtime pause for the duration of the ad. VK hide, browser visibility and manual pause reasons remain independent. An ad's completion must not resume a game still paused for another reason. The lifecycle attachment token prevents an old Bridge response from affecting a newly attached game. If the SDK never settles a show, the adapter times out after 120 seconds and releases its own lease; `createVkAds({ ..., timeoutMs })` accepts 1–300000 milliseconds for a controlled override.
 
 VK's result is an **SDK acknowledgement**, not cryptographically signed proof. V3 does not perform live VK SDK/device verification; `livePlatformVerified` and Release gates remain unproven. No real player reward is granted by the adapter itself, no SDK or game files are bundled, and no publication is performed.
+
+## V4: isolated VK-only Runtime template
+
+For **a new empty game directory only**, opt into the platform-specific Studio template:
+
+```sh
+node packages/studio/bin/ludory.mjs create --project /path/to/new-empty-game --id vk-smoke --title 'VK Sample' --lang en --profile web-game --template vk-runtime --targets vk-games
+```
+
+As with other Studio create flows, preview before adding `--apply`. The template rejects Yandex and mixed targets, and limits IDs to 35 characters so the fixed `game-id:vk-runtime` persistence key fits VK Storage limits.
+
+The generated `assets/ludory-vk.js` is an ESM bundle of **Runtime plus Connect VK**; `assets/vk-bridge.js` is a separate local bundle of the official, pinned `@vkontakte/vk-bridge@3.0.2`. `src/main.js` owns the Bridge import, the single VK initialization, lifecycle, storage, ad controls, and game Runtime. The game does not download an unpinned CDN script, use Yandex SDK or copy saves to browser storage. Studio hashes both managed files in its receipts. Rebuild and check with:
+
+```sh
+npm run build:vk-template
+npm run check:vk-template
+```
+
+The starter UI has pointer/touch/keyboard scoring, audio, explicit manual pause, VK cloud save/restore and separate fullscreen/rewarded buttons. The visible `rewarded=true` flag is **only** the strict response of one rewarded SDK call; the starter never grants a real prize or claims verified ad watching. A missing/rejected Bridge prevents Start and shows a bootstrap error.
+
+`npm run smoke:vk-v4` from `packages/runtime/test/browser` uses local, fake-Bridge Chromium with desktop 1000×720 and Android viewport emulation. This is a **contract smoke**, not a physical Android test or live VK acceptance. SDK/device advertising, upload, moderation, publication, Release PASS and candidate ZIP packaging remain **NOT_RUN** and need separate owner-authorized steps.

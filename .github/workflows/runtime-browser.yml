@@ -8,11 +8,13 @@ on:
       - 'packages/runtime-narrative/**'
       - 'packages/narrative/**'
       - 'packages/connect-yandex/**'
+      - 'packages/connect-vk/**'
       - 'packages/studio/catalog/**'
       - 'packages/studio/src/**'
       - 'scripts/build-runtime-template.mjs'
       - 'scripts/build-narrative-template.mjs'
       - 'scripts/build-yandex-template.mjs'
+      - 'scripts/build-vk-template.mjs'
       - 'scripts/build-yandex-candidate.mjs'
       - 'scripts/yandex-c5-evidence.mjs'
       - '.github/workflows/runtime-browser.yml'
@@ -32,6 +34,7 @@ jobs:
       - run: npm run build:runtime-template
       - run: npm run check:narrative-template
       - run: npm run check:yandex-template
+      - run: npm run check:vk-template
       - run: npm run check:c5-scripts
       - name: Assert generated browser bundle is committed unchanged
         run: git diff --exit-code -- packages/studio/catalog/templates/runtime-basic/assets/ludory-runtime.js

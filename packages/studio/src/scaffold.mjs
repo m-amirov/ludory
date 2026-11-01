@@ -64,9 +64,12 @@ export function planCreate(projectDir, options) {
   if (chosenTargets.some(x => !profile.targets.includes(x) || !template.targets.includes(x))) {
     return blocked(path.resolve(projectDir), 'Requested targets are not compatible with selected profile/template');
   }
-  // The Yandex Player namespace is the game id; other templates do not share this 64-character limit.
+  // The platform persistence namespace is the game id; leave room for the template's fixed save key.
   if (template.id === 'yandex-runtime' && typeof id === 'string' && id.length > 64) {
     return blocked(path.resolve(projectDir), 'Yandex game id must not exceed the 64-character Player storage namespace limit');
+  }
+  if (template.id === 'vk-runtime' && typeof id === 'string' && id.length > 35) {
+    return blocked(path.resolve(projectDir), 'VK runtime game id must not exceed 35 characters for its scoped storage key');
   }
   const manifest = defineGame({
     schemaVersion: 1, id, version, title: { [lang]: title },
