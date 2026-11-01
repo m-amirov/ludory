@@ -479,7 +479,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       const [operation, ...args] = rest;
       if (operation === 'capture') {
         const flags = argumentsFor('qa-capture', args);
-        return import('../../runtime/test/browser/qa-capture.mjs').then(({ captureTrustedCandidate }) =>
+        return import('./qa-capture.mjs').then(({ captureTrustedCandidate }) =>
           captureTrustedCandidate({ target: flags.get('--target'), archivePath: flags.get('--archive'),
             receiptPath: flags.get('--receipt'), sdkEvidencePath: flags.get('--sdk-evidence'),
             rightsPath: flags.get('--rights'), metadataPath: flags.get('--metadata'),
