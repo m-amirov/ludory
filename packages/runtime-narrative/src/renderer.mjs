@@ -31,9 +31,11 @@ function localAsset(src) {
 
 /** Browser-only, DOM-based opt-in RuntimeRenderer. No SDK, server or camera. */
 export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets = {},
-  labels = {}, relationFacts = [], now = () => globalThis.performance.now(), canBack = () => false } = {}) {
+  labels = {}, relationFacts = [], preferredMobileOrientation = 'auto',
+  now = () => globalThis.performance.now(), canBack = () => false } = {}) {
   if (!graph || !catalog) throw new TypeError('graph and catalog required');
   if (!UI[locale]) throw new TypeError('unsupported locale');
+  if (!['auto', 'portrait'].includes(preferredMobileOrientation)) throw new TypeError('unsupported mobile orientation preference');
   if (typeof now !== 'function') throw new TypeError('now must be a clock function');
   if (typeof canBack !== 'function') throw new TypeError('canBack must be a function');
   let root = null;
@@ -288,6 +290,7 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
       dispatchInput = nextDispatch;
       style = element('style', NARRATIVE_CSS);
       surface = element('section', undefined, 'ludory-narrative');
+      surface.dataset.mobilePreference = preferredMobileOrientation;
       surface.setAttribute('role', 'region');
       surface.setAttribute('aria-label', UI[locale].story);
       root.appendChild(style);
