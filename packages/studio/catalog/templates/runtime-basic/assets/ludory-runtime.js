@@ -584,7 +584,7 @@ function createViewportTracker({ getViewport, observeViewport, onResize, onError
   let last = null;
   let unsubscribe = null;
   let generation = 0;
-  function initial() {
+  function initial2() {
     last = validateViewport(getViewport());
     return { ...last };
   }
@@ -616,7 +616,7 @@ function createViewportTracker({ getViewport, observeViewport, onResize, onError
     unsubscribe = null;
     detached?.();
   }
-  return Object.freeze({ initial, attach, detach });
+  return Object.freeze({ initial: initial2, attach, detach });
 }
 
 // packages/runtime/src/persistence.mjs
@@ -1197,6 +1197,127 @@ function createBrowserStorage({ storage, namespace = "ludory" } = {}) {
   });
 }
 
+// packages/runtime/src/portable-sha256.mjs
+var K = new Uint32Array([
+  1116352408,
+  1899447441,
+  3049323471,
+  3921009573,
+  961987163,
+  1508970993,
+  2453635748,
+  2870763221,
+  3624381080,
+  310598401,
+  607225278,
+  1426881987,
+  1925078388,
+  2162078206,
+  2614888103,
+  3248222580,
+  3835390401,
+  4022224774,
+  264347078,
+  604807628,
+  770255983,
+  1249150122,
+  1555081692,
+  1996064986,
+  2554220882,
+  2821834349,
+  2952996808,
+  3210313671,
+  3336571891,
+  3584528711,
+  113926993,
+  338241895,
+  666307205,
+  773529912,
+  1294757372,
+  1396182291,
+  1695183700,
+  1986661051,
+  2177026350,
+  2456956037,
+  2730485921,
+  2820302411,
+  3259730800,
+  3345764771,
+  3516065817,
+  3600352804,
+  4094571909,
+  275423344,
+  430227734,
+  506948616,
+  659060556,
+  883997877,
+  958139571,
+  1322822218,
+  1537002063,
+  1747873779,
+  1955562222,
+  2024104815,
+  2227730452,
+  2361852424,
+  2428436474,
+  2756734187,
+  3204031479,
+  3329325298
+]);
+var initial = [
+  1779033703,
+  3144134277,
+  1013904242,
+  2773480762,
+  1359893119,
+  2600822924,
+  528734635,
+  1541459225
+];
+var rotate = (value, by) => value >>> by | value << 32 - by;
+function portableSha256(input) {
+  const bytes = input instanceof ArrayBuffer ? new Uint8Array(input) : ArrayBuffer.isView(input) ? new Uint8Array(input.buffer, input.byteOffset, input.byteLength) : null;
+  if (!bytes) throw new TypeError("SHA-256 requires a BufferSource");
+  const padded = new Uint8Array(Math.ceil((bytes.length + 9) / 64) * 64);
+  padded.set(bytes);
+  padded[bytes.length] = 128;
+  const bitLength = BigInt(bytes.length) * 8n;
+  for (let i = 0; i < 8; i++) padded[padded.length - 1 - i] = Number(bitLength >> BigInt(i * 8) & 255n);
+  const view = new DataView(padded.buffer);
+  const hash = initial.slice();
+  const words = new Uint32Array(64);
+  for (let offset = 0; offset < padded.length; offset += 64) {
+    for (let i = 0; i < 16; i++) words[i] = view.getUint32(offset + i * 4, false);
+    for (let i = 16; i < 64; i++) {
+      const a2 = words[i - 15], b2 = words[i - 2];
+      const small0 = rotate(a2, 7) ^ rotate(a2, 18) ^ a2 >>> 3;
+      const small1 = rotate(b2, 17) ^ rotate(b2, 19) ^ b2 >>> 10;
+      words[i] = words[i - 16] + small0 + words[i - 7] + small1 >>> 0;
+    }
+    let [a, b, c, d, e, f, g, h] = hash;
+    for (let i = 0; i < 64; i++) {
+      const big1 = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25);
+      const choose = e & f ^ ~e & g;
+      const t1 = h + big1 + choose + K[i] + words[i] >>> 0;
+      const big0 = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22);
+      const majority = a & b ^ a & c ^ b & c;
+      const t2 = big0 + majority >>> 0;
+      h = g;
+      g = f;
+      f = e;
+      e = d + t1 >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = t1 + t2 >>> 0;
+    }
+    for (const [index, value] of [a, b, c, d, e, f, g, h].entries()) {
+      hash[index] = hash[index] + value >>> 0;
+    }
+  }
+  return hash.map((value) => value.toString(16).padStart(8, "0")).join("");
+}
+
 // packages/runtime/src/browser-environment.mjs
 function createBrowserEnvironment({
   root,
@@ -1223,7 +1344,11 @@ function createBrowserEnvironment({
     utcNow,
     async digestSha256(bytes) {
       if (typeof cryptoObject?.subtle?.digest !== "function") {
-        throw new RuntimeError("DIGEST_UNAVAILABLE", { message: "Web Crypto SHA-256 is unavailable" });
+        try {
+          return portableSha256(bytes);
+        } catch (error) {
+          throw new RuntimeError("DIGEST_UNAVAILABLE", { message: "Portable SHA-256 failed", cause: error });
+        }
       }
       const hash = await cryptoObject.subtle.digest("SHA-256", bytes);
       return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("");

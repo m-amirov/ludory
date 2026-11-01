@@ -289,6 +289,22 @@ test('browser storage writes exact JSON and propagates quota failures; environme
   detach();
 });
 
+test('browser SHA-256 keeps save integrity when LAN HTTP does not expose Web Crypto subtle', async () => {
+  const fakeWindow = {
+    performance: { now: () => 1 }, requestAnimationFrame() {}, cancelAnimationFrame() {},
+    addEventListener() {}, removeEventListener() {},
+  };
+  const environment = createBrowserEnvironment({
+    root: { getBoundingClientRect: () => ({ width: 400, height: 800 }) },
+    windowObject: fakeWindow, cryptoObject: {},
+  });
+  for (const length of [0, 3, 55, 56, 63, 64, 65, 4096]) {
+    const data = Uint8Array.from({ length }, (_, index) => (index * 37 + 11) % 256);
+    const expected = createHash('sha256').update(data).digest('hex');
+    assert.equal(await environment.digestSha256(data), expected, `SHA-256 length ${length}`);
+  }
+});
+
 test('browser storage refuses absent provider and malformed JSON without inventing a record', async () => {
   assert.throws(() => createBrowserStorage({ storage: null }), errorCode('STORAGE_UNAVAILABLE'));
   const provider = { getItem: () => '{broken', setItem() {}, removeItem() {} };

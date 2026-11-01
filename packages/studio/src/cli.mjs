@@ -5,6 +5,7 @@ import { checkYandexRelease, checkVkCandidate, planYandexFieldTests } from '@lud
 import { inspectProject, planInit, planMigration, applyPlan } from './projects.mjs';
 import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
+import { runPreviewCli } from './preview-cli.mjs';
 import { planComponentUpdate, componentStatus, applyComponentPlan,
   previewComponentTrust, acceptComponentTrust } from './component-updates.mjs';
 import { inspectWindowsDirectoryPin } from './windows-directory-pin.mjs';
@@ -31,6 +32,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory templates list [--catalog <directory>] [--json]
   ludory templates show --name <id> [--catalog <directory>] [--json]
   ludory create --project <empty-directory> --id <slug> --title <name> --lang <locale> --profile <id> --template <id> --targets <comma-separated> [--version <semver>] [--catalog <directory>] [--apply] [--json]
+  ludory preview --project <new-studio-game> [--target <web|yandex|vk>] [--lan] [--port <4173>] [--json]
   ludory components status --project <new-studio-game> [--catalog <directory>] [--json]
   ludory components update --project <new-studio-game> [--catalog <directory>] [--apply] [--json]
   ludory components trust --project <transferred-studio-game> [--accept-state-sha256 <64-hex> --apply] [--json]
@@ -105,7 +107,8 @@ do not run it against frozen existing games. CEOS history import is not planned.
 function argumentsFor(command, argv) {
   const common = new Set(['--project', '--json']);
   const workflowCommon = [...common];
-  const allowed = command.startsWith('quality-')
+  const allowed = command === 'preview' ? new Set([...common, '--target', '--lan', '--port'])
+    : command.startsWith('quality-')
     ? new Set(command === 'quality-enable' ? [...common, '--apply']
       : command === 'quality-check' ? [...common, '--tier', '--apply']
         : command === 'quality-evidence' ? [...common, '--run'] : common)
@@ -150,7 +153,7 @@ function argumentsFor(command, argv) {
     const key = argv[i];
     if (!allowed.has(key)) throw new Error(`Unknown option: ${key}`);
     if (flags.has(key)) throw new Error(`Duplicate option: ${key}`);
-    if (key === '--apply' || key === '--json' || key === '--confirm-no-executor' || key === '--context-reviewed') {
+    if (key === '--apply' || key === '--json' || key === '--lan' || key === '--confirm-no-executor' || key === '--context-reviewed') {
       flags.set(key, true);
       continue;
     }
@@ -437,13 +440,17 @@ function display(result, json, out) {
 
 /** Pure command boundary; inject streams to test status/output without child processes. */
 export function runCli(argv, { out = text => process.stdout.write(text), err = text => process.stderr.write(text),
-  executor, devHost = discoverDevHost } = {}) {
+  executor, devHost = discoverDevHost, previewSignal } = {}) {
   try {
     const [command = 'help', ...rest] = argv;
     if (command === 'help' || command === '--help') {
       if (rest.length) throw new Error('help takes no options');
       out(usage);
       return 0;
+    }
+    if (command === 'preview') {
+      const flags = argumentsFor('preview', rest);
+      return runPreviewCli(flags, { out, err, signal: previewSignal });
     }
     if (command === 'release') {
       const [operation, ...args] = rest;
@@ -704,7 +711,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     display(result, flags.has('--json'), out);
     return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : 0;
   } catch (error) {
-    if (['workflow', 'quality', 'components', 'release'].includes(argv[0]) && argv.includes('--json')) {
+    if (['workflow', 'quality', 'components', 'release', 'preview'].includes(argv[0]) && argv.includes('--json')) {
       const projectIndex = argv.indexOf('--project');
       const result = { mode: `${argv[0]}-${argv[1] ?? 'unknown'}`, project: projectIndex < 0 ? null : (argv[projectIndex + 1] ?? null),
         status: 'FAILED', writes: [], conflicts: [error.message] };

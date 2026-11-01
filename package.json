@@ -10,7 +10,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "precheck": "npm run check:release",
+    "precheck": "npm run check:release && npm run check:preview",
+    "check:preview": "node --check packages/studio/src/preview-build.mjs && node --check packages/studio/src/preview-server.mjs && node --check packages/studio/src/preview-cli.mjs && node --check packages/runtime/src/portable-sha256.mjs",
     "check:release": "node --check packages/release/src/archive.mjs && node --check packages/release/src/check.mjs && node --check packages/release/src/vk-check.mjs && node --check packages/release/src/plan.mjs && node --check packages/release/src/index.mjs && node --check packages/studio/src/cli.mjs",
     "build:windows-pin": "node-gyp rebuild --directory packages/studio/native",
     "build:runtime-template": "node scripts/build-runtime-template.mjs",
