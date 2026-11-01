@@ -90,3 +90,59 @@ test('P3b browser capture records real console failures and blocked external req
   assert.equal(result.releaseReady, false);
   assert.equal(result.publicationAllowed, false);
 });
+
+test('P3b declared flow observes save/reload, back button and text entry on each viewport',
+  { timeout: 90000 }, async t => {
+    const data = fixture(t, 'vk-games', { injectedScript: `
+document.body.insertAdjacentHTML('beforeend', '<button id="start">Start</button><button id="back">Back</button><p id="stage"></p><textarea id="note"></textarea><button id="send">Send</button><p id="message"></p>');
+const render = () => document.querySelector('#stage').textContent = localStorage.getItem('chapter') || 'Chapter 1';
+document.querySelector('#start').onclick = () => { localStorage.setItem('chapter', 'Chapter 2'); render(); };
+document.querySelector('#back').onclick = () => { localStorage.setItem('chapter', 'Chapter 1'); render(); };
+document.querySelector('#send').onclick = () => document.querySelector('#message').textContent = document.querySelector('#note').value;
+render();` });
+    t.after(() => fs.rmSync(data.outputDir, { recursive: true, force: true }));
+    const flowPath = path.join(data.dir, 'flow.json');
+    const steps = [
+      { kind: 'click', selector: '#start' },
+      { kind: 'expect-text', selector: '#stage', text: 'Chapter 2' },
+      { kind: 'reload' },
+      { kind: 'expect-text', selector: '#stage', text: 'Chapter 2' },
+      { kind: 'click', selector: '#back' },
+      { kind: 'expect-text', selector: '#stage', text: 'Chapter 1' },
+      { kind: 'fill', selector: '#note', text: 'Player choice' },
+      { kind: 'click', selector: '#send' },
+      { kind: 'expect-text', selector: '#message', text: 'Player choice' },
+    ];
+    fs.writeFileSync(flowPath, JSON.stringify({ schemaVersion: 1, target: data.target,
+      candidateSha256: sha(data.bytes), steps }));
+    const result = await captureTrustedCandidate({ ...data, flowPath, trusted: true });
+    assert.equal(result.status, 'STARTUP_OBSERVED', JSON.stringify(result, null, 2));
+    assert.equal(result.observedScope, 'STARTUP_AND_DECLARED_FLOW');
+    assert.equal(result.flowSha256, sha(fs.readFileSync(flowPath)));
+    assert.equal(result.cases.length, 3);
+    assert.ok(result.cases.every(item => item.interaction?.status === 'PASS'));
+    assert.ok(result.cases.every(item => item.interaction.steps.length === steps.length));
+    assert.ok(result.cases.every(item => item.gameplayRoutes === 'DECLARED_STEPS_ONLY'));
+    assert.equal(result.actualModeration, 'NOT_RUN');
+    assert.equal(result.releaseReady, false);
+  });
+
+test('P3b rejects forged/stale flow and arbitrary script steps before launching browser',
+  { timeout: 30000 }, async t => {
+    const data = fixture(t, 'yandex-games');
+    t.after(() => fs.rmSync(data.outputDir, { recursive: true, force: true }));
+    const flowPath = path.join(data.dir, 'flow.json');
+    const source = { schemaVersion: 1, target: data.target,
+      candidateSha256: 'a'.repeat(64), steps: [{ kind: 'click', selector: '#start' }] };
+    fs.writeFileSync(flowPath, JSON.stringify(source));
+    let result = await captureTrustedCandidate({ ...data, flowPath, trusted: true });
+    assert.equal(result.status, 'BLOCKED');
+    assert.equal(result.reasonCode, 'QA_FLOW_CANDIDATE_MISMATCH');
+    source.candidateSha256 = sha(data.bytes);
+    source.steps = [{ kind: 'evaluate', code: 'fetch("https://example.org")' }];
+    fs.writeFileSync(flowPath, JSON.stringify(source));
+    result = await captureTrustedCandidate({ ...data, flowPath, trusted: true });
+    assert.equal(result.status, 'BLOCKED');
+    assert.equal(result.reasonCode, 'QA_FLOW_STEP_INVALID');
+    assert.equal(fs.existsSync(data.outputDir), false);
+  });
