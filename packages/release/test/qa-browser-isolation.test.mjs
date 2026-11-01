@@ -51,6 +51,11 @@ test('P3b sandbox invocation excludes workspace, credentials, networking, privil
   const stage = { root, target: 'vk-games', candidateSha256: 'b'.repeat(64) };
   const capability = probeQaDockerIsolation({ imageRef, platform: 'linux', execute: mockDocker });
   const result = planQaDockerInvocation({ stage, imageRef, capability });
+  if (process.platform !== 'linux') {
+    assert.equal(result.status, 'BLOCKED');
+    assert.equal(result.reasonCode, 'QA_BROWSER_LINUX_ISOLATION_REQUIRED');
+    return;
+  }
   assert.equal(result.status, 'INVOCATION_PLANNED');
   assert.equal(result.browserExecuted, false);
   const cmd = result.args.join(' ');
@@ -77,5 +82,5 @@ test('P3b staging path is never an arbitrary host directory', t => {
   const stage = { root: os.homedir(), target: 'yandex-games', candidateSha256: 'c'.repeat(64) };
   assert.equal(planQaDockerInvocation({ stage, imageRef, capability }).reasonCode, 'QA_BROWSER_STAGING_PATH_UNSAFE');
   assert.equal(planQaDockerInvocation({ stage: { ...stage, root }, imageRef, capability }).status,
-    'INVOCATION_PLANNED');
+    process.platform === 'linux' ? 'INVOCATION_PLANNED' : 'BLOCKED');
 });
