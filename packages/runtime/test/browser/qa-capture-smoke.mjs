@@ -146,3 +146,20 @@ test('P3b rejects forged/stale flow and arbitrary script steps before launching 
     assert.equal(result.reasonCode, 'QA_FLOW_STEP_INVALID');
     assert.equal(fs.existsSync(data.outputDir), false);
   });
+
+test('P3b marks failed declared assertion as an issue, not a successful game test',
+  { timeout: 90000 }, async t => {
+    const data = fixture(t, 'vk-games');
+    t.after(() => fs.rmSync(data.outputDir, { recursive: true, force: true }));
+    const flowPath = path.join(data.dir, 'flow.json');
+    fs.writeFileSync(flowPath, JSON.stringify({ schemaVersion: 1, target: data.target,
+      candidateSha256: sha(data.bytes),
+      steps: [{ kind: 'expect-text', selector: '#game', text: 'not-present-in-candidate' }] }));
+    const result = await captureTrustedCandidate({ ...data, flowPath, trusted: true, timeoutMs: 1000 });
+    assert.equal(result.status, 'ISSUES_FOUND', JSON.stringify(result, null, 2));
+    assert.ok(result.cases.every(row => row.interaction?.status === 'FAIL'));
+    assert.ok(result.cases.every(row => row.observedIssues?.includes('INTERACTION_FLOW_FAILED')));
+    assert.equal(result.actualModeration, 'NOT_RUN');
+    assert.equal(result.releaseReady, false);
+    assert.equal(result.publicationAllowed, false);
+  });
