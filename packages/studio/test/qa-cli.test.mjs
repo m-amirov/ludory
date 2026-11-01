@@ -130,7 +130,8 @@ test('Studio QA capture is explicit, asynchronous and fails closed before browse
     '--receipt', data.receiptPath, '--output', outputDir, '--json'];
   const missingTrust = runCli(args, { out: s => { stdout += s; }, err: s => { stderr += s; } });
   assert.equal(missingTrust, 1);
-  assert.match(stderr, /--trusted/);
+  assert.equal(JSON.parse(stdout).status, 'FAILED');
+  assert.match(JSON.parse(stdout).conflicts.join(' '), /--trusted/);
   stdout = ''; stderr = '';
   const code = await runCli([...args, '--trusted'], { out: s => { stdout += s; }, err: s => { stderr += s; } });
   assert.equal(code, 2, stderr);
