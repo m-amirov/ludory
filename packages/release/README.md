@@ -2,6 +2,53 @@
 
 Read-only local Yandex candidate verification. No network calls, uploads, publication, moderation or mutation of games/artifacts.
 
+## P3a: Read-only pre-moderation QA simulation (Yandex / VK)
+
+Use `simulateModeration()` or the Studio command to inspect a **specific, already built** candidate. P3a does not run the game, open a browser, contact Yandex/VK, upload assets, submit to moderation, or mutate the ZIP/project. The owner must designate the candidate; a ZIP alone cannot independently prove Studio origin.
+
+```sh
+node packages/studio/bin/ludory.mjs qa simulate \
+  --target yandex-games --archive candidate.zip --receipt receipt.json \
+  --sdk-evidence yandex-c5-contract.json --rights rights.json --json
+
+node packages/studio/bin/ludory.mjs qa simulate \
+  --target vk-games --archive vk-candidate.zip --receipt vk-receipt.json \
+  --rights vk-rights.json --json
+```
+
+The Yandex C5 SDK evidence is a **local simulated-browser contract**, not a live Yandex session. The VK Bridge gate verifies the **bundled local bridge**, not a production `VKWebAppInit`. VK rights declarations are optional as command input but missing declarations result in `BLOCKED`. The existing Yandex Release R1 rights and C5 evidence checks remain required.
+
+Optional `--metadata listing.json --promo-root ./promo` checks bounded, source-bound declarations and actual local icon/cover bytes. The JSON contract is:
+
+```json
+{
+  "schemaVersion": 1,
+  "target": "yandex-games",
+  "candidateSha256": "<actual ZIP SHA-256>",
+  "projectId": "<project ID from ZIP>",
+  "listing": {
+    "name": "Example Game",
+    "description": "A short description",
+    "howToPlay": "Tap to continue",
+    "category": "visual-novel",
+    "version": "1.0.0",
+    "platforms": ["desktop", "mobile"],
+    "orientation": "portrait"
+  },
+  "content": { "ageRating": "12+", "contentWarnings": [] },
+  "promo": [
+    { "kind": "icon", "path": "icon.png", "sha256": "<actual icon SHA-256>" },
+    { "kind": "cover", "path": "cover.webp", "sha256": "<actual cover SHA-256>" }
+  ]
+}
+```
+
+For VK, change `target` to `vk-games` and supply a candidate-bound `--rights` declaration with the same asset/provenance format shown below (using `vk-games`). `listing.version` must equal the version independently read from the candidate ZIP manifest. Each `promo.path` is relative to `--promo-root`; both files must exist, be regular PNG/JPEG/WebP with matching SHA-256, structurally valid image data and bounded nonzero dimensions. Structural parsing is **not** image-quality review or guaranteed full JPEG/WebP pixel decoding. Symlinked inputs and static symlinked parent directories are rejected; an adversary concurrently replacing path ancestry during inspection remains outside the guaranteed snapshot model. `ageRating`, `contentWarnings`, listing fields, media provenance and promotional copy are owner declarations, **not** legally verified or approved platform fields. Unknown attestation fields and duplicate JSON keys are rejected.
+
+Reports have an ordered target-specific rule pack revision, actual candidate SHA, per-rule `PASS`/`BLOCKED`/`FAIL`, P0/P1 findings and unresolved scopes. Observed local evidence carries `evidenceSha256` where available: for promo integrity the digest covers the original metadata-byte hash and both verified image hashes in declared order; inherited local Release evidence is re-read for a bounded SHA snapshot. This is reproducibility information, **not** a signed or immutable evidence attestation; re-run QA if any inputs can have changed. `ISSUES_FOUND` (CLI exit `1`) means a local required failure; `BLOCKED` (exit `2`) means independent checks are pending. Browser observation, visual UX, content, promo judgment and live platform moderation cannot pass in P3a, so exit `0` / `PRECHECK_CLEAR` cannot currently occur. A missing/mismatched receipt or declaration cannot be repaired by editing the report.
+
+The report always retains `reviewProvenance: "NOT_RUN"`, `actualModeration: "NOT_RUN"`, `releaseReady: false` and `publicationAllowed: false`. Yandex sources are pinned to the pack revision; official VK moderation policy source verification is incomplete, so `platform-policy` explicitly remains `BLOCKED/POLICY_SOURCE_UNVERIFIED`. **Nothing in this simulation permits a moderation submission or publication.**
+
 ## VK V5 local candidate check (separate from Yandex R1/R2)
 
 `ludory release vk-check --archive <vk-candidate.zip> --receipt <build-receipt.json> --json` runs the read-only `checkVkCandidate()` API against a stored VK-only ZIP created by `scripts/build-vk-candidate.mjs` and the complete builder receipt. The ZIP must include its own pinned local VK Bridge and Runtime bundles and both third-party licenses. The verifier independently checks ZIP layout, member CRCs, VK manifest, hashes and the full receipt. No game files are changed.

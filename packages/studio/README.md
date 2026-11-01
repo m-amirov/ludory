@@ -23,6 +23,24 @@ All commands default to preview; `--apply` exclusively creates a manifest.
 
 Exit codes: `0` for successful read/preview/application; `1` for invalid arguments or operational errors; `2` for an explicit `BLOCKED`/`CONFLICT` plan.
 
+## Pre-moderation QA simulation (P3a)
+
+For an owner-designated, already built Yandex or VK candidate ZIP, run the read-only local preflight:
+
+```sh
+node packages/studio/bin/ludory.mjs qa simulate --target yandex-games \
+  --archive candidate.zip --receipt receipt.json \
+  --sdk-evidence yandex-c5-contract.json --rights rights.json --json
+
+node packages/studio/bin/ludory.mjs qa simulate --target vk-games \
+  --archive vk-candidate.zip --receipt vk-receipt.json \
+  --rights vk-rights.json --json
+```
+
+`--metadata listing.json --promo-root ./promo` additionally checks a strict ZIP-SHA-bound listing, exact manifest/listing version agreement, and local icon/cover image hashes, structure and bounded dimensions (schema and VK rights example: [`@ludory/release` README](../release/README.md)). VK `--rights` can be omitted, but its local media check then remains `BLOCKED`; Yandex requires both SDK evidence and rights. There is no `--apply` form. The CLI returns `1` for identified P0/P1 local issues, `2` for pending checks, and only a future complete `PRECHECK_CLEAR` could return `0` (unreachable in P3a).
+
+The command checks *local* archive integrity, receipt, simulated SDK/bridge contracts, declaration consistency and optional promo bytes. It does **not** visit the real platform, start a browser, judge content/visual quality, authenticate licenses, run official moderation or grant publication authority. Reports always state `actualModeration: NOT_RUN`, `releaseReady: false`, `publicationAllowed: false`. The pinned VK policy sources are currently unverified, and a locally green gate cannot replace a platform or human review.
+
 ## Fresh local and LAN game preview (new Studio games)
 
 ```sh

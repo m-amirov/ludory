@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { defineGame } from '@ludory/core';
-import { checkYandexRelease, checkVkCandidate, planYandexFieldTests } from '@ludory/release';
+import { checkYandexRelease, checkVkCandidate, planYandexFieldTests, simulateModeration } from '@ludory/release';
 import { inspectProject, planInit, planMigration, applyPlan } from './projects.mjs';
 import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
@@ -44,6 +44,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory release check --archive <candidate.zip> --receipt <build-receipt.json> --sdk-evidence <yandex-c5-contract.json> --rights <rights.json> [--json]
   ludory release plan --archive <candidate.zip> --receipt <build-receipt.json> --sdk-evidence <yandex-c5-contract.json> --rights <rights.json> [--field-evidence <self-report.json>] [--json]
   ludory release vk-check --archive <vk-candidate.zip> --receipt <vk-build-receipt.json> [--json]
+  ludory qa simulate --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> [--sdk-evidence <json>] [--rights <json>] [--metadata <json> --promo-root <directory>] [--json]
   ludory workflow doctor --project <game-directory> [--json]
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--context-reviewed] [--apply] [--json]
@@ -99,6 +100,8 @@ workflow recover previews a failed interrupted result and requires --confirm-no-
 Release R1 checks local Yandex ZIP/hash, fake-SDK C5 evidence and rights declarations read-only.
 Release R2 plans real Yandex field tests; self-reported PASS never becomes verified platform PASS.
 PASS_LOCAL and READY_FOR_FIELD_TEST never grant rights clearance, SDK approval or publication authority.
+QA simulation examines candidate-bound local evidence only; browser, visual, content and real platform moderation remain NOT_RUN.
+The QA report never grants release readiness, a moderation verdict, or permission to publish.
 Native development workflow accepts dirty or unversioned projects; Release verification is separate.
 The legacy metadata-only migrate command requires clean Git and Starter Kit game-spec.yaml schema 2;
 do not run it against frozen existing games. CEOS history import is not planned.
@@ -108,6 +111,8 @@ function argumentsFor(command, argv) {
   const common = new Set(['--project', '--json']);
   const workflowCommon = [...common];
   const allowed = command === 'preview' ? new Set([...common, '--target', '--lan', '--port'])
+    : command === 'qa-simulate'
+    ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--json'])
     : command.startsWith('quality-')
     ? new Set(command === 'quality-enable' ? [...common, '--apply']
       : command === 'quality-check' ? [...common, '--tier', '--apply']
@@ -161,7 +166,7 @@ function argumentsFor(command, argv) {
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
     flags.set(key, value);
   }
-  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check', 'release-plan', 'release-vk-check'].includes(command) && !flags.get('--project')) {
+  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check', 'release-plan', 'release-vk-check', 'qa-simulate'].includes(command) && !flags.get('--project')) {
     throw new Error('--project is required');
   }
   if (command === 'release-check' || command === 'release-plan') {
@@ -171,6 +176,16 @@ function argumentsFor(command, argv) {
   }
   if (command === 'release-vk-check' && (!flags.has('--archive') || !flags.has('--receipt'))) {
     throw new Error('VK release check requires --archive and --receipt');
+  }
+  if (command === 'qa-simulate') {
+    for (const option of ['--target', '--archive', '--receipt']) {
+      if (!flags.has(option)) throw new Error(`${option} is required`);
+    }
+    if (flags.get('--target') === 'yandex-games') {
+      for (const option of ['--sdk-evidence', '--rights']) {
+        if (!flags.has(option)) throw new Error(`${option} is required for Yandex QA simulation`);
+      }
+    }
   }
   if (command.endsWith('-show') && !flags.get('--name')) throw new Error('--name is required for show');
   if (command === 'profiles-apply' && !flags.get('--name')) throw new Error('--name is required for profiles apply');
@@ -452,6 +467,26 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
       const flags = argumentsFor('preview', rest);
       return runPreviewCli(flags, { out, err, signal: previewSignal });
     }
+    if (command === 'qa') {
+      const [operation, ...args] = rest;
+      if (operation !== 'simulate') throw new Error(`Unknown QA operation: ${operation || '(missing)'}`);
+      const flags = argumentsFor('qa-simulate', args);
+      const report = simulateModeration({
+        target: flags.get('--target'), archivePath: flags.get('--archive'),
+        receiptPath: flags.get('--receipt'), sdkEvidencePath: flags.get('--sdk-evidence'),
+        rightsPath: flags.get('--rights'), metadataPath: flags.get('--metadata'),
+        promoRoot: flags.get('--promo-root'),
+      });
+      if (flags.has('--json')) out(`${JSON.stringify(report, null, 2)}\n`);
+      else {
+        out(`${report.status} · ${report.target} QA simulation · ${report.candidateSha256 ?? 'unknown SHA'}\n`);
+        for (const check of report.checks) {
+          out(`  ${check.id}: ${check.status} (${check.reasonCode})\n`);
+        }
+        out('  release: NOT_READY · moderation: NOT_RUN · publication: NOT_AUTHORIZED\n');
+      }
+      return report.status === 'BLOCKED' ? 2 : report.status === 'PRECHECK_CLEAR' ? 0 : 1;
+    }
     if (command === 'release') {
       const [operation, ...args] = rest;
       if (!['check', 'plan', 'vk-check'].includes(operation)) throw new Error(`Unknown release operation: ${operation || '(missing)'}`);
@@ -711,7 +746,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     display(result, flags.has('--json'), out);
     return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : 0;
   } catch (error) {
-    if (['workflow', 'quality', 'components', 'release', 'preview'].includes(argv[0]) && argv.includes('--json')) {
+    if (['workflow', 'quality', 'components', 'release', 'preview', 'qa'].includes(argv[0]) && argv.includes('--json')) {
       const projectIndex = argv.indexOf('--project');
       const result = { mode: `${argv[0]}-${argv[1] ?? 'unknown'}`, project: projectIndex < 0 ? null : (argv[projectIndex + 1] ?? null),
         status: 'FAILED', writes: [], conflicts: [error.message] };
