@@ -23,8 +23,10 @@ node packages/studio/bin/ludory.mjs qa capture \
   --output /path/to/new-vk-evidence-directory --engine chromium --json
 ```
 
-Playwright must be installed in `packages/runtime/test/browser` (see its
-`package.json`); browser engines must be available via `npx playwright install`.
+Playwright 1.56.1 is a declared dependency of `@ludory/studio`, installed by
+root `npm ci`; install browser engines with `npx playwright install`. The capture
+runner is exported as `@ludory/studio/qa-capture` and is not owned by test files.
+The test-browser package uses that same Studio interface.
 Docker is **not used**. The browser runs locally on Windows/Linux without
 mandatory container isolation. It uses fresh browser contexts, a temporary
 loopback server, blocks non-candidate-origin browser requests, and records
