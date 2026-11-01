@@ -112,7 +112,7 @@ export async function captureTrustedCandidate({
           failures.push({ status: r.status(), path: new URL(r.url()).pathname }); });
         await page.goto(server.url, { waitUntil: 'load', timeout: timeoutMs });
         await page.waitForTimeout(250);
-        const dom = await page.evaluate(() => ({
+        const captureDom = () => page.evaluate(() => ({
           title: document.title.slice(0, 200),
           visibleTextLength: document.body?.innerText?.trim().length ?? 0,
           scrollWidth: document.documentElement.scrollWidth,
@@ -120,7 +120,9 @@ export async function captureTrustedCandidate({
           scrollHeight: document.documentElement.scrollHeight,
           clientHeight: document.documentElement.clientHeight,
         }));
+        const initialDom = await captureDom();
         const interaction = await runQaFlow(page, flow, { origin: baseOrigin, timeoutMs });
+        const dom = await captureDom();
         if (interaction.status === 'FAIL') observedFlowFailure = true;
         const imageName = item.id + '.png';
         const imageBytes = await page.screenshot({ fullPage: true, timeout: timeoutMs });
@@ -128,15 +130,16 @@ export async function captureTrustedCandidate({
         const viewport = page.viewportSize();
         const screenshot = { file: imageName, sha256: sha256(imageBytes), ...pngDimensions(imageBytes) };
         const observedIssues = [];
-        if (dom.visibleTextLength === 0) observedIssues.push('NO_VISIBLE_TEXT');
-        if (dom.scrollWidth > dom.clientWidth + 2) observedIssues.push('HORIZONTAL_OVERFLOW');
+        if (initialDom.visibleTextLength === 0 || dom.visibleTextLength === 0) observedIssues.push('NO_VISIBLE_TEXT');
+        if (initialDom.scrollWidth > initialDom.clientWidth + 2 ||
+            dom.scrollWidth > dom.clientWidth + 2) observedIssues.push('HORIZONTAL_OVERFLOW');
         if (pageErrors.length) observedIssues.push('PAGE_EXCEPTION');
         if (consoleErrors.length || failures.length) observedIssues.push('CONSOLE_OR_HTTP_ERROR');
         if (blockedRequests.length) observedIssues.push('EXTERNAL_REQUEST_BLOCKED');
         if (observedFlowFailure) observedIssues.push('INTERACTION_FLOW_FAILED');
         entries.push({ id: item.id, status: observedIssues.length ? 'ISSUES_FOUND' : 'STARTUP_OBSERVED',
           viewport, deviceScaleFactor: await page.evaluate(() => devicePixelRatio),
-          browser: engine, screenshot, dom, pageErrors, consoleErrors, httpFailures: failures,
+          browser: engine, screenshot, dom, initialDom, pageErrors, consoleErrors, httpFailures: failures,
           blockedRequests, observedIssues, mobileEmulation,
           sdk: 'LIVE_NOT_TESTED', physicalDevice: false,
           actions: ['navigate', 'inspect-dom', ...interaction.steps.map(s => s.kind), 'screenshot'],
