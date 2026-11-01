@@ -64,7 +64,12 @@ export async function runQaFlow(page, flow, { origin, timeoutMs = 10000 } = {}) 
         // Read DOM text and require the explicitly declared expected text.
         // No eval or arbitrary user script is executed by the flow contract.
         await page.waitForFunction(({ selector, text }) =>
-          [...document.querySelectorAll(selector)].some(el => el.textContent?.includes(text)),
+          [...document.querySelectorAll(selector)].some(el => {
+            if (!el.textContent?.includes(text) || el.closest('[hidden],[aria-hidden="true"]')) return false;
+            const style = getComputedStyle(el);
+            return style.display !== 'none' && style.visibility !== 'hidden' &&
+              style.visibility !== 'collapse' && el.getClientRects().length > 0;
+          }),
         { selector: step.selector, text: step.text }, { timeout: timeoutMs });
       } else if (step.kind === 'reload') {
         await page.reload({ waitUntil: 'load', timeout: timeoutMs });
