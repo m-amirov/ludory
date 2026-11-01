@@ -110,3 +110,14 @@ test('Studio QA CLI returns nonzero issues for changed receipt and rejects write
   assert.deepEqual(invalidJson.report.writes, []);
   assert.equal(cli('qa', 'simulate', '--json').report.status, 'FAILED');
 });
+
+test('Studio QA CLI returns exit 2 for an absent VK candidate instead of claiming a defect', async t => {
+  const data = await fixture(t, 'vk-games');
+  const missingArchive = path.join(data.folder, 'absent.zip');
+  const args = data.args.map(arg => arg === data.archivePath ? missingArchive : arg);
+  const result = cli(...args, '--json');
+  assert.equal(result.exit, 2);
+  assert.equal(result.report.status, 'BLOCKED');
+  assert.equal(result.report.checks.find(row => row.id === 'archive').reasonCode, 'INPUT_MISSING');
+  assert.deepEqual(result.report.findings, []);
+});

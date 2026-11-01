@@ -43,7 +43,12 @@ export function simulateModeration({ target, archivePath, receiptPath, sdkEviden
     }
   } catch (error) {
     archive = undefined;
-    archiveVerification = failed(error instanceof ReleaseInputError ? error.code : 'QA_ARCHIVE_REINSPECTION_FAILED');
+    // An absent candidate is missing evidence, not a demonstrated moderation defect.
+    // Preserve the first reader's BLOCKED result; a ZIP lost after an initial PASS is a race/failure.
+    if (!(archiveVerification.status === 'BLOCKED' && archiveVerification.reasonCode === 'INPUT_MISSING' &&
+        error instanceof ReleaseInputError && error.code === 'INPUT_MISSING')) {
+      archiveVerification = failed(error instanceof ReleaseInputError ? error.code : 'QA_ARCHIVE_REINSPECTION_FAILED');
+    }
   }
 
   const stable = archive && archiveVerification.status === 'PASS';

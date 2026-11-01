@@ -145,6 +145,23 @@ test('tampered ZIP or receipt yields actionable P1 issue while other reviews sta
   assert.equal(result.candidateSha256, null);
 });
 
+test('missing candidate ZIP remains BLOCKED for both platforms without inventing a P1 defect', t => {
+  for (const target of ['yandex-games', 'vk-games']) {
+    const data = candidate(t, target);
+    const archivePath = path.join(data.folder, 'does-not-exist.zip');
+    const report = simulateModeration({ ...data, archivePath });
+    assert.equal(report.status, 'BLOCKED', target);
+    assert.deepEqual([check(report, 'archive').status, check(report, 'archive').reasonCode],
+      ['BLOCKED', 'INPUT_MISSING']);
+    assert.equal(check(report, 'build-receipt').status, 'BLOCKED');
+    assert.equal(report.candidateSha256, null);
+    assert.deepEqual(report.findings, []);
+    assert.ok(report.unverifiedScopes.includes('archive'));
+    assert.equal(report.releaseReady, false);
+    assert.equal(report.publicationAllowed, false);
+  }
+});
+
 test('forged Web/Machine observation metadata cannot turn reviews into PASS', t => {
   const data = candidate(t, 'vk-games');
   const metadataPath = path.join(data.folder, 'metadata.json');
