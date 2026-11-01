@@ -2,7 +2,8 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="ludory-mobile-orientation" content="portrait">
   <title>Ludory — интерактивная история</title>
   <style>
     :root { color-scheme: dark; }
@@ -15,6 +16,14 @@
     #status { margin: 0 auto; max-width: 1000px; color: #e9d6bd; font-size: .86rem; padding: 0 20px; min-height: 1.25rem; }
     #game { min-height: calc(100dvh - 95px); width: 100%; margin: auto; }
     @media(max-width: 480px) { header { padding: 9px 12px; } header strong { width: 100%; } header button { font-size: .85rem; } #game { min-height: calc(100dvh - 118px); } }
+    @media (max-width:600px) and (orientation:portrait) {
+      html[data-mobile-preference=portrait] body { overflow-x:hidden; }
+      html[data-mobile-preference=portrait] header { box-sizing:border-box; padding:max(10px,env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) 10px max(12px,env(safe-area-inset-left,0px)); }
+      html[data-mobile-preference=portrait] header nav { min-width:0; width:100%; }
+      html[data-mobile-preference=portrait] header button { min-width:0; flex:1 1 auto; overflow-wrap:anywhere; }
+      html[data-mobile-preference=portrait] #status { padding-inline:max(12px,env(safe-area-inset-left,0px)) max(12px,env(safe-area-inset-right,0px)); }
+      html[data-mobile-preference=portrait] #game { min-width:0; min-height:calc(100dvh - 150px); }
+    }
   </style>
 </head>
 <body>

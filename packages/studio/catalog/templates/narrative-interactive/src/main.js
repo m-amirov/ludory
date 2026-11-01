@@ -12,6 +12,9 @@ const save = document.querySelector('#save');
 const restart = document.querySelector('#restart');
 const title = document.querySelector('#story-title');
 const navigation = document.querySelector('#story-controls');
+const preferredMobileOrientation = document.querySelector('meta[name="ludory-mobile-orientation"]')?.content === 'portrait'
+  ? 'portrait' : 'auto';
+document.documentElement.dataset.mobilePreference = preferredMobileOrientation;
 
 const shell = {
   ru: {
@@ -63,7 +66,7 @@ async function launch() {
   const environment = createBrowserEnvironment({ root });
   const update = createNarrativeRuntimeUpdate({ graph, catalog });
   const renderer = createNarrativeRenderer({ graph, catalog, now: environment.now,
-    canBack: () => update.canGoBack(), assets, labels, relationFacts });
+    canBack: () => update.canGoBack(), assets, labels, relationFacts, preferredMobileOrientation });
   let storage;
   try { storage = createBrowserStorage({ storage: window.localStorage, namespace: 'ludory-narrative-v1' }); }
   catch { save.disabled = true; currentStatus = 'unavailable'; }

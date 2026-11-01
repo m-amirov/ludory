@@ -1,6 +1,21 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ludory Narrative Demo</title></head>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="ludory-mobile-orientation" content="portrait">
+  <title>Ludory Narrative Demo</title>
+  <style>
+    @media (max-width:600px) and (orientation:portrait) {
+      html[data-mobile-preference=portrait] { font: 16px/1.5 system-ui,sans-serif; }
+      html[data-mobile-preference=portrait] body { box-sizing:border-box; margin:0; min-width:0; min-height:100dvh; padding:max(16px,env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) max(16px,env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px)); overflow-x:hidden; }
+      html[data-mobile-preference=portrait] main { box-sizing:border-box; width:100%; max-width:520px; min-width:0; margin:0 auto; }
+      html[data-mobile-preference=portrait] h1,html[data-mobile-preference=portrait] p { overflow-wrap:anywhere; }
+      html[data-mobile-preference=portrait] #choices { display:flex; flex-direction:column; gap:10px; }
+      html[data-mobile-preference=portrait] #choices button { box-sizing:border-box; min-height:44px; width:100%; max-width:100%; padding:10px 12px; white-space:normal; overflow-wrap:anywhere; font:inherit; }
+    }
+  </style>
+</head>
 <body>
   <main><h1>Ludory Narrative Demo</h1><p id="line" aria-live="polite"></p><div id="choices"></div></main>
   <script defer src="src/main.js"></script>

@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { parse } from 'parse5';
 import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { loadCatalog, validateNarrativeAuthorProof } from '../src/catalog.mjs';
 import { buildNarrativeBundle, verifyStoryAssets } from '../../../scripts/build-narrative-template.mjs';
@@ -14,6 +15,45 @@ import { defineNarrativeGraph, defineNarrativeCatalog, createNarrativeState, adv
 
 const originalTemplate = fileURLToPath(new URL('../catalog/templates/narrative-interactive/', import.meta.url));
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+
+function mobileOrientationMeta(html) {
+  const queue = [parse(html)];
+  while (queue.length) {
+    const node = queue.shift();
+    if (node.tagName === 'meta' && node.attrs?.some(attr => attr.name === 'name' && attr.value === 'ludory-mobile-orientation')) {
+      return node.attrs.find(attr => attr.name === 'content')?.value;
+    }
+    queue.push(...(node.childNodes ?? []));
+  }
+  return undefined;
+}
+
+test('new narrative games opt into portrait metadata without imposing it on other genres', t => {
+  for (const template of ['narrative-basic', 'narrative-interactive']) {
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-portrait-new-'));
+    t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+    const plan = planCreate(project, { id: `${template}-new`, title: 'Story', lang: 'en',
+      profile: 'narrative-game', template, targets: ['vk-games', 'yandex-games'] });
+    assert.equal(plan.status, 'READY');
+    assert.deepEqual(fs.readdirSync(project), [], 'planning does not change an existing project');
+    applyCreatePlan(plan);
+    const htmlPath = path.join(project, 'index.html');
+    assert.equal(mobileOrientationMeta(fs.readFileSync(htmlPath, 'utf8')), 'portrait', template);
+    const receipt = JSON.parse(fs.readFileSync(path.join(project, 'ludory.studio.json')));
+    assert.equal(receipt.template.version, '1.1.0');
+    // An author can opt out in a newly created game; catalog and the creation receipt remain unchanged.
+    const html = fs.readFileSync(htmlPath, 'utf8');
+    fs.writeFileSync(htmlPath, html.replace('content="portrait"', 'content="auto"'));
+    assert.equal(mobileOrientationMeta(fs.readFileSync(htmlPath, 'utf8')), 'auto');
+    assert.equal(mobileOrientationMeta(fs.readFileSync(path.join(originalTemplate, 'index.html'), 'utf8')),
+      'portrait', 'opting out in a project does not mutate bundled templates');
+  }
+  for (const template of ['web-basic', 'runtime-basic', 'vk-runtime', 'yandex-runtime']) {
+    const bundled = loadCatalog().templates.get(template);
+    assert.equal(mobileOrientationMeta(bundled.assets.get('index.html').bytes.toString('utf8')), undefined,
+      `non-narrative ${template} keeps its current layout`);
+  }
+});
 
 test('narrative source bundle is deterministic and exactly matches shipped bytes', async () => {
   const first = await buildNarrativeBundle();
