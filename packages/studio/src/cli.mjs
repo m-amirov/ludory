@@ -45,7 +45,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory release plan --archive <candidate.zip> --receipt <build-receipt.json> --sdk-evidence <yandex-c5-contract.json> --rights <rights.json> [--field-evidence <self-report.json>] [--json]
   ludory release vk-check --archive <vk-candidate.zip> --receipt <vk-build-receipt.json> [--json]
   ludory qa simulate --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> [--sdk-evidence <json>] [--rights <json>] [--metadata <json> --promo-root <directory>] [--json]
-  ludory qa capture --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> --output <new-directory> --trusted [--engine <chromium|firefox|webkit>] [--timeout-ms <1000..30000>] [--json]
+  ludory qa capture --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> --output <new-directory> --trusted [--engine <chromium|firefox|webkit>] [--flow <flow.json>] [--timeout-ms <1000..30000>] [--json]
   ludory workflow doctor --project <game-directory> [--json]
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--context-reviewed] [--apply] [--json]
@@ -115,7 +115,7 @@ function argumentsFor(command, argv) {
     : command === 'qa-simulate'
     ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--json'])
     : command === 'qa-capture'
-    ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--output', '--trusted', '--engine', '--timeout-ms', '--json'])
+    ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--output', '--trusted', '--engine', '--flow', '--timeout-ms', '--json'])
     : command.startsWith('quality-')
     ? new Set(command === 'quality-enable' ? [...common, '--apply']
       : command === 'quality-check' ? [...common, '--tier', '--apply']
@@ -484,6 +484,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
             receiptPath: flags.get('--receipt'), sdkEvidencePath: flags.get('--sdk-evidence'),
             rightsPath: flags.get('--rights'), metadataPath: flags.get('--metadata'),
             promoRoot: flags.get('--promo-root'), outputDir: flags.get('--output'),
+            flowPath: flags.get('--flow'),
             engine: flags.get('--engine') ?? 'chromium', timeoutMs: flags.has('--timeout-ms') ? Number(flags.get('--timeout-ms')) : 10000,
             trusted: flags.has('--trusted') }))
           .then(result => {
