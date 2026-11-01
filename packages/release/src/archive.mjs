@@ -211,7 +211,7 @@ function inspectStoredArchive(archivePath, { required, target, platform }) {
     fail('ARCHIVE_MANIFEST', `ZIP must contain a complete valid ${platform}-only game manifest`);
   }
   files.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)));
-  return { sha256: sha256(bytes), projectId: manifest.id, files,
+  return { sha256: sha256(bytes), projectId: manifest.id, projectVersion: manifest.version, files,
     mediaFiles: files.filter(file => file.path.startsWith('assets/') && MEDIA.has(path.posix.extname(file.path).toLowerCase())) };
 }
 
