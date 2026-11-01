@@ -2,6 +2,12 @@
 
 Read-only local Yandex candidate verification. No network calls, uploads, publication, moderation or mutation of games/artifacts.
 
+## VK V5 local candidate check (separate from Yandex R1/R2)
+
+`ludory release vk-check --archive <vk-candidate.zip> --receipt <build-receipt.json> --json` runs the read-only `checkVkCandidate()` API against a stored VK-only ZIP created by `scripts/build-vk-candidate.mjs` and the complete builder receipt. The ZIP must include its own pinned local VK Bridge and Runtime bundles and both third-party licenses. The verifier independently checks ZIP layout, member CRCs, VK manifest, hashes and the full receipt. No game files are changed.
+
+The maximum status is `PASS_LOCAL`. It is **not** an SDK/device test, a rights certificate, a production VK Hosting observation or publication permission. `platform-live`, `physical-devices`, `rights-clearance`, `moderation` and `owner-authorization` remain `NOT_RUN`; `releaseReady` and `publicationAllowed` always remain `false`. The existing Yandex R1/R2 protocols remain unchanged.
+
 ```js
 import { checkYandexRelease } from '@ludory/release';
 const report = checkYandexRelease({ archivePath, receiptPath, sdkEvidencePath, rightsPath });

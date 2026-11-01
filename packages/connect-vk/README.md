@@ -77,4 +77,24 @@ npm run check:vk-template
 
 The starter UI has pointer/touch/keyboard scoring, audio, explicit manual pause, VK cloud save/restore and separate fullscreen/rewarded buttons. Restore is enabled only before Start (reload the game to restore a saved score). The visible rewarded-ad acknowledgement is **only** the strict response of one rewarded SDK call and explicitly credits **no prize**; the starter never grants a real reward or claims verified ad watching. A missing/rejected Bridge prevents Start and shows a bootstrap error.
 
-`npm run smoke:vk-v4` from `packages/runtime/test/browser` uses local, fake-Bridge Chromium with desktop 1000×720 and Android viewport emulation. This is a **contract smoke**, not a physical Android test or live VK acceptance. SDK/device advertising, upload, moderation, publication, Release PASS and candidate ZIP packaging remain **NOT_RUN** and need separate owner-authorized steps.
+`npm run smoke:vk-v4` from `packages/runtime/test/browser` uses local, fake-Bridge Chromium with desktop 1000×720 and Android viewport emulation. This is a **contract smoke**, not a physical Android test or live VK acceptance. SDK/device advertising, upload, moderation, publication and Release PASS remain **NOT_RUN** and need separate owner-authorized steps.
+
+## V5: local VK candidate packaging
+
+For a **new** game created with the `vk-runtime` Studio template, build a self-contained, deterministic field-test candidate without contacting VK:
+
+```sh
+node scripts/build-vk-candidate.mjs --project /path/to/new-vk-game --output /outside/game-vk.zip
+```
+
+The command prints a JSON receipt with the ZIP SHA-256 and SHA-256/size for every entry. Save that output to a separate `receipt.json` for the read-only check. `--output` must name a **new** file outside the game directory. Neither the game nor an existing ZIP is modified.
+
+```sh
+node packages/studio/bin/ludory.mjs release vk-check --archive /outside/game-vk.zip --receipt /outside/receipt.json --json
+```
+
+This independently inspects stored ZIP members, checks CRCs, verifies a VK-only manifest and the complete receipt. `PASS_LOCAL` is only a local integrity result. If the ZIP or receipt is missing, the check reports `BLOCKED`; mismatches are `FAIL`.
+
+The archive contains the entrypoint, the VK-only game manifest, pinned Studio-managed Runtime and VK Bridge bundles, both third-party license notices, and optional images/audio/fonts under `assets/`. It deliberately excludes Studio trust receipts, tests, config and developer files. Edited managed SDK/license bytes, an unregistered game, foreign platform SDK imports, unsafe filesystem entries and remote Bridge replacements are rejected.
+
+This is a **local candidate**, not VK Hosting certification. A reproducible ZIP does not establish live SDK behavior, ad rewards, device compatibility, rights clearance, moderation acceptance or permission to publish.

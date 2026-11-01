@@ -7,6 +7,7 @@ import path from 'node:path';
 import { runCli } from '../src/cli.mjs';
 import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { buildYandexCandidate } from '../../../scripts/build-yandex-candidate.mjs';
+import { buildVkCandidate } from '../../../scripts/build-vk-candidate.mjs';
 import { createYandexC5Evidence } from '../../../scripts/yandex-c5-evidence.mjs';
 
 function cli(...args) {
@@ -117,4 +118,30 @@ test('Studio release plan blocks self-declared platform PASS, propagates FAIL an
   assert.equal(missing.exit, 2);
   assert.equal(missing.report.status, 'BLOCKED');
   assert.equal(cli(...args, '--unexpected', 'true').exit, 1);
+});
+
+test('Studio VK release check reads candidate and receipt without mutating files or asserting live readiness', async t => {
+  const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-vk-release-cli-'));
+  t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
+  const project = path.join(folder, 'vk-game');
+  fs.mkdirSync(project);
+  const plan = planCreate(project, { id: 'vk-release', title: 'VK Release', lang: 'en',
+    version: '1.0.0', profile: 'web-game', template: 'vk-runtime', targets: ['vk-games'] });
+  assert.equal(plan.status, 'READY');
+  assert.equal(applyCreatePlan(plan).status, 'APPLIED');
+  const archive = path.join(folder, 'candidate.zip');
+  const receipt = path.join(folder, 'receipt.json');
+  fs.writeFileSync(receipt, JSON.stringify(await buildVkCandidate({ projectDir: project, outputZip: archive })));
+  const before = fs.readdirSync(folder).sort();
+  const args = ['release', 'vk-check', '--archive', archive, '--receipt', receipt, '--json'];
+  const result = cli(...args);
+  assert.equal(result.exit, 0, result.stderr);
+  assert.equal(result.report.status, 'PASS_LOCAL');
+  assert.equal(result.report.releaseReady, false);
+  assert.equal(result.report.publicationAllowed, false);
+  assert.deepEqual(fs.readdirSync(folder).sort(), before);
+  assert.match(cli('help').stdout, /release vk-check/);
+  assert.equal(cli(...args, '--apply').exit, 1);
+  fs.unlinkSync(receipt);
+  assert.equal(cli(...args).exit, 2);
 });

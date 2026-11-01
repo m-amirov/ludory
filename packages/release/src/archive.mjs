@@ -7,7 +7,9 @@ export const SHA_256 = /^[a-f0-9]{64}$/;
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 export const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
 const MAX_FILES = 10_000;
-const REQUIRED = ['assets/ludory-yandex.js', 'index.html', 'ludory.project.json', 'src/main.js'];
+const YANDEX_REQUIRED = ['assets/ludory-yandex.js', 'index.html', 'ludory.project.json', 'src/main.js'];
+const VK_REQUIRED = ['assets/ludory-vk.js', 'assets/vk-bridge.js', 'index.html',
+  'licenses/swc-helpers.txt', 'licenses/vk-bridge.txt', 'ludory.project.json', 'src/main.js'];
 const MEDIA = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2']);
 const VALID_PART = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const DEVICE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
@@ -84,8 +86,8 @@ function checkRange(bytes, offset, size, end = bytes.length) {
       offset > end || size > end - offset) fail('ARCHIVE_TRUNCATED', 'ZIP entry or directory exceeds file bounds');
 }
 
-/** Narrow ZIP reader: C5 emits stored, single-volume ZIPs without extensions or comments. */
-export function inspectYandexArchive(archivePath) {
+/** Narrow ZIP reader: candidate builders emit stored single-volume ZIPs without extensions. */
+function inspectStoredArchive(archivePath, { required, target, platform }) {
   const bytes = readRegularBytes(archivePath, MAX_ARCHIVE_BYTES);
   if (bytes.length < 22 || bytes.readUInt32LE(bytes.length - 22) !== 0x06054b50) {
     fail('ARCHIVE_EOCD', 'ZIP end-of-central-directory is missing or has an unsupported comment');
@@ -180,21 +182,21 @@ export function inspectYandexArchive(archivePath) {
     localEnd = start + record.size;
   }
   if (localEnd !== centralOffset) fail('ARCHIVE_LAYOUT', 'ZIP local data does not end at central directory');
-  for (const required of REQUIRED) {
-    if (!fileContents.has(required)) fail('ARCHIVE_REQUIRED', `Missing required Yandex candidate file: ${required}`);
+  for (const name of required) {
+    if (!fileContents.has(name)) fail('ARCHIVE_REQUIRED', `Missing required ${platform} candidate file: ${name}`);
   }
   for (const name of fileContents.keys()) {
     if (name.toLowerCase().split('/').at(-1) === 'sdk.js') {
       fail('ARCHIVE_COPIED_SDK', `Copied platform SDK forbidden: ${name}`);
     }
-    if (!REQUIRED.includes(name) &&
+    if (!required.includes(name) &&
         (!name.startsWith('assets/') || !MEDIA.has(path.posix.extname(name).toLowerCase()))) {
-      fail('ARCHIVE_UNEXPECTED', `Unexpected file outside C5 candidate contract: ${name}`);
+      fail('ARCHIVE_UNEXPECTED', `Unexpected file outside ${platform} candidate contract: ${name}`);
     }
   }
   let manifest;
   try { manifest = JSON.parse(fileContents.get('ludory.project.json').toString('utf8')); }
-  catch { fail('ARCHIVE_MANIFEST', 'Yandex project manifest is not JSON'); }
+  catch { fail('ARCHIVE_MANIFEST', `${platform} project manifest is not JSON`); }
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest) ||
       Object.keys(manifest).some(key => !['schemaVersion', 'id', 'version', 'title', 'engine', 'targets'].includes(key)) ||
       manifest.schemaVersion !== 1 || typeof manifest.id !== 'string' || !SLUG.test(manifest.id) ||
@@ -205,10 +207,22 @@ export function inspectYandexArchive(archivePath) {
       !Object.keys(manifest.title).length || Object.entries(manifest.title).some(([lang, value]) =>
         !/^[a-z]{2,3}(?:-[A-Za-z0-9]+)*$/.test(lang) || typeof value !== 'string' || !value.trim()) ||
       !Array.isArray(manifest.targets) || manifest.targets.length !== 1 ||
-      manifest.targets[0] !== 'yandex-games') {
-    fail('ARCHIVE_MANIFEST', 'ZIP must contain a complete valid Yandex-only game manifest');
+      manifest.targets[0] !== target || (target === 'vk-games' && manifest.id.length > 35)) {
+    fail('ARCHIVE_MANIFEST', `ZIP must contain a complete valid ${platform}-only game manifest`);
   }
   files.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)));
   return { sha256: sha256(bytes), projectId: manifest.id, files,
     mediaFiles: files.filter(file => file.path.startsWith('assets/') && MEDIA.has(path.posix.extname(file.path).toLowerCase())) };
+}
+
+/** Existing Yandex C5 inspection semantics; no VK bundles or licenses are admitted. */
+export function inspectYandexArchive(archivePath) {
+  return inspectStoredArchive(archivePath, { required: YANDEX_REQUIRED,
+    target: 'yandex-games', platform: 'Yandex' });
+}
+
+/** VK V5 read-only inspection with an explicit Bridge and license allowlist. */
+export function inspectVkArchive(archivePath) {
+  return inspectStoredArchive(archivePath, { required: VK_REQUIRED,
+    target: 'vk-games', platform: 'VK' });
 }
