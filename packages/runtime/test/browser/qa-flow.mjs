@@ -74,8 +74,11 @@ export async function runQaFlow(page, flow, { origin, timeoutMs = 10000 } = {}) 
       } else if (step.kind === 'reload') {
         await page.reload({ waitUntil: 'load', timeout: timeoutMs });
       } else if (step.kind === 'browser-back') {
-        const result = await page.goBack({ waitUntil: 'load', timeout: timeoutMs });
-        if (!result) invalid('QA_FLOW_HISTORY_UNAVAILABLE');
+        const before = page.url();
+        await page.goBack({ waitUntil: 'load', timeout: timeoutMs });
+        // Same-document SPA/hash navigation legitimately returns a null HTTP
+        // response; only unchanged browser history means no observed Back.
+        if (page.url() === before) invalid('QA_FLOW_HISTORY_UNAVAILABLE');
       }
       if (!sameOrigin(page, origin)) invalid('QA_FLOW_ORIGIN_CHANGED');
     } catch (error) {
