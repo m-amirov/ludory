@@ -178,3 +178,27 @@ test('P3b cannot claim PASS from hidden DOM text',
     assert.ok(result.cases.every(row => row.interaction?.status === 'FAIL'));
     assert.ok(result.cases.every(row => row.observedIssues?.includes('INTERACTION_FLOW_FAILED')));
   });
+
+test('P3b browser-back accepts same-document SPA navigation with no HTTP response',
+  { timeout: 90000 }, async t => {
+    const data = fixture(t, 'vk-games', { injectedScript: `
+document.body.insertAdjacentHTML('beforeend', '<button id="forward">Forward</button><p id="route"></p>');
+const renderRoute = () => document.querySelector('#route').textContent =
+  location.hash === '#second' ? 'Second scene' : 'First scene';
+document.querySelector('#forward').onclick = () => { location.hash = 'second'; renderRoute(); };
+window.addEventListener('hashchange', renderRoute);
+renderRoute();` });
+    t.after(() => fs.rmSync(data.outputDir, { recursive: true, force: true }));
+    const flowPath = path.join(data.dir, 'flow.json');
+    fs.writeFileSync(flowPath, JSON.stringify({ schemaVersion: 1, target: data.target,
+      candidateSha256: sha(data.bytes), steps: [
+        { kind: 'click', selector: '#forward' },
+        { kind: 'expect-text', selector: '#route', text: 'Second scene' },
+        { kind: 'browser-back' },
+        { kind: 'expect-text', selector: '#route', text: 'First scene' },
+      ] }));
+    const result = await captureTrustedCandidate({ ...data, flowPath, trusted: true });
+    assert.equal(result.status, 'STARTUP_OBSERVED', JSON.stringify(result, null, 2));
+    assert.ok(result.cases.every(row => row.interaction?.status === 'PASS'));
+    assert.ok(result.cases.every(row => row.interaction.steps[2].kind === 'browser-back'));
+  });
