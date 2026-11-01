@@ -91,3 +91,35 @@ test('P3b capture integrity cannot promote capture with interaction failures', t
   assert.equal(report.observedCaptureStatus, 'ISSUES_FOUND');
   assert.equal(report.browserAttested, false);
 });
+
+test('P3b capture integrity rejects success that contradicts recorded browser errors', t => {
+  const data = fixture(t);
+  data.manifest.cases[0].observedIssues = ['PAGE_EXCEPTION'];
+  data.manifest.cases[0].pageErrors = ['Uncaught TypeError'];
+  data.write();
+  assert.equal(verifyQaCaptureIntegrity(data.expected).reasonCode, 'QA_EVIDENCE_CASE_CONTRADICTION');
+  delete data.manifest.cases[0].observedIssues;
+  delete data.manifest.cases[0].pageErrors;
+  data.manifest.cases[0].interaction = { status: 'FAIL', steps: [
+    { index: 0, kind: 'expect-text', status: 'FAIL', reasonCode: 'QA_FLOW_ASSERTION_FAILED' },
+  ] };
+  data.write();
+  assert.equal(verifyQaCaptureIntegrity(data.expected).reasonCode, 'QA_EVIDENCE_CASE_CONTRADICTION');
+});
+
+test('P3b flow evidence must carry the exact declared flow hash and observed result', t => {
+  const data = fixture(t);
+  data.manifest.flowSha256 = 'c'.repeat(64);
+  data.manifest.observedScope = 'STARTUP_AND_DECLARED_FLOW';
+  data.write();
+  assert.equal(verifyQaCaptureIntegrity(data.expected).reasonCode, 'QA_EVIDENCE_CASE_CONTRADICTION');
+  for (const entry of data.manifest.cases) {
+    entry.interaction = { status: 'PASS', evidenceSha256: 'c'.repeat(64),
+      steps: [{ index: 0, kind: 'expect-text', status: 'PASS' }] };
+  }
+  data.write();
+  assert.equal(verifyQaCaptureIntegrity(data.expected).status, 'INTEGRITY_VERIFIED');
+  data.manifest.cases[1].interaction.evidenceSha256 = 'd'.repeat(64);
+  data.write();
+  assert.equal(verifyQaCaptureIntegrity(data.expected).reasonCode, 'QA_EVIDENCE_CASE_CONTRADICTION');
+});
