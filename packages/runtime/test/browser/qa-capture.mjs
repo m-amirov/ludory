@@ -115,6 +115,12 @@ export async function captureTrustedCandidate({
         const captureDom = () => page.evaluate(() => ({
           title: document.title.slice(0, 200),
           visibleTextLength: document.body?.innerText?.trim().length ?? 0,
+          visibleSurfaceCount: [...document.querySelectorAll('canvas,img,video,svg')].filter(el => {
+            const rect = el.getBoundingClientRect();
+            const style = getComputedStyle(el);
+            return rect.width > 0 && rect.height > 0 && style.display !== 'none' &&
+              style.visibility !== 'hidden' && !el.closest('[hidden],[aria-hidden="true"]');
+          }).length,
           scrollWidth: document.documentElement.scrollWidth,
           clientWidth: document.documentElement.clientWidth,
           scrollHeight: document.documentElement.scrollHeight,
@@ -130,7 +136,10 @@ export async function captureTrustedCandidate({
         const viewport = page.viewportSize();
         const screenshot = { file: imageName, sha256: sha256(imageBytes), ...pngDimensions(imageBytes) };
         const observedIssues = [];
-        if (initialDom.visibleTextLength === 0 || dom.visibleTextLength === 0) observedIssues.push('NO_VISIBLE_TEXT');
+        if ((initialDom.visibleTextLength === 0 && initialDom.visibleSurfaceCount === 0) ||
+            (dom.visibleTextLength === 0 && dom.visibleSurfaceCount === 0)) {
+          observedIssues.push('NO_OBSERVABLE_CONTENT');
+        }
         if (initialDom.scrollWidth > initialDom.clientWidth + 2 ||
             dom.scrollWidth > dom.clientWidth + 2) observedIssues.push('HORIZONTAL_OVERFLOW');
         if (pageErrors.length) observedIssues.push('PAGE_EXCEPTION');
