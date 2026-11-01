@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { defineGame } from '@ludory/core';
-import { checkYandexRelease, planYandexFieldTests } from '@ludory/release';
+import { checkYandexRelease, checkVkCandidate, planYandexFieldTests } from '@ludory/release';
 import { inspectProject, planInit, planMigration, applyPlan } from './projects.mjs';
 import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
@@ -41,6 +41,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory quality evidence --project <new-studio-game> [--run <quality-id|latest>] [--json]
   ludory release check --archive <candidate.zip> --receipt <build-receipt.json> --sdk-evidence <yandex-c5-contract.json> --rights <rights.json> [--json]
   ludory release plan --archive <candidate.zip> --receipt <build-receipt.json> --sdk-evidence <yandex-c5-contract.json> --rights <rights.json> [--field-evidence <self-report.json>] [--json]
+  ludory release vk-check --archive <vk-candidate.zip> --receipt <vk-build-receipt.json> [--json]
   ludory workflow doctor --project <game-directory> [--json]
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--context-reviewed] [--apply] [--json]
@@ -108,6 +109,8 @@ function argumentsFor(command, argv) {
     ? new Set(command === 'quality-enable' ? [...common, '--apply']
       : command === 'quality-check' ? [...common, '--tier', '--apply']
         : command === 'quality-evidence' ? [...common, '--run'] : common)
+    : command === 'release-vk-check'
+    ? new Set(['--archive', '--receipt', '--json'])
     : command === 'release-check' || command === 'release-plan'
     ? new Set(['--archive', '--receipt', '--sdk-evidence', '--rights', '--json',
       ...(command === 'release-plan' ? ['--field-evidence'] : [])])
@@ -155,13 +158,16 @@ function argumentsFor(command, argv) {
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
     flags.set(key, value);
   }
-  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check', 'release-plan'].includes(command) && !flags.get('--project')) {
+  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check', 'release-plan', 'release-vk-check'].includes(command) && !flags.get('--project')) {
     throw new Error('--project is required');
   }
   if (command === 'release-check' || command === 'release-plan') {
     for (const option of ['--archive', '--receipt', '--sdk-evidence', '--rights']) {
       if (!flags.has(option)) throw new Error(`${option} is required`);
     }
+  }
+  if (command === 'release-vk-check' && (!flags.has('--archive') || !flags.has('--receipt'))) {
+    throw new Error('VK release check requires --archive and --receipt');
   }
   if (command.endsWith('-show') && !flags.get('--name')) throw new Error('--name is required for show');
   if (command === 'profiles-apply' && !flags.get('--name')) throw new Error('--name is required for profiles apply');
@@ -441,15 +447,21 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'release') {
       const [operation, ...args] = rest;
-      if (!['check', 'plan'].includes(operation)) throw new Error(`Unknown release operation: ${operation || '(missing)'}`);
+      if (!['check', 'plan', 'vk-check'].includes(operation)) throw new Error(`Unknown release operation: ${operation || '(missing)'}`);
       const flags = argumentsFor(`release-${operation}`, args);
       const inputs = {
         archivePath: flags.get('--archive'), receiptPath: flags.get('--receipt'),
         sdkEvidencePath: flags.get('--sdk-evidence'), rightsPath: flags.get('--rights'),
       };
-      const result = operation === 'check' ? checkYandexRelease(inputs)
-        : planYandexFieldTests({ ...inputs, fieldEvidencePath: flags.get('--field-evidence') });
+      const result = operation === 'vk-check' ? checkVkCandidate(inputs)
+        : operation === 'check' ? checkYandexRelease(inputs)
+          : planYandexFieldTests({ ...inputs, fieldEvidencePath: flags.get('--field-evidence') });
       if (flags.has('--json')) out(`${JSON.stringify(result, null, 2)}\n`);
+      else if (operation === 'vk-check') {
+        out(`${result.status} · local VK candidate · ${result.candidateSha256 ?? 'unknown SHA'}\n`);
+        for (const gate of result.gates) out(`  ${gate.id}: ${gate.status} (${gate.reasonCode})\n`);
+        out('  release: NOT_READY · publication: NOT_AUTHORIZED\n');
+      }
       else if (operation === 'check') {
         out(`${result.status} · local Yandex candidate · ${result.candidateSha256 ?? 'unknown SHA'}\n`);
         for (const gate of result.gates) out(`  ${gate.id}: ${gate.status} (${gate.reasonCode})\n`);
