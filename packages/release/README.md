@@ -20,6 +20,31 @@ network-restricted, credential-free execution environment is implemented,
 the `browser-observation` QA check must remain `BLOCKED/BROWSER_NOT_RUN`.
 No release or moderation permission is implied.
 
+## P3b.2: Deny-by-default browser isolation preflight
+
+`probeQaDockerIsolation({ imageRef })` is a **read-only host capability preflight**,
+not a browser runner. It calls only local `docker info` and `docker image inspect`
+with timeouts. The requested image must be an existing, exact OCI
+`registry/name@sha256:<64-hex>` digest; Docker rootless mode and enforced
+seccomp must be present. Docker Desktop/Windows and missing rootless
+configuration are currently `BLOCKED`. It never pulls an image.
+
+`planQaDockerInvocation({ stage, imageRef, capability })` plans a
+credential-free invocation against a private `stageQaCandidate()` directory:
+`--network=none`, `--read-only`, dropped capabilities, no new privileges,
+bounded processes/memory/CPU and a **single read-only** candidate bind mount.
+It does **not** start this invocation, and the intended
+`/usr/local/bin/ludory-qa-runner` executable is not shipped yet. Both
+functions are preparatory contracts; mock preflight results in unit tests are
+not real container attestation. No browser evidence is produced or accepted
+and P3a's `browser-observation` remains `BLOCKED`.
+
+Before P3b may run game JavaScript, add a digest-pinned reviewed runner
+image, verify isolation in the *actual* run path without accepting caller
+supplied proof objects, strictly bound output evidence to the ZIP SHA, and
+test runtime/host/network isolation. A merely well-formed command-line
+plan is not evidence that isolation succeeded.
+
 ## P3a: Read-only pre-moderation QA simulation (Yandex / VK)
 
 Use `simulateModeration()` or the Studio command to inspect a **specific, already built** candidate. P3a does not run the game, open a browser, contact Yandex/VK, upload assets, submit to moderation, or mutate the ZIP/project. The owner must designate the candidate; a ZIP alone cannot independently prove Studio origin.
