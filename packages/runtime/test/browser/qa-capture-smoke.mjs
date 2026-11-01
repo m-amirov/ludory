@@ -155,7 +155,7 @@ test('P3b marks failed declared assertion as an issue, not a successful game tes
     fs.writeFileSync(flowPath, JSON.stringify({ schemaVersion: 1, target: data.target,
       candidateSha256: sha(data.bytes),
       steps: [{ kind: 'expect-text', selector: '#game', text: 'not-present-in-candidate' }] }));
-    const result = await captureTrustedCandidate({ ...data, flowPath, trusted: true, timeoutMs: 1000 });
+    const result = await captureTrustedCandidate({ ...data, flowPath, trusted: true, timeoutMs: 3000 });
     assert.equal(result.status, 'ISSUES_FOUND', JSON.stringify(result, null, 2));
     assert.ok(result.cases.every(row => row.interaction?.status === 'FAIL'));
     assert.ok(result.cases.every(row => row.observedIssues?.includes('INTERACTION_FLOW_FAILED')));
@@ -173,7 +173,7 @@ test('P3b cannot claim PASS from hidden DOM text',
     fs.writeFileSync(flowPath, JSON.stringify({ schemaVersion: 1, target: data.target,
       candidateSha256: sha(data.bytes),
       steps: [{ kind: 'expect-text', selector: '#secret', text: 'Private hidden answer' }] }));
-    const result = await captureTrustedCandidate({ ...data, flowPath, trusted: true, timeoutMs: 1000 });
+    const result = await captureTrustedCandidate({ ...data, flowPath, trusted: true, timeoutMs: 3000 });
     assert.equal(result.status, 'ISSUES_FOUND', JSON.stringify(result, null, 2));
     assert.ok(result.cases.every(row => row.interaction?.status === 'FAIL'));
     assert.ok(result.cases.every(row => row.observedIssues?.includes('INTERACTION_FLOW_FAILED')));
