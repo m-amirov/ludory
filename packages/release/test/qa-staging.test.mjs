@@ -35,7 +35,7 @@ function fixture(t, target, extra = {}) {
 for (const target of ['yandex-games', 'vk-games']) {
   test(`P3b stages every ${target} candidate member with matching SHA and safe cleanup`, t => {
     const data = fixture(t, target);
-    const staged = stageQaCandidate(data.target ? data : { ...data, target });
+    const staged = stageQaCandidate({ ...data, target });
     try {
       assert.equal(staged.target, target);
       assert.equal(staged.candidateSha256, data.candidateSha256);
