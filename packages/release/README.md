@@ -2,25 +2,51 @@
 
 Read-only local Yandex candidate verification. No network calls, uploads, publication, moderation or mutation of games/artifacts.
 
-## P3b: opt-in Playwright QA for trusted Ludory candidates
+## P3b: opt-in Playwright browser capture for trusted Ludory candidates
 
-`stageQaCandidate({ target, archivePath, candidateSha256 })` copies an
-already-verified C5/V5 candidate to a private temporary directory, after strict
-ZIP/CRC/path validation and a SHA-256 identity check. Each output file is
-rehashed and `cleanup()` is ownership-checked and idempotent. The original
-archive and game project are not modified.
+`stageQaCandidate({ target, archivePath, candidateSha256 })` copies a
+verified C5/V5 ZIP into a private temporary directory, rechecks original ZIP
+identity and every extracted member SHA-256, and removes files using an
+ownership-checked cleanup. The original project and archive are unchanged.
 
-The upcoming browser runner will use **ordinary Playwright**, without Docker,
-rootless container requirements or any separate OS isolation. It will be opt-in,
-use a fresh browser context and inspect only owner-authorized, trusted builds.
-**Playwright is not a security boundary**: do not use this mode for unknown or
-untrusted third-party JavaScript. Actual SDK, mobile-device, visual review and
-moderation remain outside this stage.
+For **trusted, owner-authorized** games only, use the separate opt-in command:
 
-Staging alone does not execute a game or produce browser evidence, so until the
-Playwright runner has actually run, P3a continues to report
-`BLOCKED/BROWSER_NOT_RUN`. None of these steps grant release or publication
-permission.
+```sh
+node packages/studio/bin/ludory.mjs qa capture \
+  --trusted --target yandex-games \
+  --archive /path/to/candidate.zip --receipt /path/to/receipt.json \
+  --output /path/to/new-qa-evidence-directory --json
+
+node packages/studio/bin/ludory.mjs qa capture \
+  --trusted --target vk-games \
+  --archive /path/to/vk-candidate.zip --receipt /path/to/receipt.json \
+  --output /path/to/new-vk-evidence-directory --engine chromium --json
+```
+
+Playwright must be installed in `packages/runtime/test/browser` (see its
+`package.json`); browser engines must be available via `npx playwright install`.
+Docker is **not used**. The browser runs locally on Windows/Linux without
+mandatory container isolation. It uses fresh browser contexts, a temporary
+loopback server, blocks non-candidate-origin browser requests, and records
+original PNG screenshots with SHA-256 and viewport metadata. This request
+filtering is not a security boundary. **Do not run arbitrary or untrusted
+third-party game JavaScript**.
+
+A new evidence directory (outside the candidate/archive directory) is
+required; existing evidence is never overwritten. The operator may choose
+`--engine chromium|firefox|webkit` and `--timeout-ms 1000..30000`.
+The smoke test is `npm run smoke:qa-capture` from the browser test package.
+
+`STARTUP_OBSERVED` means only the initial page rendered in emulated desktop,
+mobile portrait and landscape without the bounded observed errors. An observed
+exception, network denial, HTTP failure or overflow is reported as an issue.
+Other interaction paths, Back/save/reload, advertisements, live SDK behavior,
+physical phones, visual/content review and actual moderation are **NOT_RUN**.
+The JSON on disk (`capture.json`) and screenshot digests are evidence for
+later review, not authenticated platform receipts. Ordinary
+`ludory qa simulate` remains read-only and its browser rule remains
+`BLOCKED/BROWSER_NOT_RUN` until a source-bound P3b integration reconciles
+capture evidence. Neither command grants publication authority.
 
 ## P3a: Read-only pre-moderation QA simulation (Yandex / VK)
 
