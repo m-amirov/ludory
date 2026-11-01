@@ -487,13 +487,13 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
             engine: flags.get('--engine') ?? 'chromium', timeoutMs: flags.has('--timeout-ms') ? Number(flags.get('--timeout-ms')) : 10000,
             trusted: flags.has('--trusted') }))
           .then(result => {
-            if (flags.has('--json')) out(`${JSON.stringify(result, null, 2)}\\n`);
-            else out(`${result.status} · ${result.target ?? flags.get('--target')} · ${result.candidateSha256 ?? 'unverified'} · ${result.reasonCode ?? 'startup evidence only'}\\n`);
+            if (flags.has('--json')) out(`${JSON.stringify(result, null, 2)}\n`);
+            else out(`${result.status} · ${result.target ?? flags.get('--target')} · ${result.candidateSha256 ?? 'unverified'} · ${result.reasonCode ?? 'startup evidence only'}\n`);
             return result.status === 'STARTUP_OBSERVED' ? 0 : result.status === 'BLOCKED' ? 2 : 1;
           }).catch(error => {
             if (flags.has('--json')) out(`${JSON.stringify({ status: 'BLOCKED', reasonCode: 'QA_CAPTURE_UNAVAILABLE', message: error.message,
-              releaseReady: false, publicationAllowed: false, actualModeration: 'NOT_RUN' })}\\n`);
-            else err(`Ludory QA capture: ${error.message}\\n`);
+              releaseReady: false, publicationAllowed: false, actualModeration: 'NOT_RUN' })}\n`);
+            else err(`Ludory QA capture: ${error.message}\n`);
             return 2;
           });
       }
