@@ -211,3 +211,91 @@ test('synchronous resume guard adding new VK hide reason cannot resume', () => {
   assert.equal(f.status, 'PAUSED');
   assert.equal(f.trace.includes('resume'), false);
 });
+
+test('ad pause lease pauses once and resumes once, with a stable attachment token', () => {
+  const f = fixture(), lifecycle = createVkLifecycle(f);
+  assert.equal(lifecycle.getAttachmentToken(), null);
+  lifecycle.attach();
+  const token = lifecycle.getAttachmentToken();
+  assert.equal(typeof token, 'number');
+  const first = lifecycle.acquireAdPause();
+  const second = lifecycle.acquireAdPause();
+  assert.deepEqual(f.trace, ['pause', 'audio:pause']);
+  first();
+  assert.equal(f.status, 'PAUSED');
+  second();
+  second();
+  assert.equal(f.status, 'RUNNING');
+  assert.deepEqual(f.trace, ['pause', 'audio:pause', 'resume', 'audio:resume']);
+  assert.equal(lifecycle.getAttachmentToken(), token);
+});
+
+test('ad pause release preserves independent VK hide and manual pause owners', () => {
+  const f = fixture(), lifecycle = createVkLifecycle(f);
+  lifecycle.attach();
+  const release = lifecycle.acquireAdPause();
+  f.bridge.emit('VKWebAppViewHide');
+  release();
+  assert.equal(f.status, 'PAUSED');
+  lifecycle.setManualPaused(true);
+  f.bridge.emit('VKWebAppViewRestore');
+  assert.equal(f.status, 'PAUSED');
+  lifecycle.setManualPaused(false);
+  assert.equal(f.status, 'RUNNING');
+
+  const manuallyPaused = fixture('PAUSED');
+  const other = createVkLifecycle(manuallyPaused);
+  other.attach();
+  other.acquireAdPause()();
+  assert.equal(manuallyPaused.status, 'PAUSED');
+  assert.deepEqual(manuallyPaused.trace, []);
+});
+
+test('detach invalidates ad lease and notifies subscribers without resuming a stale Runtime', () => {
+  const f = fixture(), lifecycle = createVkLifecycle(f);
+  let notifications = 0;
+  const unsubscribe = lifecycle.subscribeDetach(() => notifications++);
+  lifecycle.attach();
+  const old = lifecycle.getAttachmentToken();
+  const release = lifecycle.acquireAdPause();
+  lifecycle.detach();
+  assert.equal(lifecycle.getAttachmentToken(), null);
+  release();
+  assert.equal(notifications, 1);
+  assert.equal(f.status, 'PAUSED');
+  lifecycle.attach();
+  assert.notEqual(lifecycle.getAttachmentToken(), old);
+  lifecycle.detach();
+  assert.equal(notifications, 2);
+  unsubscribe();
+  lifecycle.attach();
+  lifecycle.detach();
+  assert.equal(notifications, 2);
+});
+
+test('detaching reentrantly during ad pause acquisition rejects the stale lease', () => {
+  const f = fixture();
+  let lifecycle;
+  const pause = f.host.pause;
+  f.host.pause = () => { pause(); lifecycle.detach(); };
+  lifecycle = createVkLifecycle(f);
+  lifecycle.attach();
+  assert.throws(() => lifecycle.acquireAdPause(), { code: 'LIFECYCLE_FAILED' });
+  assert.equal(lifecycle.getAttachmentToken(), null);
+  assert.deepEqual(f.trace, ['pause']);
+});
+
+test('failed Runtime pause and throwing detach subscriber fail closed', () => {
+  const f = fixture();
+  f.host.pause = () => { throw new Error('pause denied'); };
+  const lifecycle = createVkLifecycle(f);
+  lifecycle.attach();
+  assert.throws(() => lifecycle.acquireAdPause(), { code: 'LIFECYCLE_FAILED' });
+  assert.equal(f.status, 'RUNNING');
+  let called = false;
+  lifecycle.subscribeDetach(() => { throw new Error('listener failed'); });
+  lifecycle.subscribeDetach(() => { called = true; });
+  lifecycle.detach();
+  assert.equal(called, true);
+  assert.equal(lifecycle.getLastError().code, 'LIFECYCLE_FAILED');
+});
