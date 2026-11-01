@@ -82,6 +82,14 @@ export function verifyQaCaptureIntegrity({
       const interaction = entry.interaction;
       if (!interaction || typeof interaction !== 'object' ||
           !Array.isArray(interaction.steps) ||
+          (manifest.flowSha256 !== null &&
+           (interaction.steps.length < 1 || interaction.steps.length > 30 ||
+            interaction.steps.some((step, index) => !step || typeof step !== 'object' ||
+              step.index !== index || !['click', 'fill', 'expect-text', 'reload', 'browser-back'].includes(step.kind) ||
+              !['PASS', 'FAIL'].includes(step.status) ||
+              (step.status === 'FAIL' && index !== interaction.steps.length - 1)) ||
+            (interaction.status === 'PASS' && interaction.steps.some(step => step.status !== 'PASS')) ||
+            (interaction.status === 'FAIL' && interaction.steps.at(-1)?.status !== 'FAIL'))) ||
           !['NOT_RUN', 'PASS', 'FAIL'].includes(interaction.status) ||
           (manifest.flowSha256 === null &&
            (interaction.status !== 'NOT_RUN' || interaction.steps.length !== 0)) ||
