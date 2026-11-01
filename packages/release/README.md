@@ -2,6 +2,24 @@
 
 Read-only local Yandex candidate verification. No network calls, uploads, publication, moderation or mutation of games/artifacts.
 
+## P3b.1: Verified inert ZIP staging (no browser execution)
+
+`stageQaCandidate({ target, archivePath, candidateSha256 })` materializes an already
+independently verified Yandex C5 or VK V5 candidate into a private temporary
+directory. This helper reuses Release's canonical stored-ZIP parser, bounds and
+CRC checks, and verifies the exact candidate SHA-256 before writing anything.
+Every staged file is rehashed. `cleanup()` is idempotent and refuses to delete
+a staging directory if its identity has changed. The original ZIP and Studio
+project are never modified.
+
+**This function only copies inert bytes.** It does not run the game or a
+browser, does not establish OS/container isolation, and creates no browser
+observation evidence. Do not serve staged content in an unsandboxed browser,
+especially not with Chromium `--no-sandbox`. Until P3b.2's verified,
+network-restricted, credential-free execution environment is implemented,
+the `browser-observation` QA check must remain `BLOCKED/BROWSER_NOT_RUN`.
+No release or moderation permission is implied.
+
 ## P3a: Read-only pre-moderation QA simulation (Yandex / VK)
 
 Use `simulateModeration()` or the Studio command to inspect a **specific, already built** candidate. P3a does not run the game, open a browser, contact Yandex/VK, upload assets, submit to moderation, or mutate the ZIP/project. The owner must designate the candidate; a ZIP alone cannot independently prove Studio origin.
