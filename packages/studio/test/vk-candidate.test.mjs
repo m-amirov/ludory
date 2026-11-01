@@ -210,6 +210,38 @@ test('VK candidate does not redirect the output into the game if the output pare
   assert.equal(fs.existsSync(path.join(game, 'candidate.zip')), false);
 });
 
+test('VK candidate preserves exact 64-bit output directory identity when inode exceeds safe integers', async t => {
+  const { base, game } = fixture(t);
+  const parent = path.join(base, 'large-inode-parent');
+  fs.mkdirSync(parent);
+  const output = path.join(parent, 'candidate.zip');
+  const exactInode = 9_007_199_254_740_993n;
+  const originalLstat = fs.lstatSync;
+  const originalStat = fs.statSync;
+  fs.lstatSync = function (filename, options) {
+    const result = originalLstat.apply(this, arguments);
+    if (path.resolve(filename) === parent) {
+      result.ino = options?.bigint ? exactInode : Number(exactInode);
+    }
+    return result;
+  };
+  fs.statSync = function (filename, options) {
+    const result = originalStat.apply(this, arguments);
+    if (filename === '.' && process.cwd() === parent) {
+      result.ino = options?.bigint ? exactInode : Number(exactInode);
+    }
+    return result;
+  };
+  try {
+    const receipt = await buildVkCandidate({ projectDir: game, outputZip: output });
+    assert.equal(receipt.archivePath, output);
+    assert.equal(receipt.sha256, sha(fs.readFileSync(output)));
+  } finally {
+    fs.lstatSync = originalLstat;
+    fs.statSync = originalStat;
+  }
+});
+
 test('VK candidate rejects output paths through symbolic ancestor directories', async t => {
   const { game, base } = fixture(t);
   const outside = path.join(base, 'outside');
@@ -260,5 +292,19 @@ test('VK candidate refuses linked media, linked root, case ambiguity and unsafe 
   if (a.ino !== b.ino || a.dev !== b.dev) {
     await assert.rejects(() => buildVkCandidate({ projectDir: game, outputZip: zip }), /case|duplicate|ambiguous/i);
   }
+  assert.equal(fs.existsSync(zip), false);
+});
+
+test('VK candidate rejects case-insensitive file-versus-directory collisions before writing', async t => {
+  const { game, zip } = fixture(t);
+  fs.writeFileSync(path.join(game, 'assets/Icon.png'), 'icon');
+  const collidingDirectory = path.join(game, 'assets/icon.png');
+  try { fs.mkdirSync(collidingDirectory); }
+  catch (error) {
+    if (error.code === 'EEXIST') { t.skip('Filesystem is case-insensitive'); return; }
+    throw error;
+  }
+  fs.writeFileSync(path.join(collidingDirectory, 'frame.png'), 'frame');
+  await assert.rejects(() => buildVkCandidate({ projectDir: game, outputZip: zip }), /case|collision|ambiguous/i);
   assert.equal(fs.existsSync(zip), false);
 });

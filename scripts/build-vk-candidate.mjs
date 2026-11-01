@@ -225,7 +225,7 @@ function safeProjectAndOutput(projectDir, outputZip) {
   const output = path.resolve(outputZip);
   const parent = path.dirname(output);
   rejectLinkedAncestors(parent);
-  const parentStat = fs.lstatSync(parent);
+  const parentStat = fs.lstatSync(parent, { bigint: true });
   if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) throw new Error('VK output parent must be a real directory');
   const outputParent = fs.realpathSync.native(parent);
   const relative = path.relative(root, outputParent);
@@ -244,8 +244,8 @@ function writePinnedOutput({ output, parent, parentStat }, archive) {
   try {
     process.chdir(parent);
     const anchored = fs.statSync('.', { bigint: true });
-    if (!anchored.isDirectory() || anchored.dev !== BigInt(parentStat.dev) ||
-        anchored.ino !== BigInt(parentStat.ino)) {
+    if (!anchored.isDirectory() || anchored.dev !== parentStat.dev ||
+        anchored.ino !== parentStat.ino) {
       throw new Error('VK output parent directory changed before anchored creation');
     }
     const basename = path.basename(output);
@@ -283,8 +283,18 @@ export async function buildVkCandidate({ projectDir, outputZip } = {}) {
   collectMedia(root, 'assets', assets);
   const names = [...required, ...assets].sort();
   if (names.length > maxArchiveFiles) throw new Error('VK candidate exceeds the 10000-file archive limit');
-  if (new Set(names.map(name => name.toLowerCase())).size !== names.length) {
+  const folded = new Set(names.map(name => name.toLowerCase()));
+  if (folded.size !== names.length) {
     throw new Error('Case-ambiguous duplicate VK candidate asset names');
+  }
+  for (const name of folded) {
+    let prefix = name;
+    while (prefix.includes('/')) {
+      prefix = prefix.slice(0, prefix.lastIndexOf('/'));
+      if (folded.has(prefix)) {
+        throw new Error('Case-ambiguous VK candidate file and directory collision');
+      }
+    }
   }
   let total = 0;
   const entries = {};
