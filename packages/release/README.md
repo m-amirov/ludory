@@ -37,6 +37,37 @@ required; existing evidence is never overwritten. The operator may choose
 `--engine chromium|firefox|webkit` and `--timeout-ms 1000..30000`.
 The smoke test is `npm run smoke:qa-capture` from the browser test package.
 
+Optional `--flow /path/to/flow.json` runs an explicitly declared game-specific
+interaction sequence in every viewport after startup. The flow must match
+the verified target and ZIP SHA, contain at most 30 steps and use only
+`click`, `fill`, `expect-text`, `reload` or `browser-back`.
+UI Back buttons use `click`, followed by an `expect-text` assertion.
+A save survives reload **only if** the flow asserts the restored game state;
+simply performing a reload is not acceptance evidence.
+
+Example:
+
+```json
+{
+  "schemaVersion": 1,
+  "target": "vk-games",
+  "candidateSha256": "<actual candidate ZIP SHA-256>",
+  "steps": [
+    { "kind": "click", "selector": "#start" },
+    { "kind": "expect-text", "selector": "#scene", "text": "Chapter 2" },
+    { "kind": "reload" },
+    { "kind": "expect-text", "selector": "#scene", "text": "Chapter 2" },
+    { "kind": "click", "selector": "#back" },
+    { "kind": "expect-text", "selector": "#scene", "text": "Chapter 1" }
+  ]
+}
+```
+
+A flow report has its input-byte hash, per-step results, and
+`STARTUP_AND_DECLARED_FLOW` observation scope; this is not proof of all
+game branches, SDK behaviors or storage modes. A forged or stale flow is
+blocked before the browser starts.
+
 `STARTUP_OBSERVED` means only the initial page rendered in emulated desktop,
 mobile portrait and landscape without the bounded observed errors. An observed
 exception, network denial, HTTP failure or overflow is reported as an issue.
