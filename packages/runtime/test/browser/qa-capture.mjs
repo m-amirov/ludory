@@ -84,8 +84,9 @@ export async function captureTrustedCandidate({
       const pageErrors = [];
       let page;
       try {
+        const mobileEmulation = item.isMobile && engine !== 'firefox';
         context = await browser.newContext({ viewport: item.viewport,
-          isMobile: item.isMobile, hasTouch: item.isMobile, serviceWorkers: 'block',
+          isMobile: mobileEmulation, hasTouch: mobileEmulation, serviceWorkers: 'block',
           acceptDownloads: false, ignoreHTTPSErrors: false });
         context.setDefaultTimeout(timeoutMs);
         await context.route('**/*', route => {
@@ -124,7 +125,8 @@ export async function captureTrustedCandidate({
         entries.push({ id: item.id, status: observedIssues.length ? 'ISSUES_FOUND' : 'STARTUP_OBSERVED',
           viewport, deviceScaleFactor: await page.evaluate(() => devicePixelRatio),
           browser: engine, screenshot, dom, pageErrors, consoleErrors, httpFailures: failures,
-          blockedRequests, observedIssues, sdk: 'LIVE_NOT_TESTED', physicalDevice: false,
+          blockedRequests, observedIssues, mobileEmulation,
+          sdk: 'LIVE_NOT_TESTED', physicalDevice: false,
           actions: ['navigate', 'inspect-dom', 'screenshot'], gameplayRoutes: 'NOT_RUN',
           saveReload: 'NOT_RUN', audioFocus: 'NOT_RUN' });
       } catch (error) {
