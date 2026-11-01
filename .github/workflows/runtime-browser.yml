@@ -49,6 +49,9 @@ jobs:
         working-directory: packages/runtime/test/browser
         env:
           LUDORY_C5_ARTIFACT_DIR: artifacts
+      - name: P3b trusted candidate browser capture smoke
+        run: npm run smoke:qa-capture
+        working-directory: packages/runtime/test/browser
       - name: Upload C5 browser evidence
         if: always()
         uses: actions/upload-artifact@v4
