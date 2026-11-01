@@ -79,6 +79,23 @@ later review, not authenticated platform receipts. Ordinary
 `BLOCKED/BROWSER_NOT_RUN` until a source-bound P3b integration reconciles
 capture evidence. Neither command grants publication authority.
 
+### Capture evidence integrity (P3b.4)
+
+`verifyQaCaptureIntegrity({ evidenceDir, target, candidateSha256, reportSha256? })`
+is a separate, read-only check of exported `capture.json` and the original
+screenshots. It checks the report SHA-256 if supplied, target/ZIP binding,
+declared case order/status, screenshots' byte SHA-256, PNG dimensions, and
+missing/renamed files. A capture also runs this verifier after writing the
+evidence; failed post-write validation returns `BLOCKED`.
+
+`INTEGRITY_VERIFIED` establishes **only local byte consistency**, never
+authenticated browser provenance, visible-pixel quality or independent
+platform moderation. `browserAttested:false`,
+`actualModeration:'NOT_RUN'`, `releaseReady:false` and
+`publicationAllowed:false` remain fixed. A JSON report plus hashes can be
+re-created by the file owner, so P3c must inspect original PNG pixels and
+use an independently evidenced review route before making subjective claims.
+
 ## P3a: Read-only pre-moderation QA simulation (Yandex / VK)
 
 Use `simulateModeration()` or the Studio command to inspect a **specific, already built** candidate. P3a does not run the game, open a browser, contact Yandex/VK, upload assets, submit to moderation, or mutate the ZIP/project. The owner must designate the candidate; a ZIP alone cannot independently prove Studio origin.
