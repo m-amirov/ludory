@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { simulateModeration, stageQaCandidate } from '../../../release/src/index.mjs';
 import { startPreviewServer } from '../../../studio/src/preview-server.mjs';
+import { readQaFlow, runQaFlow } from './qa-flow.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const cases = Object.freeze([
@@ -44,7 +45,7 @@ function validateOutput(outputDir, archivePath, stagedRoot) {
  */
 export async function captureTrustedCandidate({
   target, archivePath, receiptPath, sdkEvidencePath, rightsPath, metadataPath, promoRoot,
-  outputDir, trusted = false, engine = 'chromium', timeoutMs = 10000, playwrightModule,
+  outputDir, flowPath, trusted = false, engine = 'chromium', timeoutMs = 10000, playwrightModule,
 } = {}) {
   if (!trusted) return blocked('QA_TRUSTED_EXECUTION_NOT_AUTHORIZED');
   if (!['chromium', 'firefox', 'webkit'].includes(engine) ||
@@ -59,6 +60,12 @@ export async function captureTrustedCandidate({
   const receiptGate = local.checks.find(item => item.id === 'build-receipt');
   if (archiveGate?.status !== 'PASS' || receiptGate?.status !== 'PASS' ||
       !local.candidateSha256) return { ...blocked('QA_CANDIDATE_UNVERIFIED'), target };
+  let flow = null;
+  if (flowPath !== undefined) {
+    try { flow = readQaFlow(flowPath, { target, candidateSha256: local.candidateSha256 }); }
+    catch (error) { return { ...blocked(error.code ?? 'QA_FLOW_INVALID'), target,
+      candidateSha256: local.candidateSha256 }; }
+  }
   let stage, server, browser, context;
   try {
     stage = stageQaCandidate({ target, archivePath, candidateSha256: local.candidateSha256 });
@@ -83,6 +90,7 @@ export async function captureTrustedCandidate({
       const consoleErrors = [];
       const pageErrors = [];
       let page;
+      let observedFlowFailure = false;
       try {
         const mobileEmulation = item.isMobile && engine !== 'firefox';
         context = await browser.newContext({ viewport: item.viewport,
@@ -111,6 +119,8 @@ export async function captureTrustedCandidate({
           scrollHeight: document.documentElement.scrollHeight,
           clientHeight: document.documentElement.clientHeight,
         }));
+        const interaction = await runQaFlow(page, flow, { origin: baseOrigin, timeoutMs });
+        if (interaction.status === 'FAIL') observedFlowFailure = true;
         const imageName = item.id + '.png';
         const imageBytes = await page.screenshot({ fullPage: true, timeout: timeoutMs });
         fs.writeFileSync(path.join(output, imageName), imageBytes, { flag: 'wx', mode: 0o600 });
@@ -122,12 +132,14 @@ export async function captureTrustedCandidate({
         if (pageErrors.length) observedIssues.push('PAGE_EXCEPTION');
         if (consoleErrors.length || failures.length) observedIssues.push('CONSOLE_OR_HTTP_ERROR');
         if (blockedRequests.length) observedIssues.push('EXTERNAL_REQUEST_BLOCKED');
+        if (observedFlowFailure) observedIssues.push('INTERACTION_FLOW_FAILED');
         entries.push({ id: item.id, status: observedIssues.length ? 'ISSUES_FOUND' : 'STARTUP_OBSERVED',
           viewport, deviceScaleFactor: await page.evaluate(() => devicePixelRatio),
           browser: engine, screenshot, dom, pageErrors, consoleErrors, httpFailures: failures,
           blockedRequests, observedIssues, mobileEmulation,
           sdk: 'LIVE_NOT_TESTED', physicalDevice: false,
-          actions: ['navigate', 'inspect-dom', 'screenshot'], gameplayRoutes: 'NOT_RUN',
+          actions: ['navigate', ...(flow ? flow.steps.map(s => s.kind) : []), 'inspect-dom', 'screenshot'],
+          interaction, gameplayRoutes: flow ? 'DECLARED_STEPS_ONLY' : 'NOT_RUN',
           saveReload: 'NOT_RUN', audioFocus: 'NOT_RUN' });
       } catch (error) {
         entries.push({ id: item.id, status: 'BLOCKED', reasonCode: 'QA_BROWSER_CASE_FAILED',
@@ -140,7 +152,9 @@ export async function captureTrustedCandidate({
       : entries.some(item => item.status === 'BLOCKED') ? 'BLOCKED' : 'STARTUP_OBSERVED';
     const report = { schemaVersion: 1, kind: 'qa-browser-capture', status, target,
       candidateSha256: local.candidateSha256, engine, browserVersion: browser.version(),
-      cases: entries, observedScope: 'STARTUP_ONLY', sdk: 'LIVE_NOT_TESTED',
+      flowSha256: flow?.evidenceSha256 ?? null,
+      cases: entries, observedScope: flow ? 'STARTUP_AND_DECLARED_FLOW' : 'STARTUP_ONLY',
+      sdk: 'LIVE_NOT_TESTED',
       physicalDevices: 'NOT_RUN', actualModeration: 'NOT_RUN',
       releaseReady: false, publicationAllowed: false, outputDirectory: output };
     const encoded = Buffer.from(JSON.stringify(report, null, 2) + '\n');
@@ -162,7 +176,7 @@ function parseArgs(args) {
   for (let i = 0; i < args.length; i++) {
     const key = args[i];
     if (!['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata',
-      '--promo-root', '--output', '--engine', '--timeout-ms', '--trusted'].includes(key) ||
+      '--promo-root', '--output', '--flow', '--engine', '--timeout-ms', '--trusted'].includes(key) ||
       flags.has(key)) throw new Error('QA_ARGUMENT_INVALID');
     flags.set(key, key === '--trusted' ? true : args[++i]);
   }
@@ -172,7 +186,7 @@ function parseArgs(args) {
   return { target: flags.get('--target'), archivePath: flags.get('--archive'),
     receiptPath: flags.get('--receipt'), sdkEvidencePath: flags.get('--sdk-evidence'),
     rightsPath: flags.get('--rights'), metadataPath: flags.get('--metadata'),
-    promoRoot: flags.get('--promo-root'), outputDir: flags.get('--output'),
+    promoRoot: flags.get('--promo-root'), outputDir: flags.get('--output'), flowPath: flags.get('--flow'),
     engine: flags.get('--engine'), trusted: true,
     timeoutMs: flags.has('--timeout-ms') ? Number(flags.get('--timeout-ms')) : undefined };
 }
