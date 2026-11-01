@@ -9,13 +9,16 @@ import { captureTrustedCandidate } from './qa-capture.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const targets = ['yandex-games', 'vk-games'];
-function fixture(t, target, { injectedScript = '' } = {}) {
+function fixture(t, target, { injectedScript = '', canvasOnly = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-qa-capture-smoke-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const project = { schemaVersion: 1, id: 'qa-capture-demo', version: '1.0.0',
     title: { en: 'Capture test' }, engine: 'web', targets: [target] };
   const entries = {
-    'index.html': '<!doctype html><html><head><title>QA</title></head><body><main id="game">Ready to capture</main><script src="/src/main.js"></script></body></html>',
+    'index.html': '<!doctype html><html><head><title>QA</title></head><body>' +
+      (canvasOnly ? '<canvas id="game" width="320" height="240"></canvas>' :
+        '<main id="game">Ready to capture</main>') +
+      '<script src="/src/main.js"></script></body></html>',
     'ludory.project.json': JSON.stringify(project),
     'src/main.js': 'document.querySelector("#game").dataset.ready = "true";' + injectedScript,
     ...(target === 'yandex-games'
@@ -230,3 +233,17 @@ document.querySelector('#expand').onclick = () => {
     assert.equal(result.releaseReady, false);
     assert.equal(result.publicationAllowed, false);
 });
+
+test('P3b recognizes a canvas-only Phaser-style startup without visible DOM text',
+  { timeout: 90000 }, async t => {
+    const data = fixture(t, 'vk-games', {
+      canvasOnly: true,
+      injectedScript: 'document.querySelector("#game").getContext("2d").fillRect(0, 0, 100, 100);',
+    });
+    t.after(() => fs.rmSync(data.outputDir, { recursive: true, force: true }));
+    const result = await captureTrustedCandidate({ ...data, trusted: true, engine: 'chromium' });
+    assert.equal(result.status, 'STARTUP_OBSERVED', JSON.stringify(result, null, 2));
+    assert.ok(result.cases.every(item => item.dom?.visibleTextLength === 0));
+    assert.ok(result.cases.every(item => item.dom?.visibleSurfaceCount === 1));
+    assert.equal(result.actualModeration, 'NOT_RUN');
+  });
