@@ -66,6 +66,33 @@ export function verifyQaCaptureIntegrity({
       continue;
     }
     if (entry.status === 'ISSUES_FOUND') hasFailures = true;
+    // Consistency checks are not proof that a browser really produced the
+    // report. They only prevent a self-contradictory saved manifest from being
+    // treated as internally sound evidence.
+    for (const key of ['observedIssues', 'pageErrors', 'consoleErrors',
+      'httpFailures', 'blockedRequests']) {
+      if (entry[key] !== undefined && !Array.isArray(entry[key])) {
+        return failed('QA_EVIDENCE_CASE_CONTRADICTION');
+      }
+      if (entry.status === 'STARTUP_OBSERVED' && entry[key]?.length) {
+        return failed('QA_EVIDENCE_CASE_CONTRADICTION');
+      }
+    }
+    if (entry.interaction !== undefined) {
+      const interaction = entry.interaction;
+      if (!interaction || typeof interaction !== 'object' ||
+          !Array.isArray(interaction.steps) ||
+          !['NOT_RUN', 'PASS', 'FAIL'].includes(interaction.status) ||
+          (manifest.flowSha256 === null &&
+           (interaction.status !== 'NOT_RUN' || interaction.steps.length !== 0)) ||
+          (manifest.flowSha256 !== null &&
+           (interaction.status === 'NOT_RUN' || interaction.evidenceSha256 !== manifest.flowSha256)) ||
+          (entry.status === 'STARTUP_OBSERVED' && interaction.status === 'FAIL')) {
+        return failed('QA_EVIDENCE_CASE_CONTRADICTION');
+      }
+    } else if (manifest.flowSha256 !== null) {
+      return failed('QA_EVIDENCE_CASE_CONTRADICTION');
+    }
     const image = entry.screenshot;
     if (!image || typeof image !== 'object' ||
         image.file !== entry.id + '.png' || !SHA_256.test(image.sha256 ?? '') ||
