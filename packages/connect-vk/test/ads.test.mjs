@@ -214,3 +214,21 @@ test('timeout config rejects invalid values', () => {
     assert.throws(() => fixture({ timeoutMs }), TypeError);
   }
 });
+
+test('reward is cancelled when Runtime resume subscriber destroys ads during pause release', async () => {
+  const f = fixture();
+  f.host.subscribe(event => {
+    if (event.status === 'RUNNING') f.ads.destroy();
+  });
+  await assert.rejects(f.ads.showRewarded(), expectCode('ADS_FAILED'));
+  assert.equal(f.status, 'RUNNING');
+});
+
+test('reward is cancelled when Runtime resume subscriber detaches lifecycle during pause release', async () => {
+  const f = fixture();
+  f.host.subscribe(event => {
+    if (event.status === 'RUNNING') f.lifecycle.detach();
+  });
+  await assert.rejects(f.ads.showRewarded(), expectCode('ADS_FAILED'));
+  assert.equal(f.lifecycle.getStatus(), 'DETACHED');
+});

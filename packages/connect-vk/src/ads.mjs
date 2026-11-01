@@ -51,6 +51,11 @@ export function createVkAds({ bridge, lifecycle, timeoutMs = 120_000 } = {}) {
         clearTimeout(attempt.timer);
         try { attempt.release?.(); }
         catch (cause) { failure ??= problem('ADS_FAILED', 'Failed to release VK ad pause', cause); }
+        // Releasing the pause can synchronously resume Runtime and invoke
+        // subscribers that destroy ads or detach the current game session.
+        if (!failure && value && !attached(token)) {
+          failure = problem('ADS_FAILED', 'VK lifecycle changed while releasing ad pause');
+        }
         if (failure) reject(failure);
         else resolve(value);
       };
