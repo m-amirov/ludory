@@ -64,8 +64,10 @@ function listedFiles(project) {
       if (privateName(entry.name)) continue;
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
       if (entry.isSymbolicLink()) throw new Error('PREVIEW_SOURCE_UNSAFE');
-      if (entry.isDirectory()) descend(path.join(directory, entry.name), relative, depth + 1);
-      else if (entry.isFile() && publicExt.has(path.extname(entry.name).toLowerCase())) {
+      if (entry.isDirectory() && entry.name !== '__tests__') {
+        descend(path.join(directory, entry.name), relative, depth + 1);
+      } else if (entry.isFile() && !/(?:\.test|\.spec)\.m?js$/i.test(entry.name) &&
+                 publicExt.has(path.extname(entry.name).toLowerCase())) {
         names.push(relative);
         if (++total > maxFiles) throw new Error('PREVIEW_SOURCE_TOO_LARGE');
       }
@@ -139,14 +141,16 @@ function validateDependencies(files, read) {
       for (const match of source.matchAll(/\bfetch\s*\(\s*['"]([^'"]+)['"]/g)) {
         localDependency(match[1], 'index.html', known);
       }
-      for (const match of source.matchAll(/\bnew\s+URL\s*\(\s*['"]([^'"]+)['"]\s*,\s*import\.meta\.url/g)) {
-        localDependency(match[1], name, known);
+      const moduleRelativeLiterals = new Set();
+      for (const match of source.matchAll(/\bnew\s+URL\s*\(\s*(['"])([^'"\n]+)\1\s*,\s*import\.meta\.url/g)) {
+        localDependency(match[2], name, known);
+        moduleRelativeLiterals.add(match.index + match[0].indexOf(match[1]));
       }
       // Game artwork paths are resolved relative to document URL by img.src,
       // even when the literal appears in a JS module under src/.
       if (name.startsWith('src/')) {
         for (const match of source.matchAll(/['"]((?:\.\/)?(?:assets|media|images|audio|sounds|fonts)\/[^'"\s]+\.(?:json|svg|png|jpg|jpeg|webp|avif|gif|ogg|mp3|wav|webm|mp4|woff2?))['"]/gi)) {
-          localDependency(match[1], 'index.html', known);
+          if (!moduleRelativeLiterals.has(match.index)) localDependency(match[1], 'index.html', known);
         }
       }
     }

@@ -105,6 +105,49 @@ test('static imports on the same line, fetch, art maps, srcset and inline CSS ca
   }
 });
 
+test('Node test modules under src are not browser distribution assets', t => {
+  const project = newStudioAiProject(t, { git: false });
+  fs.writeFileSync(path.join(project, 'src', 'main.test.js'),
+    "import test from 'node:test';\ntest('local', () => {});\n");
+  fs.writeFileSync(path.join(project, 'src', 'example.spec.mjs'),
+    "import test from 'node:test';\n");
+  fs.mkdirSync(path.join(project, 'src', '__tests__'));
+  fs.writeFileSync(path.join(project, 'src', '__tests__', 'helper.js'),
+    "import assert from 'node:assert';\n");
+  const plan = planPreviewBuild(project);
+  assert.equal(plan.status, 'READY', plan.reasonCode);
+  assert.equal(plan.files.some(file => file.path === 'src/main.test.js'), false);
+  assert.equal(plan.files.some(file => file.path === 'src/example.spec.mjs'), false);
+  assert.equal(plan.files.some(file => file.path.startsWith('src/__tests__/')), false);
+  const built = buildPreview(plan);
+  assert.equal(built.status, 'BUILT', built.reasonCode);
+  t.after(() => built.cleanup());
+  assert.equal(fs.existsSync(path.join(built.root, 'src', 'main.test.js')), false);
+  assert.equal(fs.existsSync(path.join(built.root, 'src', '__tests__')), false);
+});
+
+test('new URL with import.meta.url checks module-relative art without requiring a root duplicate', t => {
+  const project = newStudioAiProject(t, { git: false });
+  fs.mkdirSync(path.join(project, 'src', 'assets'));
+  fs.writeFileSync(path.join(project, 'src', 'assets', 'picture.svg'), '<svg/>');
+  const main = path.join(project, 'src', 'main.js');
+  fs.writeFileSync(main, "const art = new URL('./assets/picture.svg', import.meta.url);\n");
+  const plan = planPreviewBuild(project);
+  assert.equal(plan.status, 'READY', plan.reasonCode);
+  const built = buildPreview(plan);
+  assert.equal(built.status, 'BUILT', built.reasonCode);
+  t.after(() => built.cleanup());
+  assert.equal(fs.readFileSync(path.join(built.root, 'src', 'assets', 'picture.svg'), 'utf8'), '<svg/>');
+
+  fs.unlinkSync(path.join(project, 'src', 'assets', 'picture.svg'));
+  assert.equal(planPreviewBuild(project).reasonCode, 'PREVIEW_ASSET_MISSING');
+  fs.writeFileSync(path.join(project, 'src', 'assets', 'picture.svg'), '<svg/>');
+  fs.appendFileSync(main, "const missingDocumentArt = './assets/missing.svg';\n");
+  const blocked = planPreviewBuild(project);
+  assert.equal(blocked.status, 'BLOCKED');
+  assert.equal(blocked.reasonCode, 'PREVIEW_ASSET_MISSING');
+});
+
 test('a missing image declared by the native narrative asset manifest blocks staging', t => {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-preview-narrative-'));
   t.after(() => fs.rmSync(project, { recursive: true, force: true }));

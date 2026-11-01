@@ -40,6 +40,8 @@ The command prints `http://127.0.0.1:4173/` for local-only use, or the detected 
 
 Every invocation stages and verifies **fresh current** browser-native HTML/JS, assets and statically detectable referenced local files; a build/validation error stops rather than showing an older game. Dynamically constructed asset URLs cannot be exhaustively checked before launch: test these paths in the browser. Restart the command after source edits (no automatic watch in v1). Press `Ctrl+C` to close the server and delete only its owned temporary output. A port conflict or absent usable private adapter returns `BLOCKED`.
 
+Development-only `*.test.js`, `*.spec.js` (also `.mjs`) and `__tests__/` directories are excluded from the served distribution; browser code must not import them.
+
 The server exposes only the allowlisted built distribution, never the project root, `.ludory`, `.env`, source maps or ownership receipts. It requires an independently trusted, newly Studio-created project; imported or frozen games cannot be previewed through this command. Only standard browser-loadable static files are supported in v1: TypeScript and bare package imports need a separate build adapter. An author-owned asset inside a public asset directory is considered public on `--lan`.
 
 LAN mode uses ordinary HTTP on a private IP, not HTTPS. Runtime's save checksum has an offline SHA-256 fallback for browsers without Web Crypto on that origin; this protects against accidental save corruption but does **not** encrypt network traffic or make the origin secure.
