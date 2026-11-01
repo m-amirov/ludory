@@ -8,6 +8,8 @@ const score = document.querySelector('#score');
 const status = document.querySelector('#status');
 const errorLabel = document.querySelector('#error');
 const buttons = [...document.querySelectorAll('#controls button')];
+const restoreButton = document.querySelector('#restore');
+const rewardNotice = document.querySelector('#reward-notice');
 
 const beep = (() => {
   const sampleRate = 8000;
@@ -104,6 +106,7 @@ async function boot() {
     if (event.type === 'status') {
       status.textContent = event.status;
       status.dataset.host = event.status;
+      restoreButton.disabled = event.status !== 'READY';
     }
   });
   await host.initialize();
@@ -129,8 +132,10 @@ async function boot() {
   document.querySelector('#fullscreen-ad').onclick = () => run('fullscreen-ad', () => ads.showFullscreen());
   document.querySelector('#rewarded-ad').onclick = () => run('rewarded-ad', async () => {
     status.dataset.rewarded = 'false';
+    rewardNotice.textContent = 'Rewarded ad: not confirmed';
     const result = await ads.showRewarded();
     status.dataset.rewarded = String(result.rewarded === true);
+    if (result.rewarded === true) rewardNotice.textContent = 'Rewarded ad: SDK confirmed (no prize credited)';
   });
   window.addEventListener('pagehide', event => {
     if (event.persisted) return;
@@ -142,6 +147,7 @@ async function boot() {
     });
   });
   buttons.forEach(button => { button.disabled = false; });
+  restoreButton.disabled = host.getStatus() !== 'READY';
   status.dataset.sdkReady = 'true';
 }
 

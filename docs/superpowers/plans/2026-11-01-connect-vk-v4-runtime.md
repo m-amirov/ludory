@@ -41,7 +41,7 @@
 - [x] Run `node --import ./packages/studio/test/setup-trust-env.mjs packages/studio/test/vk-template.test.mjs` and confirm missing feature failure.
 - [x] Add pinned Bridge dependency, dual esbuild build, Studio catalog descriptor/profile wiring, 35-character check and checked-in assets.
 - [x] Re-run focused tests; verify both build output buffers repeat identically, SDK is isolated, and modified bytes fail verification.
-- [ ] Commit this coherent feature increment.
+- [x] Commit this coherent feature increment (combined with Task 2 and Task 3 in local V4 commit `20e1e59`).
 
 ### Task 2: Safe VK game entrypoint and wide/mobile UI
 
@@ -54,7 +54,7 @@
 - [x] Write failing static/behavior tests for exact local imports, explicit init, no Yandex leaks, fail-closed state and responsive CSS requirements.
 - [x] Confirm RED, implement minimal game input, renderer, host, storage, lifecycle, ads, sound and controls; reject non-VK game manifest.
 - [x] Confirm GREEN in focused tests and `npm run check`.
-- [ ] Commit this coherent increment.
+- [x] Commit this coherent increment (combined local V4 commit `20e1e59`).
 
 ### Task 3: Browser contract smoke and CI gates
 
@@ -67,5 +67,12 @@
 - [x] Add failing Chromium smoke for desktop 1000×720 and Pixel 7 emulation, boot failure, save/restore, manual/VK/ad pause, false/true reward, responsive controls.
 - [x] Run focused browser smoke and confirm RED for the missing behavior.
 - [x] Wire the browser entrypoint and CI path filters/commands to make the tests GREEN; retain clear emulation/contract labels.
-- [ ] Run `npm run check:vk-template`, `npm run check`, `npm test`, browser smoke, `node examples/core-session.mjs`, and `git diff --check`; report any pre-existing environment-only failures explicitly.
-- [ ] Commit coherent browser/CI integration and prepare a PR; do not merge without owner approval.
+- [x] Run `npm run check:vk-template`, `npm run check`, `npm test`, browser smoke, `node examples/core-session.mjs`, and `git diff --check`; report any pre-existing environment-only failures explicitly.
+- [x] Commit coherent browser/CI integration (local V4 commit `20e1e59`); remote PR remains pending the owner's push/PR authorization.
+
+## Verification and review note
+
+- Full Node suite: 823 PASS / 13 SKIP / 0 FAIL, followed by quality integration 18 PASS. `npm run check`, `npm run check:vk-template`, Core example and focused fake-Bridge Chromium desktop/Android smoke passed locally.
+- Restricted-sandbox Node subprocess handling reports `EPERM` even for a Git child that exits `0`; in that mode five unrelated AI/Studio test files fail. The same full test suite ran green in the approved nonrestricted execution mode. No AI/Studio source was changed to work around the sandbox.
+- Independent read-only review found no Critical or Important issues, but two initially Minor UX issues were regraded Important for normal player-visible behavior: Restore was actionable while invalid, and rewarded acknowledgement was invisible. Both were verified RED→GREEN in the browser smoke; a separate mutation check proved stale previous-success UI is caught on a later failed ad.
+- Live VK SDK/device, actual watched ads, publication, moderation and remote CI are **NOT_RUN** at this local commit. Do not merge without fresh exact-HEAD CI, review and separate owner authorization.

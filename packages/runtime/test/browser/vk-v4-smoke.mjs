@@ -107,12 +107,17 @@ async function runVariant(browser, config, label, url) {
   try {
     await page.goto(url, { waitUntil: 'load' });
     await page.locator('#status[data-sdk-ready="true"][data-host="READY"]').waitFor();
+    assert.equal(await page.locator('#restore').isEnabled(), true, 'Restore is legal before Start');
     await responsive(page);
+    assert.equal(await page.locator('#reward-notice').count(), 1, 'Ad acknowledgement must be visibly labelled');
+    assert.match(await page.locator('#reward-notice').textContent(), /not confirmed/i);
     assert.deepEqual(await page.evaluate(() => __vkTest.calls.map(call => call.method)), ['VKWebAppInit']);
     assert.equal(await page.evaluate(() => __vkTest.ads.length), 0, 'Ads must not show automatically');
 
     await page.locator('#start').click();
     await hostStatus(page, 'RUNNING');
+    assert.equal(await page.locator('#restore').isDisabled(), true,
+      'Restore must not offer an invalid transition during gameplay');
     if (label === 'Android emulation') await page.locator('#game').tap();
     else await page.locator('#game').click();
     await page.waitForFunction(() => document.querySelector('#score')?.textContent === '1');
@@ -142,12 +147,22 @@ async function runVariant(browser, config, label, url) {
     await page.evaluate(() => __vkTest.ads.at(-1).resolve({ result: false }));
     await operation(page, 'rewarded-ad', 'error');
     assert.equal(await page.locator('#status').getAttribute('data-rewarded'), 'false');
+    assert.match(await page.locator('#reward-notice').textContent(), /not confirmed/i);
     await hostStatus(page, 'RUNNING');
     await page.locator('#rewarded-ad').click();
     await hostStatus(page, 'PAUSED');
     await page.evaluate(() => __vkTest.ads.at(-1).resolve({ result: true }));
     await operation(page, 'rewarded-ad');
     assert.equal(await page.locator('#status').getAttribute('data-rewarded'), 'true');
+    assert.match(await page.locator('#reward-notice').textContent(), /SDK confirmed.*no prize credited/i);
+    await hostStatus(page, 'RUNNING');
+    await page.locator('#rewarded-ad').click();
+    await hostStatus(page, 'PAUSED');
+    await page.evaluate(() => __vkTest.ads.at(-1).resolve({ result: false }));
+    await operation(page, 'rewarded-ad', 'error');
+    assert.equal(await page.locator('#status').getAttribute('data-rewarded'), 'false');
+    assert.match(await page.locator('#reward-notice').textContent(), /not confirmed/i,
+      'A previous successful ad must not label a later failed attempt as successful');
     await hostStatus(page, 'RUNNING');
 
     await page.locator('#save').click();
@@ -156,6 +171,7 @@ async function runVariant(browser, config, label, url) {
     assert.equal(Object.keys(saved).length, 1, 'Only one VK-scoped save key is used');
     await page.reload({ waitUntil: 'load' });
     await hostStatus(page, 'READY');
+    assert.equal(await page.locator('#restore').isEnabled(), true, 'Reload permits restore before Start');
     await page.locator('#restore').click();
     await operation(page, 'restore');
     assert.equal(await page.locator('#score').textContent(), '1');

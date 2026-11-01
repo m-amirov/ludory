@@ -75,6 +75,6 @@ npm run build:vk-template
 npm run check:vk-template
 ```
 
-The starter UI has pointer/touch/keyboard scoring, audio, explicit manual pause, VK cloud save/restore and separate fullscreen/rewarded buttons. The visible `rewarded=true` flag is **only** the strict response of one rewarded SDK call; the starter never grants a real prize or claims verified ad watching. A missing/rejected Bridge prevents Start and shows a bootstrap error.
+The starter UI has pointer/touch/keyboard scoring, audio, explicit manual pause, VK cloud save/restore and separate fullscreen/rewarded buttons. Restore is enabled only before Start (reload the game to restore a saved score). The visible rewarded-ad acknowledgement is **only** the strict response of one rewarded SDK call and explicitly credits **no prize**; the starter never grants a real reward or claims verified ad watching. A missing/rejected Bridge prevents Start and shows a bootstrap error.
 
 `npm run smoke:vk-v4` from `packages/runtime/test/browser` uses local, fake-Bridge Chromium with desktop 1000×720 and Android viewport emulation. This is a **contract smoke**, not a physical Android test or live VK acceptance. SDK/device advertising, upload, moderation, publication, Release PASS and candidate ZIP packaging remain **NOT_RUN** and need separate owner-authorized steps.
