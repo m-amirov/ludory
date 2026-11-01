@@ -80,7 +80,8 @@ test('P3b staging path is never an arbitrary host directory', t => {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const capability = probeQaDockerIsolation({ imageRef, platform: 'linux', execute: mockDocker });
   const stage = { root: os.homedir(), target: 'yandex-games', candidateSha256: 'c'.repeat(64) };
-  assert.equal(planQaDockerInvocation({ stage, imageRef, capability }).reasonCode, 'QA_BROWSER_STAGING_PATH_UNSAFE');
+  assert.equal(planQaDockerInvocation({ stage, imageRef, capability }).reasonCode,
+    process.platform === 'linux' ? 'QA_BROWSER_STAGING_PATH_UNSAFE' : 'QA_BROWSER_LINUX_ISOLATION_REQUIRED');
   assert.equal(planQaDockerInvocation({ stage: { ...stage, root }, imageRef, capability }).status,
     process.platform === 'linux' ? 'INVOCATION_PLANNED' : 'BLOCKED');
 });
