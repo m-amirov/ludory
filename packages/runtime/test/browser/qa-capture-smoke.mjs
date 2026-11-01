@@ -163,3 +163,18 @@ test('P3b marks failed declared assertion as an issue, not a successful game tes
     assert.equal(result.releaseReady, false);
     assert.equal(result.publicationAllowed, false);
   });
+
+test('P3b cannot claim PASS from hidden DOM text',
+  { timeout: 90000 }, async t => {
+    const data = fixture(t, 'vk-games', { injectedScript:
+      "document.body.insertAdjacentHTML('beforeend', '<p id=secret hidden>Private hidden answer</p>');" });
+    t.after(() => fs.rmSync(data.outputDir, { recursive: true, force: true }));
+    const flowPath = path.join(data.dir, 'flow.json');
+    fs.writeFileSync(flowPath, JSON.stringify({ schemaVersion: 1, target: data.target,
+      candidateSha256: sha(data.bytes),
+      steps: [{ kind: 'expect-text', selector: '#secret', text: 'Private hidden answer' }] }));
+    const result = await captureTrustedCandidate({ ...data, flowPath, trusted: true, timeoutMs: 1000 });
+    assert.equal(result.status, 'ISSUES_FOUND', JSON.stringify(result, null, 2));
+    assert.ok(result.cases.every(row => row.interaction?.status === 'FAIL'));
+    assert.ok(result.cases.every(row => row.observedIssues?.includes('INTERACTION_FLOW_FAILED')));
+  });
