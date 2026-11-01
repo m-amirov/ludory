@@ -41,7 +41,8 @@ function validateOutput(outputDir, archivePath, stagedRoot) {
 /**
  * Explicit opt-in Playwright capture for an owner-trusted candidate.
  * No Docker, container isolation, SDK host or moderation authority.
- * Only STARTUP is observed: saves, monetization and gameplay routes remain NOT_RUN.
+ * Default observation is startup-only; a SHA-bound declarative flow can test
+ * specified UI states. Undeclared interactions, real SDK and moderation remain NOT_RUN.
  */
 export async function captureTrustedCandidate({
   target, archivePath, receiptPath, sdkEvidencePath, rightsPath, metadataPath, promoRoot,
@@ -138,7 +139,7 @@ export async function captureTrustedCandidate({
           browser: engine, screenshot, dom, pageErrors, consoleErrors, httpFailures: failures,
           blockedRequests, observedIssues, mobileEmulation,
           sdk: 'LIVE_NOT_TESTED', physicalDevice: false,
-          actions: ['navigate', ...(flow ? flow.steps.map(s => s.kind) : []), 'inspect-dom', 'screenshot'],
+          actions: ['navigate', 'inspect-dom', ...interaction.steps.map(s => s.kind), 'screenshot'],
           interaction, gameplayRoutes: flow ? 'DECLARED_STEPS_ONLY' : 'NOT_RUN',
           saveReload: 'NOT_RUN', audioFocus: 'NOT_RUN' });
       } catch (error) {
