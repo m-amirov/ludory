@@ -1,26 +1,27 @@
-# Ludory P3b — isolated browser QA and evidence capture (implementation plan)
+# Ludory P3b — Playwright browser QA and evidence capture
 
-Date: 2026-11-01. Base: main after PR #62 (P3a). Owner-approved P3 design: `docs/superpowers/specs/2026-11-01-qa-moderation-simulation-design.md`.
+Date: 2026-11-01. Base: main after PR #62 (P3a).
+Owner decision: **no Docker and no mandatory OS/container isolation**. Run only owner-authorized Ludory-built candidates with ordinary Playwright browsers.
 
-## Goal and non-goals
+## Goal and boundaries
 
-Opt-in browser observations of the *exact* already-built, independently verified Yandex/VK candidate ZIP. Collect deterministic, hash-bound functional results and original screenshots for P3c. No source or ZIP mutation, platform access, live SDK, publication, or implicit external network. Failure to provide a genuinely isolated browser environment is `BLOCKED`, never a downgraded sandbox or synthetic PASS.
+Run an explicitly authorized, already-built Yandex/VK candidate in Playwright and collect bounded UI/functional evidence tied to the exact original ZIP SHA-256. Support Windows and Linux. No publication, moderation submission, new server infrastructure, paid API, or changes to game source/ZIP.
 
-## Trust model and implementation steps
+Playwright runs game JavaScript on the host and **is not a security boundary**. Only use on builds the operator trusts. No automatic execution as part of read-only `ludory qa simulate`. Launch requires a separate explicit command. Browser profiles must be temporary and not reuse personal profiles or browser credentials. Default test network handling should avoid unnecessary external calls and explicitly report SDK mocks; no claim that network filtering is OS isolation.
 
-1. **P3b.1 — immutable candidate staging (TDD).** Add a bounded archive-to-temporary-directory staging function. Reuse the existing Release stored-ZIP parser, its CRC/path and candidate SHA checks, and read the complete ZIP a second time immediately before staging. Refuse a changed or mismatched SHA. Unpack only validated files, without symlinks, permissions wider than owner, preexisting destinations, or arbitrary path traversal. Verify staged bytes against each receipt member. Cleanup checks the temp directory's original identity and is idempotent. Inputs and original ZIP are never changed. Include positive Yandex/VK tests and negative tests for SHA mismatch, unsafe paths and missing/corrupt ZIP.
-2. **P3b.2 — isolated execution contract.** No generic `playwright.chromium.launch({args:['--no-sandbox']})` from the host as security isolation. Run the staged game in a separately provided verified OS/container sandbox that disables outbound network, does not mount user secrets or repo workspace, uses its own unprivileged identity and resource/time limits, and serves only staged public assets on loopback *inside that sandbox*. Use strict capability attestation; unavailable or unverifiable sandbox => `BLOCKED/QA_BROWSER_ISOLATION_UNAVAILABLE`. Playwright context restrictions and request routing are defense-in-depth only.
-3. **P3b.3 — bounded functional observation.** Only for an authorized current candidate, exercise startup, declared routes or safe deterministic test actions, runtime exceptions, console errors, blocked external requests, screenshots, orientation, viewport, controls, reload/saves, and focus/audio if observable. No clicking an arbitrary game's outbound URLs. Explicitly label mock SDK and mobile emulation. Do not claim to have traversed branches without action coverage.
-4. **P3b.4 — evidence ownership.** Artifact manifest: schema version, target, candidate SHA, rule-pack revision, runner ID/version and isolation attestations, browser engine/version, per-step viewport/DPR/timeouts, actions, observations, original PNG dimensions/hash, screenshot file paths and checksums. Output to an explicit new directory *outside* project/ZIP directories; no overwrite. Hash the complete serialized manifest; scrub credentials and disallow external URL fetches. Run-generated evidence is non-authoritative after it leaves the runner; `simulateModeration()` must not convert a user-supplied JSON `source:MACHINE_OBSERVED` to PASS.
-5. **P3b.5 — integration and gates.** Add optional CLI browser mode only when isolation is attested and the current ZIP is bound to the original P3a candidate hash. Preserve P3a's read-only behavior as default and constant `releaseReady:false`, `publicationAllowed:false`, `actualModeration:'NOT_RUN'`. Browser observations may clear only their own scope; subjective visual, content and promo review remain BLOCKED until P3c. Add Windows/Linux unavailable-sandbox tests, malicious candidate inputs, stale/replaced archive tests, clean lifecycle/cleanup tests, deterministic evidence checks, and independent review.
+## Implementation slices
 
-## Verification and release gates
+1. **P3b.1 — verified candidate staging.** Preserve reusable strict stored ZIP parser and `stageQaCandidate()`, candidate SHA-256/CRC/path/size validation, a private temporary directory, file hash revalidation, and ownership-safe cleanup. No browser launches on this step.
+2. **P3b.2 — Playwright launch (no Docker).** Implement opt-in, cross-platform Playwright capture for trusted candidates. Serve only the staged build on a loopback HTTP listener (existing preview server where applicable, otherwise a focused read-only server with the same path protections). Use fresh Playwright context, no inherited profile, bounded waits, `finally` cleanup, and current-candidate SHA validation. Missing Playwright/browser binaries or unavailable local listener -> `BLOCKED`, not an invented pass. Platform SDKs are locally mocked only when a known test fixture provides an explicit mock; otherwise record untested host functionality.
+3. **P3b.3 — browser observations.** Record startup, page errors and console errors, HTTP failures, viewport/orientation, scroll and reachability, screenshots at desktop and mobile emulation, and only known safe game actions where available. Real-device and live SDK checks remain `NOT_RUN`. Avoid arbitrary click-through outside game origin.
+4. **P3b.4 — bounded evidence.** Manifest includes candidate SHA-256, target, runner/browser versions, case ID, viewport and DPR, exact actions, errors, original PNG dimensions/hash, screenshot paths and evidence digest. Explicit output directory must be fresh and outside game/ZIP; never overwrite. A user-edited JSON receipt cannot attest browser observation on its own.
+5. **P3b.5 — integration and gates.** Add a separate opt-in CLI command; leave P3a read-only and unchanged by default. Respect `releaseReady:false`, `publicationAllowed:false` and `actualModeration:'NOT_RUN'`. Subjective visual/content/promo review remains `BLOCKED` until independent P3c.
 
-- `npm test`, `npm run check`, `node examples/core-session.mjs`, target browser smoke and new security-negative tests must pass.
-- Run the exact PR HEAD on GitHub CI for Ubuntu and Windows Node 22/24, plus browser workflow.
-- No trust expansion or runtime publication commands; do not merge before security review and user approval.
-- Physical-device testing, real platform SDK and actual moderation intentionally remain NOT_RUN.
+## Acceptance tests
 
-## Engineering note
+- Unit/regression: valid Yandex/VK candidates, wrong SHA, missing/corrupt ZIP, missing browser, unexpected HTTP/network requests, cleanup after timeout, error capture, screenshot file hashes, archive source immutability.
+- Browser: Chromium desktop and Android emulation; WebKit emulated iPhone where locally available. Windows and Linux should not require Docker.
+- `npm test`, `npm run check`, `node examples/core-session.mjs`, Playwright smoke and GitHub CI on exact PR HEAD all pass.
+- Independent review before merge. PR stays Draft until tests and code review are complete; merge only with owner's approval.
 
-P3b.1 may be reviewed and merged independently as a non-executing safe-staging slice. Do not attempt P3b.2 until the process/container security boundary is demonstrably enforceable in supported environments. In particular, `--no-sandbox` is not a valid substitute for the required external containment.
+No existing games are migrated or edited and no actual platform approval can be inferred.
