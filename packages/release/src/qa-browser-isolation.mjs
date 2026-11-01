@@ -7,6 +7,8 @@ import { SHA_256 } from './archive.mjs';
 const imagePattern = /^([a-z0-9.-]+(?::[0-9]+)?\/[a-z0-9._/-]+)@sha256:([a-f0-9]{64})$/;
 const block = reasonCode => Object.freeze({ status: 'BLOCKED', reasonCode });
 const fixedRunner = '/usr/local/bin/ludory-qa-runner';
+// Only objects produced by this module's successful local probe can plan a run.
+const probedCapabilities = new WeakSet();
 
 /** A security preflight, NOT an attestation that a browser ran or that screenshots exist.
  * No Docker pulls, containers, network requests or game execution happen here. */
@@ -39,15 +41,18 @@ export function probeQaDockerIsolation({ imageRef, platform = process.platform,
   }
   const osName = check(['image', 'inspect', imageRef, '--format', '{{json .Os}}']);
   if (osName !== 'linux') return block('QA_BROWSER_IMAGE_PLATFORM_INVALID');
-  return Object.freeze({ status: 'CAPABILITY_CONFIRMED', isolation: 'ROOTLESS_DOCKER',
+  const capability = Object.freeze({ status: 'CAPABILITY_CONFIRMED', isolation: 'ROOTLESS_DOCKER',
     imageRef, network: 'none', imagePulled: false, browserExecuted: false });
+  probedCapabilities.add(capability);
+  return capability;
 }
 
 /** Prepare an immutable, security-restricted invocation for the future P3b
  * runner image. The caller must pass a stageQaCandidate() result, never a
  * game source directory. Does not spawn Docker or run browser code. */
 export function planQaDockerInvocation({ stage, imageRef, capability } = {}) {
-  if (capability?.status !== 'CAPABILITY_CONFIRMED' ||
+  if (!capability || !probedCapabilities.has(capability) ||
+      capability?.status !== 'CAPABILITY_CONFIRMED' ||
       capability.imageRef !== imageRef || capability.isolation !== 'ROOTLESS_DOCKER') {
     return block('QA_BROWSER_ISOLATION_UNAVAILABLE');
   }
