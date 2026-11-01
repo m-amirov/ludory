@@ -121,3 +121,23 @@ test('Studio QA CLI returns exit 2 for an absent VK candidate instead of claimin
   assert.equal(result.report.checks.find(row => row.id === 'archive').reasonCode, 'INPUT_MISSING');
   assert.deepEqual(result.report.findings, []);
 });
+
+test('Studio QA capture is explicit, asynchronous and fails closed before browser execution', async t => {
+  const data = await fixture(t, 'vk-games');
+  let stdout = '', stderr = '';
+  const outputDir = path.join(os.tmpdir(), 'ludory-qa-capture-not-created-' + path.basename(data.folder));
+  const args = ['qa', 'capture', '--target', 'vk-games', '--archive', path.join(data.folder, 'missing.zip'),
+    '--receipt', data.receiptPath, '--output', outputDir, '--json'];
+  const missingTrust = runCli(args, { out: s => { stdout += s; }, err: s => { stderr += s; } });
+  assert.equal(missingTrust, 1);
+  assert.match(stderr, /--trusted/);
+  stdout = ''; stderr = '';
+  const code = await runCli([...args, '--trusted'], { out: s => { stdout += s; }, err: s => { stderr += s; } });
+  assert.equal(code, 2, stderr);
+  const report = JSON.parse(stdout);
+  assert.equal(report.status, 'BLOCKED');
+  assert.equal(report.reasonCode, 'QA_CANDIDATE_UNVERIFIED');
+  assert.equal(report.releaseReady, false);
+  assert.equal(report.publicationAllowed, false);
+  assert.equal(fs.existsSync(outputDir), false);
+});
