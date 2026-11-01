@@ -10,6 +10,10 @@ import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { buildVkCandidate, validateVkCandidatePath } from '../../../scripts/build-vk-candidate.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+const sameDirectory = (directory, identity) => {
+  const current = fs.statSync(directory, { bigint: true });
+  return current.dev === identity.dev && current.ino === identity.ino;
+};
 const options = { id: 'vk-candidate', title: 'VK Candidate', lang: 'en', version: '1.0.0',
   profile: 'web-game', template: 'vk-runtime', targets: ['vk-games'] };
 
@@ -170,10 +174,11 @@ test('VK candidate packages the exact previously validated managed bytes across 
   const { game, zip } = fixture(t);
   const bridge = path.join(game, 'assets/vk-bridge.js');
   const trusted = fs.readFileSync(bridge);
+  const assetsIdentity = fs.statSync(path.join(game, 'assets'), { bigint: true });
   const original = fs.readdirSync;
   let changed = false;
   fs.readdirSync = function (directory, ...args) {
-    if (!changed && path.resolve(directory) === path.join(game, 'assets')) {
+    if (!changed && sameDirectory(directory, assetsIdentity)) {
       changed = true;
       fs.writeFileSync(bridge, 'globalThis.fakeBridge = true;');
     }
@@ -192,10 +197,11 @@ test('VK candidate does not redirect the output into the game if the output pare
   const parent = path.join(base, 'outside');
   fs.mkdirSync(parent);
   const output = path.join(parent, 'candidate.zip');
+  const assetsIdentity = fs.statSync(path.join(game, 'assets'), { bigint: true });
   const original = fs.readdirSync;
   let changed = false;
   fs.readdirSync = function (directory, ...args) {
-    if (!changed && path.resolve(directory) === path.join(game, 'assets')) {
+    if (!changed && sameDirectory(directory, assetsIdentity)) {
       changed = true;
       fs.renameSync(parent, path.join(base, 'moved-parent'));
       fs.symlinkSync(game, parent, 'dir');
