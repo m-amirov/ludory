@@ -247,3 +247,18 @@ test('P3b recognizes a canvas-only Phaser-style startup without visible DOM text
     assert.ok(result.cases.every(item => item.dom?.visibleSurfaceCount === 1));
     assert.equal(result.actualModeration, 'NOT_RUN');
   });
+
+test('P3b never matches hidden descendant text inside a visible scene container',
+  { timeout: 90000 }, async t => {
+    const data = fixture(t, 'vk-games', { injectedScript:
+      'document.querySelector("#game").innerHTML = "Chapter 1<span hidden>Chapter 2</span>";' });
+    t.after(() => fs.rmSync(data.outputDir, { recursive: true, force: true }));
+    const flowPath = path.join(data.dir, 'flow.json');
+    fs.writeFileSync(flowPath, JSON.stringify({ schemaVersion: 1, target: data.target,
+      candidateSha256: sha(data.bytes),
+      steps: [{ kind: 'expect-text', selector: '#game', text: 'Chapter 2' }] }));
+    const result = await captureTrustedCandidate({ ...data, flowPath, trusted: true, timeoutMs: 3000 });
+    assert.equal(result.status, 'ISSUES_FOUND', JSON.stringify(result, null, 2));
+    assert.ok(result.cases.every(row => row.interaction?.status === 'FAIL'));
+    assert.ok(result.cases.every(row => row.observedIssues?.includes('INTERACTION_FLOW_FAILED')));
+  });
