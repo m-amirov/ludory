@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { zipSync } from 'fflate';
-import { captureTrustedCandidate } from './qa-capture.mjs';
+import { captureTrustedCandidate } from '@ludory/studio/qa-capture';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const targets = ['yandex-games', 'vk-games'];
