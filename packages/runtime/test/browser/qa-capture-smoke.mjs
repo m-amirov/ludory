@@ -202,3 +202,31 @@ renderRoute();` });
     assert.ok(result.cases.every(row => row.interaction?.status === 'PASS'));
     assert.ok(result.cases.every(row => row.interaction.steps[2].kind === 'browser-back'));
   });
+
+test('P3b detects horizontal overflow introduced only after a declared gameplay action',
+  { timeout: 90000 }, async t => {
+    const data = fixture(t, 'vk-games', { injectedScript: `
+document.body.insertAdjacentHTML('beforeend', '<button id="expand">Expand</button><div id="wide"></div>');
+document.querySelector('#expand').onclick = () => {
+  const wide = document.querySelector('#wide');
+  wide.style.width = '2400px';
+  wide.textContent = 'Expanded gameplay panel';
+};` });
+    t.after(() => fs.rmSync(data.outputDir, { recursive: true, force: true }));
+    const flowPath = path.join(data.dir, 'overflow-flow.json');
+    fs.writeFileSync(flowPath, JSON.stringify({
+      schemaVersion: 1, target: data.target, candidateSha256: sha(data.bytes),
+      steps: [
+        { kind: 'click', selector: '#expand' },
+        { kind: 'expect-text', selector: '#wide', text: 'Expanded gameplay panel' },
+      ],
+    }));
+    const result = await captureTrustedCandidate({ ...data, flowPath, trusted: true });
+    assert.equal(result.status, 'ISSUES_FOUND', JSON.stringify(result, null, 2));
+    assert.ok(result.cases.every(item => item.interaction.status === 'PASS'));
+    assert.ok(result.cases.every(item => item.initialDom.scrollWidth <= item.initialDom.clientWidth + 2));
+    assert.ok(result.cases.every(item => item.dom.scrollWidth > item.dom.clientWidth + 2));
+    assert.ok(result.cases.every(item => item.observedIssues.includes('HORIZONTAL_OVERFLOW')));
+    assert.equal(result.releaseReady, false);
+    assert.equal(result.publicationAllowed, false);
+});
