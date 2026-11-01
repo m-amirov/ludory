@@ -51,6 +51,7 @@ export function probeQaDockerIsolation({ imageRef, platform = process.platform,
  * runner image. The caller must pass a stageQaCandidate() result, never a
  * game source directory. Does not spawn Docker or run browser code. */
 export function planQaDockerInvocation({ stage, imageRef, capability } = {}) {
+  if (process.platform !== 'linux') return block('QA_BROWSER_LINUX_ISOLATION_REQUIRED');
   if (!capability || !probedCapabilities.has(capability) ||
       capability?.status !== 'CAPABILITY_CONFIRMED' ||
       capability.imageRef !== imageRef || capability.isolation !== 'ROOTLESS_DOCKER') {
