@@ -123,3 +123,25 @@ test('P3b flow evidence must carry the exact declared flow hash and observed res
   data.write();
   assert.equal(verifyQaCaptureIntegrity(data.expected).reasonCode, 'QA_EVIDENCE_CASE_CONTRADICTION');
 });
+
+test('P3b rejects aggregate flow PASS with a failed, empty or inconsistent step list', t => {
+  const data = fixture(t);
+  data.manifest.flowSha256 = 'c'.repeat(64);
+  data.manifest.observedScope = 'STARTUP_AND_DECLARED_FLOW';
+  for (const entry of data.manifest.cases) {
+    entry.interaction = { status: 'PASS', evidenceSha256: 'c'.repeat(64),
+      steps: [{ index: 0, kind: 'expect-text', status: 'PASS', reasonCode: 'QA_FLOW_STEP_OBSERVED' }] };
+  }
+  data.write();
+  assert.equal(verifyQaCaptureIntegrity(data.expected).status, 'INTEGRITY_VERIFIED');
+  data.manifest.cases[0].interaction.steps[0].status = 'FAIL';
+  data.write();
+  assert.equal(verifyQaCaptureIntegrity(data.expected).reasonCode, 'QA_EVIDENCE_CASE_CONTRADICTION');
+  data.manifest.cases[0].interaction.steps = [];
+  data.write();
+  assert.equal(verifyQaCaptureIntegrity(data.expected).reasonCode, 'QA_EVIDENCE_CASE_CONTRADICTION');
+  data.manifest.cases[0].interaction.steps = [
+    { index: 2, kind: 'click', status: 'PASS', reasonCode: 'QA_FLOW_STEP_OBSERVED' }];
+  data.write();
+  assert.equal(verifyQaCaptureIntegrity(data.expected).reasonCode, 'QA_EVIDENCE_CASE_CONTRADICTION');
+});
