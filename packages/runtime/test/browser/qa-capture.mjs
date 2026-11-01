@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import { simulateModeration, stageQaCandidate } from '../../../release/src/index.mjs';
+import { simulateModeration, stageQaCandidate, verifyQaCaptureIntegrity } from '../../../release/src/index.mjs';
 import { startPreviewServer } from '../../../studio/src/preview-server.mjs';
 import { readQaFlow, runQaFlow } from './qa-flow.mjs';
 
@@ -160,7 +160,16 @@ export async function captureTrustedCandidate({
       releaseReady: false, publicationAllowed: false, outputDirectory: output };
     const encoded = Buffer.from(JSON.stringify(report, null, 2) + '\n');
     fs.writeFileSync(path.join(output, 'capture.json'), encoded, { flag: 'wx', mode: 0o600 });
-    return { ...report, reportSha256: sha256(encoded) };
+    const reportSha256 = sha256(encoded);
+    const integrity = verifyQaCaptureIntegrity({ evidenceDir: output, target,
+      candidateSha256: local.candidateSha256, reportSha256 });
+    if (integrity.status !== 'INTEGRITY_VERIFIED') {
+      return { ...blocked('QA_EVIDENCE_POSTWRITE_VERIFICATION_FAILED'),
+        target, candidateSha256: local.candidateSha256,
+        integrityReasonCode: integrity.reasonCode ?? 'QA_EVIDENCE_UNKNOWN' };
+    }
+    return { ...report, reportSha256, evidenceIntegrity: integrity.status,
+      browserAttested: false };
   } catch (error) {
     return { ...blocked('QA_BROWSER_CAPTURE_FAILED'), target,
       message: String(error.code ?? error.message).slice(0, 200) };
