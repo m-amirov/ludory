@@ -63,6 +63,8 @@ test('P3b sandbox invocation excludes workspace, credentials, networking, privil
   assert.doesNotMatch(cmd, /--privileged|--network=host|\/var\/run\/docker\.sock|\/home\/|--env-file/);
   assert.deepEqual(result.args.slice(-5), [imageRef, '--candidate-sha256', stage.candidateSha256, '--target', stage.target]);
   assert.equal(planQaDockerInvocation({ stage, imageRef, capability: null }).status, 'BLOCKED');
+  assert.equal(planQaDockerInvocation({ stage, imageRef, capability: { ...capability } }).reasonCode,
+    'QA_BROWSER_ISOLATION_UNAVAILABLE', 'JSON-copied proof must be rejected');
   assert.equal(planQaDockerInvocation({ stage: { ...stage, root: root + '-missing' }, imageRef, capability }).status, 'BLOCKED');
   assert.equal(planQaDockerInvocation({ stage, imageRef: imageRef.replace('a'.repeat(64), 'c'.repeat(64)), capability }).status,
     'BLOCKED');
