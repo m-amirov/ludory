@@ -4,6 +4,9 @@ const scenes = {
   river: { text: 'A boat waits in the moonlight.', choices: [['Start again', 'start']] },
 };
 
+document.documentElement.dataset.mobilePreference =
+  document.querySelector('meta[name="ludory-mobile-orientation"]')?.content === 'portrait' ? 'portrait' : 'auto';
+
 function showScene(id) {
   const scene = scenes[id];
   document.getElementById('line').textContent = scene.text;

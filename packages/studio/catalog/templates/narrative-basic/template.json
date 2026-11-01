@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "narrative-basic",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Small branching dialogue demo playable locally",
   "profile": "narrative-game",
   "engine": "web",

@@ -50,6 +50,7 @@ test('renderer mounts safely, shows escaped text and emits finite normalized act
   await renderer.mount({ root, viewport: { width: 380, height: 720, dpr: 1, orientation: 'portrait' },
     snapshot: snapshot(initialState), dispatchInput: event => events.push(event) });
   assert.equal(root.children.length, 2); // scoped stylesheet plus game surface
+  assert.equal(root.children[1].dataset.mobilePreference, 'auto', 'existing callers retain auto preference');
   assert.equal(find(root, node => node.textContent === '<b>Здравствуй</b>').tagName, 'P');
   const next = find(root, node => node.dataset.action === 'narrative:next:intro');
   next.click();
@@ -61,6 +62,32 @@ test('renderer mounts safely, shows escaped text and emits finite normalized act
   next.click();
   assert.equal(events.length, 1);
   assert.equal(root.children.length, 0);
+});
+
+test('explicit portrait preference remains stable across viewport rotation and story input', async () => {
+  const { graph, catalog, initialState } = fixture();
+  const { root } = screen();
+  const events = [];
+  const renderer = createNarrativeRenderer({ graph, catalog, preferredMobileOrientation: 'portrait', now: () => 42 });
+  await renderer.mount({ root, viewport: { width: 320, height: 640, orientation: 'portrait' },
+    snapshot: snapshot(initialState), dispatchInput: event => events.push(event) });
+  const surface = root.children[1];
+  assert.equal(surface.dataset.mobilePreference, 'portrait');
+  assert.equal(surface.dataset.orientation, 'portrait');
+  renderer.resize({ width: 667, height: 375, orientation: 'landscape' });
+  assert.equal(surface.dataset.mobilePreference, 'portrait', 'preference is not device rotation');
+  assert.equal(surface.dataset.orientation, 'landscape');
+  find(root, node => node.dataset.action === 'narrative:next:intro').click();
+  assert.deepEqual(events.map(event => event.action), ['narrative:next:intro']);
+  await renderer.unmount();
+});
+
+test('renderer rejects unsupported mobile orientation preferences before mounting', () => {
+  const { graph, catalog } = fixture();
+  for (const preference of ['landscape', '', null, 1, {}, false]) {
+    assert.throws(() => createNarrativeRenderer({ graph, catalog, preferredMobileOrientation: preference }),
+      TypeError, `unsupported preference ${String(preference)} should fail`);
+  }
 });
 
 test('renderer photo, keepsake and guided message intent/tone/attachment preview', async () => {
