@@ -98,6 +98,31 @@ platform moderation. `browserAttested:false`,
 re-created by the file owner, so P3c must inspect original PNG pixels and
 use an independently evidenced review route before making subjective claims.
 
+## P3c.1: Source-bound packet for independent visual/content review
+
+`prepareQaReviewPacket({ target, archivePath, receiptPath, sdkEvidencePath,
+rightsPath, metadataPath, promoRoot, evidenceDir, reportSha256? })` prepares a
+**read-only**, target-specific packet from the exact local candidate ZIP,
+builder receipt, metadata, promo icon/cover and existing P3b `capture.json` +
+PNG screenshots. It reuses P3a and P3b integrity checks and rereads metadata
+and original promo bytes against the recorded hashes. No files are written.
+
+`READY_FOR_HANDOFF` means the packet contains three intact screenshot byte
+references and actual icon/cover file references, with exact hashes, a pinned
+policy-source list, user-declared listing and a fixed visual/content/promo rubric.
+It **does not** prove a browser captured the frames or that Web DEV received or
+looked at them. The caller must explicitly supply those actual image files to
+an independent image-capable Web DEV session and independently verify receipt
+provenance. If delivery is missing, the review remains **NOT_RUN**. A read-only
+packet is not an AI assessment or platform moderation receipt. P3a
+`ludory qa simulate` remains unchanged and BLOCKED for independent review.
+
+This initial P3c slice does **not** add any network transmissions, Web DEV
+invocations, paid API, new server, Docker, project writes, or upload/publication
+authority. `browserAttested:false`, `reviewProvenance:'NOT_RUN'`,
+`actualModeration:'NOT_RUN'`, `releaseReady:false` and
+`publicationAllowed:false` remain fixed even for `READY_FOR_HANDOFF`.
+
 ## P3a: Read-only pre-moderation QA simulation (Yandex / VK)
 
 Use `simulateModeration()` or the Studio command to inspect a **specific, already built** candidate. P3a does not run the game, open a browser, contact Yandex/VK, upload assets, submit to moderation, or mutate the ZIP/project. The owner must designate the candidate; a ZIP alone cannot independently prove Studio origin.
