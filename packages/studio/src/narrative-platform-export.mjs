@@ -186,7 +186,9 @@ export function materializeNarrativePlatformProjects(plan) {
         fs.copyFileSync(path.join(pin.root, filename), target, fs.constants.COPYFILE_EXCL);
       }
       const origin = verifyStudioOrigin(root);
-      if (!origin.ok || origin.project !== root) throw new Error(`F5B_TARGET_ORIGIN_${origin.code}`);
+      if (!origin.ok || origin.project !== canonicalPhysicalDirectory(root)) {
+        throw new Error(`F5B_TARGET_ORIGIN_${origin.code}`);
+      }
       const files = scanDerivedFiles(root);
       projects[key] = { root, target: spec.target, files, sha256: sha(Buffer.from(JSON.stringify(files))) };
     }
