@@ -1,10 +1,13 @@
 import './setup-trust-env.mjs';
 import test from 'node:test';
+import { qaDirectoryDurabilityAvailable } from './helpers/qa-review-durability.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { runCli } from '../src/cli.mjs';
 import { makeQaRepairFixture, makeQaRepairRecheck } from './helpers/qa-repair-fixture.mjs';
+
+const durableTest = qaDirectoryDurabilityAvailable ? test : test.skip;
 
 async function invoke(args) {
   let out = '';
@@ -28,7 +31,7 @@ test('help identifies explicit consent, status, round start and review record ac
   assert.match(result.out, /qa repair-record --output/);
 });
 
-test('repair preview never creates consent or probes Web; apply needs the explicit --repair flag', async t => {
+durableTest('repair preview never creates consent or probes Web; apply needs the explicit --repair flag', async t => {
   const f = await makeQaRepairFixture(t);
   const preview = await invoke(['qa', 'repair', ...args(f), '--json']);
   assert.equal(preview.code, 0, preview.err);
@@ -47,7 +50,7 @@ test('repair preview never creates consent or probes Web; apply needs the explic
   assert.equal(applied.hostCalls, 0);
 });
 
-test('recording a fresh reinspection is explicit and never called a moderation PASS', async t => {
+durableTest('recording a fresh reinspection is explicit and never called a moderation PASS', async t => {
   const f = await makeQaRepairFixture(t);
   await invoke(['qa', 'repair', ...args(f), '--repair', '--apply', '--json']);
   const next = await invoke(['qa', 'repair-next', '--output', f.repairOutput, '--apply', '--json']);
@@ -76,7 +79,7 @@ test('recording a fresh reinspection is explicit and never called a moderation P
     'RECHECK_RECORDED');
 });
 
-test('invalid flags and foreign sources fail without creating a repair session', async t => {
+durableTest('invalid flags and foreign sources fail without creating a repair session', async t => {
   const f = await makeQaRepairFixture(t);
   for (const extra of [['--secret'], ['--apply', '--apply'], ['--repair', '--unknown']]) {
     const result = await invoke(['qa', 'repair', ...args(f), ...extra, '--json']);

@@ -161,6 +161,12 @@ user-owned files, and disallows Studio ownership, protected configs, credentials
 rights and SDK/vendor files. Any unexpected edit produces `ESCALATE` and is
 preserved for inspection; there is **no automatic rollback**.
 
+Like P3c, P3d requires verified directory-entry fsync for durable consent and
+round events. On hosts that cannot provide it (often Windows Node), `--apply`
+must stop as `BLOCKED` before any agent handoff. Success-path contract tests
+run only when the actual test filesystem passes that durability probe; this
+does not mean a skipped Windows test is a successful repair operation.
+
 One `--repair --apply` consent authorizes **at most two** primary-agent repair
 rounds. Each `repair-next --apply` appends an exclusive durable intent before
 the agent edits. A started round is `PENDING_RECOVERY` on later status reads:

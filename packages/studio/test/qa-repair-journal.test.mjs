@@ -1,5 +1,6 @@
 import './setup-trust-env.mjs';
 import test from 'node:test';
+import { qaDirectoryDurabilityAvailable } from './helpers/qa-review-durability.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,6 +10,8 @@ import { beginQaRepair, inspectQaRepair, startQaRepairRound,
   completeQaRepairRound } from '../src/qa-repair-journal.mjs';
 import { makeQaRepairFixture, makeQaRepairRecheck } from './helpers/qa-repair-fixture.mjs';
 
+const durableTest = qaDirectoryDurabilityAvailable ? test : test.skip;
+
 async function consent(t) {
   const f = await makeQaRepairFixture(t);
   const plan = planQaRepair({ project: f.project, reviewOutput: f.reviewOutput,
@@ -17,7 +20,7 @@ async function consent(t) {
   return { ...f, plan };
 }
 
-test('a read-only consent preview has zero writes; applying pins two-round scope durably', async t => {
+durableTest('a read-only consent preview has zero writes; applying pins two-round scope durably', async t => {
   const f = await consent(t);
   assert.equal(beginQaRepair(f.plan, { apply: false }).status, 'READY_FOR_AGENT_HANDOFF');
   assert.equal(fs.existsSync(f.repairOutput), false);
@@ -31,7 +34,7 @@ test('a read-only consent preview has zero writes; applying pins two-round scope
   assert.equal(beginQaRepair(f.plan, { apply: true }).status, 'BLOCKED');
 });
 
-test('a started round is durably uncertain and cannot silently restart or touch source', async t => {
+durableTest('a started round is durably uncertain and cannot silently restart or touch source', async t => {
   const f = await consent(t);
   beginQaRepair(f.plan, { apply: true });
   const original = fs.readFileSync(path.join(f.project, 'src/main.js'));
@@ -45,7 +48,7 @@ test('a started round is durably uncertain and cannot silently restart or touch 
   assert.deepEqual(fs.readFileSync(path.join(f.project, 'src/main.js')), original);
 });
 
-test('concurrent starts cannot append a duplicate invalid event after another writer advances head', async t => {
+durableTest('concurrent starts cannot append a duplicate invalid event after another writer advances head', async t => {
   const f = await consent(t);
   beginQaRepair(f.plan, { apply: true });
   const original = fs.readdirSync;
@@ -66,7 +69,7 @@ test('concurrent starts cannot append a duplicate invalid event after another wr
   assert.deepEqual(fs.readdirSync(f.repairOutput).sort(), ['000001.json', 'session.json']);
 });
 
-test('one authorized consent permits at most two source edits and fresh independent-review handoffs', async t => {
+durableTest('one authorized consent permits at most two source edits and fresh independent-review handoffs', async t => {
   const f = await consent(t);
   beginQaRepair(f.plan, { apply: true });
   startQaRepairRound(f.repairOutput, { apply: true });
@@ -94,7 +97,7 @@ test('one authorized consent permits at most two source edits and fresh independ
   assert.equal(fs.readdirSync(f.repairOutput).filter(n => n.startsWith('000')).length, 4);
 });
 
-test('a fresh review with P2 only records reinspection, never simulated/real moderation PASS', async t => {
+durableTest('a fresh review with P2 only records reinspection, never simulated/real moderation PASS', async t => {
   const f = await consent(t);
   beginQaRepair(f.plan, { apply: true });
   startQaRepairRound(f.repairOutput, { apply: true });
@@ -110,7 +113,7 @@ test('a fresh review with P2 only records reinspection, never simulated/real mod
   assert.equal(startQaRepairRound(f.repairOutput, { apply: true }).status, 'RECHECK_RECORDED');
 });
 
-test('new P0 after P1 is a blocking regression even in round one', async t => {
+durableTest('new P0 after P1 is a blocking regression even in round one', async t => {
   const f = await consent(t);
   beginQaRepair(f.plan, { apply: true });
   startQaRepairRound(f.repairOutput, { apply: true });
@@ -122,7 +125,7 @@ test('new P0 after P1 is a blocking regression even in round one', async t => {
   assert.equal(result.reasonCode, 'QA_REPAIR_P0_REGRESSION');
 });
 
-test('unexpected user-owned file edit escalates and preserves the changed bytes', async t => {
+durableTest('unexpected user-owned file edit escalates and preserves the changed bytes', async t => {
   const f = await consent(t);
   beginQaRepair(f.plan, { apply: true });
   startQaRepairRound(f.repairOutput, { apply: true });
@@ -137,7 +140,7 @@ test('unexpected user-owned file edit escalates and preserves the changed bytes'
   assert.equal(fs.readFileSync(path.join(f.project, 'owner-notes.txt'), 'utf8'), 'do not lose');
 });
 
-test('missing, unchanged or wrong-target reinspection never consumes a successful round', async t => {
+durableTest('missing, unchanged or wrong-target reinspection never consumes a successful round', async t => {
   const f = await consent(t);
   beginQaRepair(f.plan, { apply: true });
   startQaRepairRound(f.repairOutput, { apply: true });
@@ -153,7 +156,7 @@ test('missing, unchanged or wrong-target reinspection never consumes a successfu
   assert.equal(inspectQaRepair(f.repairOutput).status, 'PENDING_RECOVERY');
 });
 
-test('tampered local consent or round event fails closed', async t => {
+durableTest('tampered local consent or round event fails closed', async t => {
   const f = await consent(t);
   beginQaRepair(f.plan, { apply: true });
   startQaRepairRound(f.repairOutput, { apply: true });
@@ -165,7 +168,7 @@ test('tampered local consent or round event fails closed', async t => {
   assert.equal(startQaRepairRound(f.repairOutput, { apply: true }).status, 'BLOCKED');
 });
 
-test('a rehashed consent cannot broaden allowed paths after the owner opted in', async t => {
+durableTest('a rehashed consent cannot broaden allowed paths after the owner opted in', async t => {
   const f = await consent(t);
   beginQaRepair(f.plan, { apply: true });
   const file = path.join(f.repairOutput, 'session.json');
@@ -178,7 +181,7 @@ test('a rehashed consent cannot broaden allowed paths after the owner opted in',
   assert.equal(startQaRepairRound(f.repairOutput, { apply: true }).status, 'BLOCKED');
 });
 
-test('a rehashed result cannot invent REWORK after an out-of-scope edit', async t => {
+durableTest('a rehashed result cannot invent REWORK after an out-of-scope edit', async t => {
   const f = await consent(t);
   beginQaRepair(f.plan, { apply: true });
   startQaRepairRound(f.repairOutput, { apply: true });
@@ -197,7 +200,7 @@ test('a rehashed result cannot invent REWORK after an out-of-scope edit', async 
   assert.equal(inspectQaRepair(f.repairOutput).status, 'BLOCKED');
 });
 
-test('introducing a different P0 while old P0 remains is an immediate regression', async t => {
+durableTest('introducing a different P0 while old P0 remains is an immediate regression', async t => {
   const f = await makeQaRepairFixture(t, { severity: 'P0' });
   const plan = planQaRepair({ project: f.project, reviewOutput: f.reviewOutput,
     outputDir: f.repairOutput, inScope: 'src/main.js', mutationBoundary: 'Fix P0 A only' });

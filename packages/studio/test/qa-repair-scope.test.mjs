@@ -1,12 +1,15 @@
 import './setup-trust-env.mjs';
 import test from 'node:test';
+import { qaDirectoryDurabilityAvailable } from './helpers/qa-review-durability.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { planQaRepair, snapshotQaRepairSource } from '../src/qa-repair-scope.mjs';
 import { makeQaRepairFixture } from './helpers/qa-repair-fixture.mjs';
 
-test('trusted P1 journal yields an exact source-bound agent handoff without writing', async t => {
+const durableTest = qaDirectoryDurabilityAvailable ? test : test.skip;
+
+durableTest('trusted P1 journal yields an exact source-bound agent handoff without writing', async t => {
   const f = await makeQaRepairFixture(t);
   const result = planQaRepair({ project: f.project, reviewOutput: f.reviewOutput,
     inScope: 'src/main.js', mutationBoundary: 'Fix clipped mobile choices only', outputDir: f.repairOutput });
@@ -21,7 +24,7 @@ test('trusted P1 journal yields an exact source-bound agent handoff without writ
   assert.match(result.warning, /not authenticated|local record/i);
 });
 
-test('copied Studio files and untrusted existing projects cannot authorize fixes', async t => {
+durableTest('copied Studio files and untrusted existing projects cannot authorize fixes', async t => {
   const f = await makeQaRepairFixture(t);
   const copy = path.join(f.folder, 'copied');
   fs.mkdirSync(copy);
@@ -32,7 +35,7 @@ test('copied Studio files and untrusted existing projects cannot authorize fixes
     mutationBoundary: 'Only UI', outputDir: f.repairOutput }).status, 'BLOCKED');
 });
 
-test('scope rejects parent traversal, Studio ownership files, hidden secrets and symlink paths', async t => {
+durableTest('scope rejects parent traversal, Studio ownership files, hidden secrets and symlink paths', async t => {
   const f = await makeQaRepairFixture(t);
   const base = { project: f.project, reviewOutput: f.reviewOutput,
     mutationBoundary: 'Only UI', outputDir: f.repairOutput };
@@ -46,7 +49,7 @@ test('scope rejects parent traversal, Studio ownership files, hidden secrets and
   assert.equal(planQaRepair({ ...base, inScope: 'src/linked.js' }).status, 'BLOCKED');
 });
 
-test('inventory detects ordinary source edits, including user notes outside the allowlist', async t => {
+durableTest('inventory detects ordinary source edits, including user notes outside the allowlist', async t => {
   const f = await makeQaRepairFixture(t);
   const first = snapshotQaRepairSource(f.project);
   fs.appendFileSync(path.join(f.project, 'src', 'main.js'), '\n// changed\n');
@@ -60,7 +63,7 @@ test('inventory detects ordinary source edits, including user notes outside the 
   assert.ok(third.files.some(x => x.path === 'owner-notes.txt'));
 });
 
-test('inventory also tracks protected user files inside .ludory instead of hiding their edits', async t => {
+durableTest('inventory also tracks protected user files inside .ludory instead of hiding their edits', async t => {
   const f = await makeQaRepairFixture(t);
   const first = snapshotQaRepairSource(f.project);
   fs.mkdirSync(path.join(f.project, '.ludory'));
@@ -70,7 +73,7 @@ test('inventory also tracks protected user files inside .ludory instead of hidin
   assert.ok(second.files.some(item => item.path === '.ludory/owner-config.json'));
 });
 
-test('skippable generated directory names cannot hide a user file or nested user directory', async t => {
+durableTest('skippable generated directory names cannot hide a user file or nested user directory', async t => {
   const f = await makeQaRepairFixture(t);
   fs.writeFileSync(path.join(f.project, 'src', 'build'), 'an important user file');
   fs.mkdirSync(path.join(f.project, 'src', 'coverage'));
@@ -85,7 +88,7 @@ test('skippable generated directory names cannot hide a user file or nested user
   assert.notEqual(found.digest, replaced.digest, 'same bytes with different inode must be a changed source');
 });
 
-test('consent invalidates deleted or replaced initial Web inputs after the review', async t => {
+durableTest('consent invalidates deleted or replaced initial Web inputs after the review', async t => {
   const f = await makeQaRepairFixture(t);
   const options = { project: f.project, reviewOutput: f.reviewOutput,
     inScope: 'src/main.js', mutationBoundary: 'Only UI', outputDir: f.repairOutput };
@@ -94,7 +97,7 @@ test('consent invalidates deleted or replaced initial Web inputs after the revie
   assert.equal(planQaRepair(options).status, 'BLOCKED');
 });
 
-test('review without a blocking P0/P1 cannot issue a repair handoff', async t => {
+durableTest('review without a blocking P0/P1 cannot issue a repair handoff', async t => {
   const f = await makeQaRepairFixture(t, { severity: null });
   const result = planQaRepair({ project: f.project, reviewOutput: f.reviewOutput,
     inScope: 'src/main.js', mutationBoundary: 'Only UI', outputDir: f.repairOutput });
