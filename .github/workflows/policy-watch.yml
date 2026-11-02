@@ -1,0 +1,52 @@
+name: Platform requirements watch
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: policy-watch-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  yandex:
+    name: Yandex Games official documentation
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Compare reviewed policy baseline
+        run: node scripts/policy-watch.mjs --report "$RUNNER_TEMP/policy-watch.json"
+      - name: Create or update one advisory review issue
+        uses: actions/github-script@v9
+        env:
+          POLICY_WATCH_REPORT: ${{ runner.temp }}/policy-watch.json
+        with:
+          script: |
+            const { readFileSync } = require('node:fs');
+            const { pathToFileURL } = require('node:url');
+            const scriptUrl = pathToFileURL(`${process.env.GITHUB_WORKSPACE}/scripts/policy-watch-issue.mjs`).href;
+            const { planPolicyIssueAction } = await import(scriptUrl);
+            const report = JSON.parse(readFileSync(process.env.POLICY_WATCH_REPORT, 'utf8'));
+            const openIssues = await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo, state: 'open', per_page: 100,
+            });
+            const action = planPolicyIssueAction(report, openIssues);
+            if (action.action === 'create') {
+              const created = await github.rest.issues.create({ ...context.repo, title: action.title, body: action.body });
+              core.info(`Created requirements review issue #${created.data.number}`);
+            } else if (action.action === 'update') {
+              await github.rest.issues.update({ ...context.repo, issue_number: action.issueNumber, body: action.body });
+              core.info(`Updated requirements review issue #${action.issueNumber}`);
+            } else {
+              core.info('No issue write needed. Existing review issues are never auto-closed.');
+            }
