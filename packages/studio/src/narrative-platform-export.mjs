@@ -1,10 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { canonicalPhysicalDirectory } from '@ludory/core';
 import { verifyStudioOrigin, assertComponentTrust, hostTrustDigest } from '@ludory/studio-trust';
 import { readRegular } from './profile-state.mjs';
 import { planPreviewBuild, buildPreview } from './preview-build.mjs';
+import { planCreate, applyCreatePlan } from './scaffold.mjs';
+import { compileNarrativePlatformEntrypoint } from './narrative-platform-compile.mjs';
+import { buildYandexCandidate } from '../../../scripts/build-yandex-candidate.mjs';
+import { buildVkCandidate } from '../../../scripts/build-vk-candidate.mjs';
+import { inspectYandexArchive, inspectVkArchive } from '@ludory/release';
+import { readRegularBytes } from '../../release/src/archive.mjs';
 
 const mode = 'narrative-platform-export';
 const targets = Object.freeze(['yandex-games', 'vk-games']);
@@ -88,4 +94,328 @@ export function materializeNarrativePlatformSource(plan) {
   return { mode, status: 'SOURCE_PINNED', root: built.root, sourceDigest: built.sourceDigest,
     files: built.files, targets: [...targets], cleanup: built.cleanup,
     releaseReady: false, publicationAllowed: false };
+}
+
+const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+const mediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2']);
+const targetSpecs = Object.freeze({
+  yandex: { target: 'yandex-games', template: 'yandex-runtime' },
+  vk: { target: 'vk-games', template: 'vk-runtime' },
+});
+
+function scanDerivedFiles(root, relative = '') {
+  const found = [];
+  for (const name of fs.readdirSync(path.join(root, relative)).sort()) {
+    const local = relative ? `${relative}/${name}` : name;
+    const file = path.join(root, local);
+    const stat = fs.lstatSync(file);
+    if (stat.isSymbolicLink()) throw new Error(`F5B_DERIVED_SYMLINK: ${local}`);
+    if (stat.isDirectory()) found.push(...scanDerivedFiles(root, local));
+    else if (stat.isFile()) {
+      const bytes = fs.readFileSync(file);
+      found.push({ path: local, sha256: sha(bytes), size: bytes.length });
+    } else throw new Error(`F5B_DERIVED_SPECIAL_FILE: ${local}`);
+  }
+  return found;
+}
+
+function ownedCleanup(directory) {
+  const ownership = fs.lstatSync(directory, { bigint: true });
+  let called = false;
+  return () => {
+    if (called) return;
+    called = true;
+    let now;
+    try { now = fs.lstatSync(directory, { bigint: true }); } catch (error) {
+      if (error.code === 'ENOENT') return;
+      throw error;
+    }
+    if (!now.isDirectory() || now.isSymbolicLink() ||
+        now.dev !== ownership.dev || now.ino !== ownership.ino) {
+      throw new Error('F5B_DERIVED_DIRECTORY_IDENTITY_CHANGED');
+    }
+    fs.rmSync(directory, { recursive: true });
+  };
+}
+
+/** Materializes a fresh F5b1 pin into two short-lived native target projects. */
+export function materializeNarrativePlatformProjects(plan) {
+  const pin = materializeNarrativePlatformSource(plan);
+  if (pin.status !== 'SOURCE_PINNED') return { ...pin, releaseReady: false, publicationAllowed: false };
+  let derived;
+  let cleanup;
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(pin.root, 'ludory.project.json')));
+    const titles = Object.entries(manifest.title);
+    if (!titles.length) throw new Error('F5B_TITLE_REQUIRED');
+    derived = fs.mkdtempSync(path.join(path.dirname(pin.root), 'ludory-f5b2-targets-'));
+    cleanup = ownedCleanup(derived);
+    const projects = {};
+    const seenMedia = new Set();
+    const media = [];
+    for (const file of pin.files) {
+      if (/^(?:images|media|audio|sounds|fonts)\//.test(file.path)) {
+        throw new Error(`F5B_UNSUPPORTED_AUTHOR_MEDIA_ROOT: ${file.path}`);
+      }
+      if (!file.path.startsWith('assets/') || file.path === 'assets/ludory-narrative.js') continue;
+      const extension = path.posix.extname(file.path).toLowerCase();
+      const segments = file.path.split('/');
+      if (!mediaExtensions.has(extension) || segments.some(segment => !/^[a-z0-9][a-z0-9._-]*$/i.test(segment) ||
+          segment === '.' || segment === '..' || /[. ]$/.test(segment))) {
+        throw new Error(`F5B_UNSUPPORTED_AUTHOR_MEDIA: ${file.path}`);
+      }
+      const folded = file.path.toLowerCase();
+      if (seenMedia.has(folded)) throw new Error(`F5B_CASE_COLLIDING_AUTHOR_MEDIA: ${file.path}`);
+      seenMedia.add(folded);
+      media.push(file.path);
+    }
+    for (const [key, spec] of Object.entries(targetSpecs)) {
+      const root = path.join(derived, key);
+      fs.mkdirSync(root);
+      const create = planCreate(root, { id: manifest.id, version: manifest.version,
+        title: manifest.title, lang: titles[0][0], profile: 'web-game',
+        template: spec.template, targets: [spec.target] });
+      if (create.status !== 'READY') throw new Error(`F5B_TARGET_SCAFFOLD_${create.conflicts.join(';')}`);
+      if (applyCreatePlan(create).status !== 'APPLIED') throw new Error('F5B_TARGET_SCAFFOLD_FAILED');
+      const compiled = compileNarrativePlatformEntrypoint({ sourceRoot: pin.root, target: spec.target });
+      fs.writeFileSync(path.join(root, 'index.html'), compiled.htmlBytes);
+      fs.writeFileSync(path.join(root, 'src/main.js'), compiled.entryBytes);
+      for (const filename of media) {
+        const target = path.join(root, filename);
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(path.join(pin.root, filename), target, fs.constants.COPYFILE_EXCL);
+      }
+      const origin = verifyStudioOrigin(root);
+      if (!origin.ok || origin.project !== root) throw new Error(`F5B_TARGET_ORIGIN_${origin.code}`);
+      const files = scanDerivedFiles(root);
+      projects[key] = { root, target: spec.target, files, sha256: sha(Buffer.from(JSON.stringify(files))) };
+    }
+    return { mode, status: 'DERIVED_LOCAL', sourceDigest: pin.sourceDigest, projects,
+      cleanup, releaseReady: false, publicationAllowed: false };
+  } catch (error) {
+    if (cleanup) cleanup();
+    return { ...blocked(plan?.project ?? null, error.message || 'F5B_DERIVATION_FAILED'),
+      releaseReady: false, publicationAllowed: false };
+  } finally { pin.cleanup(); }
+}
+
+const outputNames = Object.freeze(['yandexZip', 'vkZip', 'yandexBuildReceipt', 'vkBuildReceipt', 'exportReceipt']);
+const outputFileName = /^[a-z0-9][a-z0-9._-]*$/i;
+
+function outputAdmission(paths, sourceRoot, projects) {
+  if (!paths || typeof paths !== 'object') throw new Error('F5B_OUTPUT_PATHS_REQUIRED');
+  const admitted = {};
+  const pins = {};
+  const unique = new Set();
+  const protectedRoots = [sourceRoot, ...Object.values(projects).map(item => item.root)]
+    .map(item => canonicalPhysicalDirectory(item));
+  for (const [index, name] of outputNames.entries()) {
+    const requested = paths[name];
+    if (typeof requested !== 'string' || !requested.trim()) throw new Error(`F5B_OUTPUT_REQUIRED_${name}`);
+    const output = path.resolve(requested);
+    const basename = path.basename(output);
+    if (!outputFileName.test(basename) || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(basename) ||
+        !basename.endsWith(index < 2 ? '.zip' : '.json')) throw new Error(`F5B_OUTPUT_NAME_UNSAFE_${name}`);
+    let ancestor = path.parse(output).root;
+    for (const segment of path.dirname(output).slice(ancestor.length).split(path.sep)) {
+      if (!segment) continue;
+      ancestor = path.join(ancestor, segment);
+      const stat = fs.lstatSync(ancestor);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('F5B_OUTPUT_PARENT_UNSAFE');
+    }
+    const physicalParent = canonicalPhysicalDirectory(path.dirname(output));
+    if (protectedRoots.some(root => {
+      const relative = path.relative(root, physicalParent);
+      return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+    })) throw new Error('F5B_OUTPUT_OVERLAPS_SOURCE');
+    try { fs.lstatSync(output); throw new Error(`F5B_OUTPUT_EXISTS_${name}`); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    const identity = `${physicalParent.toLowerCase()}|${basename.toLowerCase()}`;
+    if (unique.has(identity)) throw new Error('F5B_OUTPUT_COLLISION');
+    unique.add(identity);
+    admitted[name] = output;
+    const parentStat = fs.lstatSync(physicalParent, { bigint: true });
+    pins[name] = { parent: physicalParent, dev: parentStat.dev, ino: parentStat.ino };
+  }
+  Object.defineProperty(admitted, '_parentPins', { value: pins });
+  return admitted;
+}
+
+function writeExclusiveJson(filename, value, partialOutputs, pin) {
+  const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
+  if (bytes.length > 1024 * 1024) throw new Error('F5B_RECEIPT_TOO_LARGE');
+  const previousCwd = process.cwd();
+  try {
+    process.chdir(pin.parent);
+    const anchored = fs.statSync('.', { bigint: true });
+    if (!anchored.isDirectory() || anchored.dev !== pin.dev || anchored.ino !== pin.ino) {
+      throw new Error('F5B_OUTPUT_PARENT_CHANGED');
+    }
+    const fd = fs.openSync(path.basename(filename), fs.constants.O_CREAT | fs.constants.O_EXCL |
+      fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW ?? 0), 0o600);
+    partialOutputs.push(filename);
+    try {
+      fs.writeFileSync(fd, bytes);
+      fs.fsyncSync(fd);
+      const current = fs.lstatSync(pin.parent, { bigint: true });
+      if (!current.isDirectory() || current.isSymbolicLink() ||
+          current.dev !== pin.dev || current.ino !== pin.ino) {
+        throw new Error('F5B_OUTPUT_PARENT_CHANGED');
+      }
+    } finally { fs.closeSync(fd); }
+  } finally { process.chdir(previousCwd); }
+}
+
+function exact(value, fields) {
+  return value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
+}
+
+function assertFileArray(files) {
+  if (!Array.isArray(files) || !files.length) throw new Error('F5B_RECEIPT_FILE_LIST_INVALID');
+  const seen = new Set();
+  for (const file of files) {
+    if (!exact(file, ['path', 'sha256', 'size']) || typeof file.path !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(file.sha256) || !Number.isSafeInteger(file.size) || file.size < 0 ||
+        seen.has(file.path) || file.path.startsWith('/') || file.path.includes('..') || file.path.includes('\\')) {
+      throw new Error('F5B_RECEIPT_FILE_LIST_INVALID');
+    }
+    seen.add(file.path);
+  }
+}
+
+function sameFiles(left, right) {
+  assertFileArray(left);
+  assertFileArray(right);
+  const ordered = files => [...files].sort((a, b) => a.path.localeCompare(b.path));
+  if (JSON.stringify(ordered(left)) !== JSON.stringify(ordered(right))) {
+    throw new Error('F5B_CANDIDATE_MEMBER_MISMATCH');
+  }
+}
+
+function readReceipt(filename) {
+  return JSON.parse(readRegularBytes(filename, 1024 * 1024).toString('utf8'));
+}
+
+/** Re-check stored ZIP/member bytes against a live host-trusted F5b1 plan. */
+export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
+  let rederived;
+  let result;
+  try {
+    const issued = sourcePlan && typeof sourcePlan === 'object' ? issuedPlans.get(sourcePlan) : null;
+    if (!issued || shape(sourcePlan) !== issued.shape) throw new Error('F5B_TRUSTED_SOURCE_PLAN_REQUIRED');
+    rederived = materializeNarrativePlatformProjects(sourcePlan);
+    if (rederived.status !== 'DERIVED_LOCAL') throw new Error(rederived.reasonCode || 'F5B_SOURCE_REDERIVATION_FAILED');
+    const linked = readReceipt(paths.exportReceipt);
+    if (!exact(linked, ['schemaVersion', 'sourceDigest', 'sourceFiles', 'candidates']) ||
+        linked.schemaVersion !== 1 || !Array.isArray(linked.candidates) || linked.candidates.length !== 2) {
+      throw new Error('F5B_EXPORT_RECEIPT_INVALID');
+    }
+    assertFileArray(linked.sourceFiles);
+    if (sha(Buffer.from(JSON.stringify(linked.sourceFiles))) !== linked.sourceDigest) {
+      throw new Error('F5B_SOURCE_DIGEST_MISMATCH');
+    }
+    if (linked.sourceDigest !== sourcePlan.sourceDigest ||
+        JSON.stringify(linked.sourceFiles) !== JSON.stringify(sourcePlan.files)) {
+      throw new Error('F5B_SOURCE_BINDING_MISMATCH');
+    }
+    for (const [index, key] of ['yandex', 'vk'].entries()) {
+      const candidate = linked.candidates[index];
+      const target = targetSpecs[key].target;
+      const archivePath = path.resolve(paths[`${key}Zip`]);
+      const receipt = readReceipt(paths[`${key}BuildReceipt`]);
+      const archived = key === 'yandex' ? inspectYandexArchive(archivePath) : inspectVkArchive(archivePath);
+      if (!exact(candidate, ['target', 'derivedProjectSha256', 'derivedFiles', 'archivePath', 'archiveSha256', 'files']) ||
+          !exact(receipt, ['archivePath', 'sha256', 'files']) ||
+          candidate.target !== target || candidate.archivePath !== archivePath ||
+          receipt.archivePath !== archivePath || candidate.archiveSha256 !== archived.sha256 ||
+          receipt.sha256 !== archived.sha256) throw new Error('F5B_ARCHIVE_RECEIPT_MISMATCH');
+      sameFiles(candidate.files, archived.files);
+      sameFiles(receipt.files, archived.files);
+      assertFileArray(candidate.derivedFiles);
+      if (sha(Buffer.from(JSON.stringify(candidate.derivedFiles))) !== candidate.derivedProjectSha256) {
+        throw new Error('F5B_DERIVED_HASH_MISMATCH');
+      }
+      if (candidate.derivedProjectSha256 !== rederived.projects[key].sha256) {
+        throw new Error('F5B_DERIVED_SOURCE_BINDING_MISMATCH');
+      }
+      sameFiles(candidate.derivedFiles, rederived.projects[key].files);
+      const derived = new Map(candidate.derivedFiles.map(file => [file.path, file]));
+      for (const file of archived.files) {
+        const original = derived.get(file.path);
+        if (!original || original.sha256 !== file.sha256 || original.size !== file.size) {
+          throw new Error('F5B_DERIVED_ARCHIVE_MISMATCH');
+        }
+      }
+    }
+    result = { mode, status: 'LOCAL_ARCHIVES_VERIFIED', sourceDigest: linked.sourceDigest,
+      releaseReady: false, publicationAllowed: false };
+  } catch (error) {
+    result = { mode, status: 'BLOCKED', reasonCode: error.message || 'F5B_ARCHIVE_VERIFICATION_FAILED',
+      releaseReady: false, publicationAllowed: false };
+  } finally {
+    try { rederived?.cleanup?.(); }
+    catch (error) { result = { mode, status: 'BLOCKED', reasonCode: error.message,
+      releaseReady: false, publicationAllowed: false }; }
+  }
+  return result;
+}
+
+/** Create two exclusive target ZIPs and external receipts from one authenticated F5b1 plan. */
+export async function buildNarrativePlatformCandidates(plan, paths = {}) {
+  const derived = materializeNarrativePlatformProjects(plan);
+  if (derived.status !== 'DERIVED_LOCAL') return { ...derived, partialOutputs: [],
+    releaseReady: false, publicationAllowed: false };
+  const partialOutputs = [];
+  let outputs;
+  try {
+    outputs = outputAdmission(paths, plan.project, derived.projects);
+    const yandex = await buildYandexCandidate({ projectDir: derived.projects.yandex.root,
+      outputZip: outputs.yandexZip });
+    partialOutputs.push(outputs.yandexZip);
+    const vk = await buildVkCandidate({ projectDir: derived.projects.vk.root,
+      outputZip: outputs.vkZip });
+    partialOutputs.push(outputs.vkZip);
+    // Each candidate already passed its own strict packager contract. Inspect
+    // the stored ZIP again before linking it to the trusted source digest.
+    const yArchive = inspectYandexArchive(outputs.yandexZip);
+    const vArchive = inspectVkArchive(outputs.vkZip);
+    sameFiles(yandex.files, yArchive.files);
+    sameFiles(vk.files, vArchive.files);
+    if (yandex.sha256 !== yArchive.sha256 || vk.sha256 !== vArchive.sha256) {
+      throw new Error('F5B_ARCHIVE_CHANGED_AFTER_BUILD');
+    }
+    writeExclusiveJson(outputs.yandexBuildReceipt, yandex, partialOutputs, outputs._parentPins.yandexBuildReceipt);
+    writeExclusiveJson(outputs.vkBuildReceipt, vk, partialOutputs, outputs._parentPins.vkBuildReceipt);
+    writeExclusiveJson(outputs.exportReceipt, { schemaVersion: 1,
+      sourceDigest: derived.sourceDigest, sourceFiles: plan.files,
+      candidates: [
+        { target: 'yandex-games', derivedProjectSha256: derived.projects.yandex.sha256,
+          derivedFiles: derived.projects.yandex.files, archivePath: outputs.yandexZip,
+          archiveSha256: yandex.sha256, files: yandex.files },
+        { target: 'vk-games', derivedProjectSha256: derived.projects.vk.sha256,
+          derivedFiles: derived.projects.vk.files, archivePath: outputs.vkZip,
+          archiveSha256: vk.sha256, files: vk.files },
+      ],
+    }, partialOutputs, outputs._parentPins.exportReceipt);
+    const verified = verifyNarrativePlatformCandidates(outputs, plan);
+    if (verified.status !== 'LOCAL_ARCHIVES_VERIFIED' || verified.sourceDigest !== derived.sourceDigest) {
+      throw new Error(verified.reasonCode ?? 'F5B_PAIR_VERIFICATION_FAILED');
+    }
+    return { mode, status: 'CANDIDATES_BUILT_LOCAL', sourceDigest: derived.sourceDigest,
+      candidates: { yandex: yandex, vk }, exportReceipt: outputs.exportReceipt,
+      releaseReady: false, publicationAllowed: false };
+  } catch (error) {
+    // Builders try ownership-scoped rollback, but disk errors or concurrent
+    // replacement can leave a file they intentionally retain. Report every
+    // unexpected residual path; this is not a claim that we own those bytes.
+    if (outputs) for (const name of outputNames) {
+      const filename = outputs[name];
+      if (partialOutputs.includes(filename)) continue;
+      try { fs.lstatSync(filename); partialOutputs.push(filename); }
+      catch { /* absent or uncertain: never remove it */ }
+    }
+    return { ...blocked(plan?.project ?? null, error.message || 'F5B_BUILD_FAILED'), partialOutputs,
+      releaseReady: false, publicationAllowed: false };
+  } finally { derived.cleanup(); }
 }

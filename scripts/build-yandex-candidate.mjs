@@ -172,6 +172,7 @@ function outsideProject(project, output) {
   const parent = path.dirname(output);
   const parentStat = fs.lstatSync(parent);
   if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) throw new Error('Yandex output parent must be a real directory');
+  const parentIdentity = fs.lstatSync(parent, { bigint: true });
   const outputParent = fs.realpathSync.native(parent);
   const relative = path.relative(root, outputParent);
   if (relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) &&
@@ -179,7 +180,43 @@ function outsideProject(project, output) {
     throw new Error('Yandex output archive must be outside the game project');
   }
   if (fs.existsSync(output)) throw new Error('Yandex candidate output already exists; refusing overwrite');
-  return root;
+  return { root, parent, parentIdentity };
+}
+
+function writePinnedOutput(output, { parent, parentIdentity }, archive) {
+  const previousCwd = process.cwd();
+  try {
+    // Anchor the creation to the admitted directory inode, not a path that
+    // another process can replace with a link after preflight.
+    process.chdir(parent);
+    const anchored = fs.statSync('.', { bigint: true });
+    if (!anchored.isDirectory() || anchored.dev !== parentIdentity.dev ||
+        anchored.ino !== parentIdentity.ino) throw new Error('Yandex output parent changed before write');
+    const basename = path.basename(output);
+    const fd = fs.openSync(basename, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY |
+      (fs.constants.O_NOFOLLOW ?? 0), 0o600);
+    const own = fs.fstatSync(fd);
+    try {
+      fs.writeFileSync(fd, archive);
+      fs.fsyncSync(fd);
+      const after = fs.lstatSync(parent, { bigint: true });
+      if (!after.isDirectory() || after.isSymbolicLink() ||
+          after.dev !== anchored.dev || after.ino !== anchored.ino) {
+        throw new Error('Yandex output parent changed during write');
+      }
+    } catch (error) {
+      // Roll back only an owned inode in the anchored directory, never through
+      // the possibly replaced external path.
+      try {
+        const found = fs.lstatSync(basename);
+        if (found.isFile() && !found.isSymbolicLink() && found.dev === own.dev && found.ino === own.ino) {
+          const observed = fs.readFileSync(basename);
+          if (observed.equals(archive.subarray(0, observed.length))) fs.unlinkSync(basename);
+        }
+      } catch { /* retain uncertain output for owner recovery */ }
+      throw error;
+    } finally { fs.closeSync(fd); }
+  } finally { process.chdir(previousCwd); }
 }
 
 /** Local SDK-contract candidate; never a certified Release bundle. */
@@ -188,7 +225,8 @@ export async function buildYandexCandidate({ projectDir, outputZip } = {}) {
     throw new TypeError('projectDir and outputZip must be paths');
   }
   const output = path.resolve(outputZip);
-  const root = outsideProject(path.resolve(projectDir), output);
+  const admitted = outsideProject(path.resolve(projectDir), output);
+  const { root } = admitted;
   validateProject(root);
   const assets = [];
   collectAssets(root, 'assets', assets);
@@ -207,24 +245,7 @@ export async function buildYandexCandidate({ projectDir, outputZip } = {}) {
   }
   const archive = Buffer.from(zipSync(entries, { level: 0, mtime: new Date(1980, 0, 1) }));
   const hash = sha256(archive);
-  // Reading every source and building the ZIP is non-mutating. Only now open an exclusive destination.
-  const fd = fs.openSync(output, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY |
-    (fs.constants.O_NOFOLLOW ?? 0), 0o600);
-  const own = fs.fstatSync(fd);
-  try {
-    fs.writeFileSync(fd, archive);
-    fs.fsyncSync(fd);
-  } catch (error) {
-    // Only remove bytes that are demonstrably still ours; preserve concurrent user replacements.
-    try {
-      const found = fs.lstatSync(output);
-      if (found.isFile() && !found.isSymbolicLink() && found.dev === own.dev && found.ino === own.ino) {
-        const observed = fs.readFileSync(output);
-        if (observed.equals(archive.subarray(0, observed.length))) fs.unlinkSync(output);
-      }
-    } catch { /* retain uncertain output for owner recovery */ }
-    throw error;
-  } finally { fs.closeSync(fd); }
+  writePinnedOutput(output, admitted, archive);
   return { archivePath: output, sha256: hash, files };
 }
 

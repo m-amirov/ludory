@@ -23,6 +23,37 @@ All commands default to preview; `--apply` exclusively creates a manifest.
 
 Exit codes: `0` for successful read/preview/application; `1` for invalid arguments or operational errors; `2` for an explicit `BLOCKED`/`CONFLICT` plan.
 
+## Narrative dual-target local candidates (F5b2, programmatic)
+
+For a **new, trusted** `narrative-interactive` game with both platform targets, the Studio module can derive two independent SDK projects and ZIP candidates from one freshly verified source snapshot:
+
+```js
+import {
+  planNarrativePlatformExport, buildNarrativePlatformCandidates,
+  verifyNarrativePlatformCandidates,
+} from './packages/studio/src/narrative-platform-export.mjs';
+
+const plan = planNarrativePlatformExport('/path/to/new-narrative-game');
+if (plan.status !== 'READY_TO_DERIVE') throw new Error(plan.reasonCode);
+const outputs = {
+  yandexZip: '/existing/output-dir/story-yandex.zip',
+  vkZip: '/existing/output-dir/story-vk.zip',
+  yandexBuildReceipt: '/existing/output-dir/story-yandex.build.json',
+  vkBuildReceipt: '/existing/output-dir/story-vk.build.json',
+  exportReceipt: '/existing/output-dir/story-pair.export.json',
+};
+const result = await buildNarrativePlatformCandidates(plan, outputs);
+if (result.status !== 'CANDIDATES_BUILT_LOCAL') throw new Error(result.reasonCode);
+const check = verifyNarrativePlatformCandidates(outputs, plan);
+if (check.status !== 'LOCAL_ARCHIVES_VERIFIED') throw new Error(check.reasonCode);
+```
+
+All five destination paths must be distinct and absent, with regular existing parent directories outside the source. Neither build nor verification edits the authored project; a failed second archive or receipt write can leave explicitly reported `partialOutputs` for manual recovery. Do not rerun on top of existing outputs.
+
+The **author's story module and media under `assets/`** are compiled/copied. The launch module `src/main.js` must match the built-in platform-aware narrative template; an edited launcher or media under other public roots is blocked until a separately validated adapter can support it. Media paths must satisfy the stricter Yandex/VK ZIP allowlists. The Yandex SDK is provided by the host `/sdk.js`; the VK Bridge is the bundled local asset.
+
+The paired JSON receipt links hashes and file lists, but is **not signed**. `verifyNarrativePlatformCandidates` therefore requires the original live F5b1 plan and re-derives the source; a later process cannot authenticate source provenance from the editable receipt alone. Results remain local candidates only: `releaseReady:false`, `publicationAllowed:false`. Browser fake-SDK gameplay tests (F5b3), device tests, rights, live platform approval and moderation remain separate requirements.
+
 ## Pre-moderation QA simulation (P3a)
 
 For an owner-designated, already built Yandex or VK candidate ZIP, run the read-only local preflight:
