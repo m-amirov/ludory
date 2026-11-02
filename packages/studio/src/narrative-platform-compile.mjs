@@ -68,12 +68,65 @@ function regular(root, relative) {
   return fs.readFileSync(full);
 }
 
+// F5b2 copies only supported assets/ media, not arbitrary authored HTML
+// dependencies. Reject unsupported references before producing either ZIP.
+const htmlMediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2']);
+const htmlUrlAttributes = new Set([
+  'href', 'src', 'srcset', 'poster', 'action', 'formaction', 'data', 'xlink:href',
+  'ping', 'background', 'cite', 'manifest',
+]);
+const forbiddenHtmlElements = new Set(['base', 'link', 'iframe', 'frame', 'frameset', 'object', 'embed', 'form']);
+
+function safeHtmlMedia(value) {
+  if (!/^(?:\.\/)?assets\/[a-z0-9][a-z0-9._/-]*$/i.test(value)) return false;
+  const segments = value.replace(/^\.\//, '').split('/');
+  return segments.every(segment => /^[a-z0-9][a-z0-9._-]*$/i.test(segment) &&
+    segment !== '.' && segment !== '..' && !/[. ]$/.test(segment)) &&
+    htmlMediaExtensions.has(path.posix.extname(value).toLowerCase());
+}
+
+function checkHtmlCss(css) {
+  // CSS escapes can disguise resource-loading functions, so until a CSS
+  // dependency packager exists only self-contained declarations are allowed.
+  if (/\\|@import\b|\burl\s*\(|(?:-webkit-)?image-set\s*\(/i.test(css)) {
+    throw new Error('F5B_REMOTE_OR_ACTIVE_HTML_FORBIDDEN');
+  }
+}
+
+function checkAuthorHtmlResources(document) {
+  function walk(node) {
+    const tag = node.tagName;
+    if (forbiddenHtmlElements.has(tag) ||
+        (tag === 'meta' && node.attrs?.some(attr =>
+          attr.name === 'http-equiv' && attr.value.trim().toLowerCase() === 'refresh'))) {
+      throw new Error('F5B_UNSUPPORTED_AUTHOR_HTML_RESOURCE');
+    }
+    if (tag === 'style') {
+      for (const child of node.childNodes ?? []) checkHtmlCss(child.value ?? '');
+    }
+    for (const attr of node.attrs ?? []) {
+      if (/^on[a-z]/i.test(attr.name)) throw new Error('F5B_REMOTE_OR_ACTIVE_HTML_FORBIDDEN');
+      if (attr.name === 'style') checkHtmlCss(attr.value);
+      if (!htmlUrlAttributes.has(attr.name)) continue;
+      if (tag === 'script' && attr.name === 'src' && attr.value === 'src/entry.js') continue;
+      if (tag === 'a' && attr.name === 'href' && /^#[a-z0-9_-]+$/i.test(attr.value)) continue;
+      if (['src', 'poster'].includes(attr.name) &&
+          ['img', 'audio', 'video', 'source'].includes(tag) && safeHtmlMedia(attr.value)) continue;
+      throw new Error('F5B_UNSUPPORTED_AUTHOR_HTML_RESOURCE');
+    }
+    for (const child of node.childNodes ?? []) walk(child);
+    if (node.content) walk(node.content);
+  }
+  walk(document);
+}
+
 function originalHtml(root, target) {
   const html = regular(root, 'index.html').toString('utf8');
   if (/https?:\/\/|(?:<base\b)|(?:<iframe\b)/i.test(html)) throw new Error('F5B_REMOTE_OR_ACTIVE_HTML_FORBIDDEN');
   const errors = [];
   const document = parse(html, { onParseError: e => errors.push(e.code) });
   if (errors.length) throw new Error('F5B_INVALID_AUTHOR_HTML');
+  checkAuthorHtmlResources(document);
   const rootNode = document.childNodes.find(node => node.tagName === 'html');
   const head = rootNode?.childNodes.find(node => node.tagName === 'head');
   const body = rootNode?.childNodes.find(node => node.tagName === 'body');

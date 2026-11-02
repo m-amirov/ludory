@@ -81,6 +81,69 @@ test('F5b2 refuses unsupported author entry or remote imports', t => {
   assert.throws(() => compileNarrativePlatformEntrypoint({ sourceRoot: project, target: 'yandex-games' }), /remote|import|URL|forbidden/i);
 });
 
+test('F5b2 blocks authored HTML resources that cannot be safely packaged for both SDKs', async t => {
+  const cases = [
+    { name: 'protocol-relative CSS import', html: '<style>@import url(//example.invalid/leak.css);</style>' },
+    { name: 'protocol-relative CSS image', html: '<style>body{background:url(//example.invalid/leak.png)}</style>' },
+    { name: 'CSS image-set remote string', html: '<style>body{background:image-set("//example.invalid/leak.png" 1x)}</style>' },
+    { name: 'escaped CSS url function', html: '<style>body{background:u\\72l(//example.invalid/leak.png)}</style>' },
+    { name: 'inline style remote image', html: '<div style="background:url(//example.invalid/leak.png)"></div>' },
+    { name: 'mixed local and remote srcset',
+      html: '<img srcset="assets/lighthouse.svg 1x, //example.invalid/leak.png 2x">',
+      files: { 'assets/lighthouse.svg': '<svg xmlns="http://www.w3.org/2000/svg"></svg>' } },
+    { name: 'remote video poster', html: '<video poster="//example.invalid/leak.png"></video>' },
+    { name: 'unpackaged local stylesheet', html: '<link rel="stylesheet" href="src/custom.css">',
+      files: { 'src/custom.css': 'body { color: red; }' } },
+    { name: 'unpackaged local image', html: '<img src="src/photo.png">',
+      files: { 'src/photo.png': 'not-an-image' } },
+  ];
+  for (const item of cases) {
+    await t.test(item.name, tt => {
+      const { project } = fixture(tt);
+      for (const [relative, bytes] of Object.entries(item.files ?? {})) {
+        const filename = path.join(project, relative);
+        fs.mkdirSync(path.dirname(filename), { recursive: true });
+        fs.writeFileSync(filename, bytes);
+      }
+      const filename = path.join(project, 'index.html');
+      const original = fs.readFileSync(filename, 'utf8');
+      fs.writeFileSync(filename, original.replace('</head>', `${item.html}\n</head>`));
+      const plan = planNarrativePlatformExport(project);
+      assert.equal(plan.status, 'READY_TO_DERIVE', `${item.name}: ${plan.reasonCode}`);
+      for (const target of ['yandex-games', 'vk-games']) {
+        assert.throws(() => compileNarrativePlatformEntrypoint({ sourceRoot: project, target }),
+          /F5B_(?:UNSUPPORTED_AUTHOR_HTML_RESOURCE|REMOTE_OR_ACTIVE_HTML_FORBIDDEN)/, `${item.name}: ${target}`);
+      }
+      const derived = materializeNarrativePlatformProjects(plan);
+      try {
+        assert.equal(derived.status, 'BLOCKED', item.name);
+        assert.match(derived.reasonCode, /F5B_(?:UNSUPPORTED_AUTHOR_HTML_RESOURCE|REMOTE_OR_ACTIVE_HTML_FORBIDDEN)/);
+        assert.equal(derived.releaseReady, false);
+        assert.equal(derived.publicationAllowed, false);
+      } finally { derived.cleanup?.(); }
+    });
+  }
+});
+
+test('F5b2 keeps supported local HTML media in each derived project', t => {
+  const { project } = fixture(t);
+  const image = path.join(project, 'assets', 'author-photo.svg');
+  fs.writeFileSync(image, '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>');
+  const filename = path.join(project, 'index.html');
+  fs.writeFileSync(filename, fs.readFileSync(filename, 'utf8').replace('</body>',
+    '<img src="assets/author-photo.svg" alt="Авторское фото">\n</body>'));
+  const plan = planNarrativePlatformExport(project);
+  assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
+  const derived = materializeNarrativePlatformProjects(plan);
+  assert.equal(derived.status, 'DERIVED_LOCAL', derived.reasonCode);
+  try {
+    for (const item of Object.values(derived.projects)) {
+      assert.equal(fs.readFileSync(path.join(item.root, 'assets/author-photo.svg')).equals(fs.readFileSync(image)), true);
+      assert.match(fs.readFileSync(path.join(item.root, 'index.html'), 'utf8'), /assets\/author-photo\.svg/);
+    }
+  } finally { derived.cleanup(); }
+});
+
 test('F5b2 derived manifests preserve all authored title locales', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-f5b2-titles-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
