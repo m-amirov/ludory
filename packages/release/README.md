@@ -117,6 +117,19 @@ provenance. If delivery is missing, the review remains **NOT_RUN**. A read-only
 packet is not an AI assessment or platform moderation receipt. P3a
 `ludory qa simulate` remains unchanged and BLOCKED for independent review.
 
+Use the read-only Studio command (paths refer to already-generated files):
+
+```sh
+node packages/studio/bin/ludory.mjs qa handoff --target vk-games \\
+  --archive candidate.zip --receipt receipt.json --rights rights.json \\
+  --metadata listing.json --promo-root promo --evidence-dir browser-evidence --json
+```
+
+For Yandex add `--sdk-evidence` and the matching rights declarations.
+The CLI only prints the packet on stdout; it cannot call Web DEV or write
+files. Its exit statuses are 0 `READY_FOR_HANDOFF`, 2 `BLOCKED`,
+1 `ISSUES_FOUND`; exit 0 is *not* moderation approval.
+
 This initial P3c slice does **not** add any network transmissions, Web DEV
 invocations, paid API, new server, Docker, project writes, or upload/publication
 authority. `browserAttested:false`, `reviewProvenance:'NOT_RUN'`,
