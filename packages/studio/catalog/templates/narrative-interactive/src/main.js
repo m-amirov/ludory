@@ -5,6 +5,8 @@ import {
 } from '../assets/ludory-narrative.js';
 import { graphData, catalogData, assets, labels, relationFacts } from './story.js';
 
+/** Author-owned entrypoint: platform hooks are supplied by an explicit derived SDK bootstrap. */
+export async function startNarrative({ platform = null } = {}) {
 const root = document.querySelector('#game');
 const message = document.querySelector('#status');
 const language = document.querySelector('#language');
@@ -56,7 +58,6 @@ function updateShell() {
 
 function setStatus(status) { currentStatus = status; updateShell(); }
 
-async function launch() {
   // A static same-origin file created by Studio, not a backend or remote API.
   const response = await fetch('./ludory.project.json');
   if (!response.ok) throw new Error('Game manifest is unavailable');
@@ -68,8 +69,18 @@ async function launch() {
   const renderer = createNarrativeRenderer({ graph, catalog, now: environment.now,
     canBack: () => update.canGoBack(), assets, labels, relationFacts, preferredMobileOrientation });
   let storage;
-  try { storage = createBrowserStorage({ storage: window.localStorage, namespace: 'ludory-narrative-v1' }); }
-  catch { save.disabled = true; currentStatus = 'unavailable'; }
+  let integration;
+  if (platform !== null) {
+    integration = await platform.prepare(game);
+    if (!integration?.storage || typeof integration.attach !== 'function' ||
+        typeof integration.ready !== 'function' || typeof integration.dispose !== 'function') {
+      throw new TypeError('Narrative platform must provide storage, attach, ready and dispose');
+    }
+    storage = integration.storage;
+  } else {
+    try { storage = createBrowserStorage({ storage: window.localStorage, namespace: 'ludory-narrative-v1' }); }
+    catch { save.disabled = true; currentStatus = 'unavailable'; }
+  }
   const saveKey = `${game.id}:narrative-demo`;
   // Install restart before any restore can FAULT the Runtime host.
   restart.addEventListener('click', async () => {
@@ -81,7 +92,9 @@ async function launch() {
   const host = createRuntimeHost({ game, initialState: { narrative: createNarrativeState(graph) },
     update, renderer, input: { subscribe: () => () => {}, enable() {}, disable() {} },
     environment, ...(storage ? { storage, saveKey } : {}) });
+  if (integration) await integration.attach(host);
   await host.initialize();
+  if (integration) await integration.ready(host);
   let restoreFailed = false;
   if (storage) {
     try {
@@ -113,6 +126,9 @@ async function launch() {
     try { await host.save(); setStatus('saved'); }
     catch { setStatus('saveFailed'); }
   });
+  if (integration) window.addEventListener('pagehide', event => {
+    if (event.persisted) return;
+    void host.destroy().finally(() => integration.dispose());
+  });
+  return host;
 }
-
-launch().catch(error => { message.textContent = error.message; root.textContent = 'Не удалось запустить историю.'; });

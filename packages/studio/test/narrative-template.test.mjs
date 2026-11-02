@@ -40,7 +40,7 @@ test('new narrative games opt into portrait metadata without imposing it on othe
     const htmlPath = path.join(project, 'index.html');
     assert.equal(mobileOrientationMeta(fs.readFileSync(htmlPath, 'utf8')), 'portrait', template);
     const receipt = JSON.parse(fs.readFileSync(path.join(project, 'ludory.studio.json')));
-    assert.equal(receipt.template.version, '1.1.0');
+    assert.equal(receipt.template.version, template === 'narrative-interactive' ? '1.2.0' : '1.1.0');
     // An author can opt out in a newly created game; catalog and the creation receipt remain unchanged.
     const html = fs.readFileSync(htmlPath, 'utf8');
     fs.writeFileSync(htmlPath, html.replace('content="portrait"', 'content="auto"'));
@@ -181,4 +181,19 @@ test('Studio create receipts preserve exact N3 bundle hashes without template im
   const entry = fs.readFileSync(path.join(dir, 'src/main.js'), 'utf8');
   assert.match(entry, /assets\/ludory-narrative\.js/);
   assert.doesNotMatch(entry, /from\s*['"]@ludory\//);
+});
+
+test('narrative authored entry exports a launch function without starting on import', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-narrative-entry-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const plan = planCreate(dir, { id: 'entry-contract', title: 'Entry', lang: 'ru',
+    profile: 'narrative-game', template: 'narrative-interactive', targets: ['yandex-games', 'vk-games'] });
+  assert.equal(plan.status, 'READY');
+  assert.equal(applyCreatePlan(plan).status, 'APPLIED');
+  const { pathToFileURL } = await import('node:url');
+  // A source module must be safe to bundle/import without a browser; only the
+  // preview's explicit src/entry.js is allowed to call startNarrative().
+  const entry = await import(pathToFileURL(path.join(dir, 'src/main.js')).href);
+  assert.equal(typeof entry.startNarrative, 'function');
+  assert.ok(fs.readFileSync(path.join(dir, 'src/entry.js'), 'utf8').includes('startNarrative'));
 });

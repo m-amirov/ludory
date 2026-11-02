@@ -72,7 +72,7 @@ export function planCreate(projectDir, options) {
     return blocked(path.resolve(projectDir), 'VK runtime game id must not exceed 35 characters for its scoped storage key');
   }
   const manifest = defineGame({
-    schemaVersion: 1, id, version, title: { [lang]: title },
+    schemaVersion: 1, id, version, title: typeof title === 'string' ? { [lang]: title } : title,
     engine: profile.engine, targets: chosenTargets,
   });
   const init = planInit(projectDir, manifest);
