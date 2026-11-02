@@ -29,7 +29,7 @@ async function cli(argv, injection = {}) {
 
 const host = turn => ({ probe: async () => ({ available: true, reasonCode: 'AVAILABLE',
   transportVerified: true, entitlementVerified: true, routeObserved: 'web-dev',
-  modelObserved: 'gpt-6-sol' }), turn,
+  modelObserved: 'gpt-6-sol-instant' }), turn,
   close: async () => {} });
 
 test('workflow draft previews source-bound manual handoff with zero files or host launches', async t => {
@@ -60,7 +60,7 @@ test('workflow draft requires apply plus observed route; returns review-only out
   assert.equal(missing.result.status, 'NEEDS_USER_ACTION');
   assert.equal(readNativeRun(project, run).events.length, 0);
   const result = await cli(args, { devHost: () => host(async () => ({ status: 'HOST_OBSERVED',
-    text: 'Pictorial notes, not PASS.', modelObserved: 'gpt-6-sol', routeObserved: 'web-dev' })) });
+    text: 'Pictorial notes, not PASS.', modelObserved: 'gpt-6-sol-instant', routeObserved: 'web-dev' })) });
   assert.equal(result.code, 0, result.stderr);
   assert.equal(result.result.status, 'PENDING_REVIEW');
   assert.equal(readNativeRun(project, run).events.length, 2);
@@ -130,10 +130,10 @@ test('episode-script generation automatically invokes an independent reviewer an
     '--task', 'episode-script', '--brief', 'episode.md', '--json', '--apply'], {
     devHost: () => host(async ({ prompt }) => {
       calls++;
-      if (calls === 1) return { status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
+      if (calls === 1) return { status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol-instant',
         routeObserved: 'web-dev', text: draft };
       assert.match(prompt, /INDEPENDENT narrative reviewer/);
-      return { status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', routeObserved: 'web-dev',
+      return { status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol-instant', routeObserved: 'web-dev',
         text: JSON.stringify({ schemaVersion: 1, draftSha256: hash(draft), verdict: 'ACCEPT',
           summary: 'Continuity and choices agree with the brief.', findings: [] }) };
     }),
@@ -154,7 +154,7 @@ test('manual episode import triggers automatic REWORK on grounded P1 evidence', 
   const draft = 'A new episode draft, awaiting review.';
   const auto = await cli(['workflow', 'draft-import', '--project', project, '--run', run,
     '--task', 'episode-script', '--brief', 'episode.md', '--file', 'candidate.md', '--json', '--apply'], {
-    devHost: () => host(async () => ({ status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
+    devHost: () => host(async () => ({ status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol-instant',
       routeObserved: 'web-dev', text: JSON.stringify({ schemaVersion: 1,
         draftSha256: hash(draft), verdict: 'REWORK', summary: 'Choice does not affect the route.',
         findings: [{ severity: 'P1', category: 'choice', location: 'opening',

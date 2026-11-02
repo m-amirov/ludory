@@ -21,8 +21,8 @@ const validArtPreflight = cap => {
   return isVerifiedCapability(cap, 'webDev') &&
     ownData(cap, 'browserObservationV2Available') === true &&
     ownData(cap, 'routeAvailable') === 'web-dev' &&
-    ownData(cap, 'modelRouteAvailable') === 'chatgpt-web/gpt-6-sol' &&
-    ownData(cap, 'reasoningRequired') === 'high' &&
+    ownData(cap, 'modelRouteAvailable') === 'chatgpt-web/gpt-6-sol-instant' &&
+    ownData(cap, 'reasoningRequired') === 'low' &&
     ownData(preflight, 'authenticated') === true &&
     ownData(preflight, 'newChat') === true &&
     ownData(preflight, 'solAvailable') === true &&
@@ -140,7 +140,7 @@ export function planArtReview(projectDir, options = {}, { discover = () => null 
   return { engine: 'ludory-ai', operation: 'art-review', project, runId: current.run.runId,
     status: verified ? 'READY' : 'NEEDS_USER_ACTION',
     reasonCode: verified ? 'ART_WEB_VISUAL_READY' : 'ART_WEB_VISUAL_UNVERIFIED',
-    selectedRoute: verified ? 'web-dev' : null, modelObserved: verified ? 'gpt-6-sol' : null,
+    selectedRoute: verified ? 'web-dev' : null, modelObserved: verified ? 'gpt-6-sol-instant' : null,
     sourceBinding: binding, runHeadSha256: current.headSha256, stage: current.nextStage,
     reviewCount: previousReviews.length,
     brief: imported.brief, image: { path: image, sha256: imported.output.outputSha256,
@@ -190,7 +190,7 @@ function validHostObservation(value, image, traceId) {
   const upload = value?.upload;
   return value?.protocolVersion === 2 && value.source === 'browser-ui' &&
     value.traceId === traceId &&
-    value.selectedModel === 'gpt-6-sol' && value.reasoning === 'high' &&
+    value.selectedModel === 'gpt-6-sol-instant' && value.reasoning === 'low' &&
     attached?.ref === image.ref && attached?.sha256 === image.sha256 && attached?.bytes === image.size &&
     upload?.creationRequestObserved === true && upload?.processingRequestObserved === true &&
     ['process_upload_stream', 'claim_and_finish'].includes(upload.processingRequestKind) &&
@@ -263,7 +263,7 @@ export async function executeArtReview(plan, { apply = false, host = null } = {}
   const requested = commitNativeEvent(planNativeEvent(plan.project, plan.runId, {
     kind: 'ART_REVIEW_REQUESTED', stage: plan.stage,
     artReview: { image: plan.image, brief: plan.brief, sources: plan.sources,
-      modelObserved: 'gpt-6-sol' },
+      modelObserved: 'gpt-6-sol-instant' },
   }));
   const artRequestSha256 = requested.pendingArtReview;
   const pendingResult = code => ({ engine: 'ludory-ai', operation: 'art-review', project: plan.project,
@@ -276,7 +276,7 @@ export async function executeArtReview(plan, { apply = false, host = null } = {}
       bytes, sha256: plan.image.sha256 }] });
   const expectedTraceId = `art-${plan.runId}`;
   if (response?.status !== 'HOST_OBSERVED' || response.routeObserved !== 'web-dev' ||
-      response.modelObserved !== 'gpt-6-sol' || response.imageInputObserved !== true ||
+      response.modelObserved !== 'gpt-6-sol-instant' || response.imageInputObserved !== true ||
       response.traceId !== expectedTraceId || response.imageRef !== plan.image.ref ||
       response.imageSha256 !== plan.image.sha256 || response.imageBytes !== plan.image.size) {
     return pendingResult('ART_VISUAL_ATTESTATION_MISSING');
@@ -286,7 +286,7 @@ export async function executeArtReview(plan, { apply = false, host = null } = {}
   }
   const parsed = interpretArtReview(response.text, { imageSha256: plan.image.sha256 });
   const receipt = recordNativeArtReview(plan.project, plan.runId, requested.headSha256, {
-    provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', visualInputObserved: true,
+    provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol-instant', visualInputObserved: true,
     artRequestSha256,
     verdict: parsed.verdict, reasonCode: parsed.reasonCode, findings: parsed.findings,
     summary: parsed.summary, hostObservation: response.hostObservation,
@@ -302,7 +302,7 @@ export async function executeArtReview(plan, { apply = false, host = null } = {}
     runId: plan.runId, status: exhausted ? 'ESCALATE' : parsed.verdict === 'BLOCKED' ? 'BLOCKED' : 'REVIEWED',
     verdict: parsed.verdict, findings: parsed.findings, summary: parsed.summary,
     reasonCode: parsed.reasonCode, provenance: 'HOST_OBSERVED',
-    modelObserved: 'gpt-6-sol', image: plan.image, brief: plan.brief,
+    modelObserved: 'gpt-6-sol-instant', image: plan.image, brief: plan.brief,
     sources: plan.sources, writes: [receipt.receiptPath],
     hostObservation: response.hostObservation,
     receiptPath: receipt.receiptPath, receiptSha256: receipt.receiptSha256,

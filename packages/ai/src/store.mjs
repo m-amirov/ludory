@@ -18,7 +18,8 @@ const EXECUTION_CODES = new Set(['EXECUTED_UNVERIFIED', 'EXECUTOR_INCOMPLETE', '
 const DEV_TASKS = new Set(['episode-script', 'art-concept']);
 const REVIEW_CODES = new Set(['HOST_OBSERVED', 'REVIEW_RESPONSE_UNVERIFIED', 'REVIEW_INTERRUPTED']);
 const DEV_RESULT_CODES = new Set(['HOST_OBSERVED', 'DEV_EXECUTOR_UNVERIFIED', 'DEV_EXECUTOR_INTERRUPTED']);
-const DEV_MODEL = /^gpt-\d+(?:\.\d+)?-sol$/i;
+// Keep historical Web ledger model IDs readable while permitting new Instant receipts.
+const DEV_MODEL = /^gpt-\d+(?:\.\d+)?-sol(?:-instant)?$/i;
 const IMAGE_MODEL = /^gpt-\d+(?:\.\d+)?-(?:terra|sol)$/i;
 // Read-only compatibility for signed native run events created before the API route
 // was removed. This is a ledger schema, NOT an executable provider or CLI option.
@@ -181,11 +182,21 @@ export function applyNativeStorageRecovery(preview, { confirmNoExecutor = false 
   }
 }
 
+// Historical high-effort receipts stay readable; only Instant can author new reviews.
+const supportedWebReviewModel = model => model === 'gpt-6-sol-instant' || model === 'gpt-6-sol';
+const historicalWebObservation = receipt =>
+  (receipt.modelObserved === 'gpt-6-sol-instant' &&
+    receipt.hostObservation?.selectedModel === 'gpt-6-sol-instant' &&
+    receipt.hostObservation?.reasoning === 'low') ||
+  (receipt.modelObserved === 'gpt-6-sol' &&
+    receipt.hostObservation?.selectedModel === 'gpt-6-sol' &&
+    receipt.hostObservation?.reasoning === 'high');
+
 function validateArtRequest(request, current) {
   const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED')?.manual;
   if (!imported || !request || typeof request !== 'object' || Array.isArray(request) ||
       Object.keys(request).sort().join(',') !== 'brief,image,modelObserved,sources' ||
-      request.modelObserved !== 'gpt-6-sol' ||
+      !supportedWebReviewModel(request.modelObserved) ||
       request.image?.path !== imported.output.outputPath ||
       request.image?.sha256 !== imported.output.outputSha256 ||
       request.image?.size !== imported.output.outputSize ||
@@ -396,9 +407,9 @@ function reviewedEpisodeIsCurrent(current) {
 function validateNarrativeRequest(value, sourceDraft) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).sort().join(',') !== 'brief,draft,modelObserved,sources,taskKind' ||
-      value.taskKind !== 'episode-script' || value.modelObserved !== 'gpt-6-sol' ||
+      value.taskKind !== 'episode-script' || !supportedWebReviewModel(value.modelObserved) ||
       !sourceDraft || JSON.stringify(value) !== JSON.stringify({
-        taskKind: 'episode-script', modelObserved: 'gpt-6-sol',
+        taskKind: 'episode-script', modelObserved: value.modelObserved,
         draft: sourceDraft.draft, brief: sourceDraft.brief, sources: sourceDraft.sources,
       })) throw new Error('NATIVE_REVIEW_REQUEST_INVALID');
   return value;
@@ -957,14 +968,13 @@ function readArtReceiptEntries(project, runId, projectId) {
         receipt.projectId !== projectId || receipt.runId !== runId ||
         !/^[a-f0-9]{64}$/.test(receipt.runHeadSha256 ?? '') ||
         receipt.prevSha256 !== (previous ?? receipt.runHeadSha256) ||
-        receipt.provenance !== 'HOST_OBSERVED' || receipt.modelObserved !== 'gpt-6-sol' ||
+        receipt.provenance !== 'HOST_OBSERVED' || !historicalWebObservation(receipt) ||
         receipt.visualInputObserved !== true ||
         (receipt.artRequestSha256 !== undefined &&
           (receipt.artRequestSha256 !== receipt.runHeadSha256 ||
             history.some(item => item.artRequestSha256 === receipt.artRequestSha256))) ||
         receipt.hostObservation?.protocolVersion !== 2 || receipt.hostObservation?.source !== 'browser-ui' ||
         receipt.hostObservation?.traceId !== `art-${runId}` ||
-        receipt.hostObservation?.selectedModel !== 'gpt-6-sol' || receipt.hostObservation?.reasoning !== 'high' ||
         receipt.hostObservation?.image?.ref !== receipt.image?.ref ||
         receipt.hostObservation?.image?.sha256 !== receipt.image?.sha256 ||
         receipt.hostObservation?.image?.bytes !== receipt.image?.size ||
@@ -1001,10 +1011,10 @@ export function readNativeArtReviews(projectDir, runRef) {
 export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, report) {
   const source = inspectNativeProject(projectDir);
   if (!report || report.provenance !== 'HOST_OBSERVED' ||
-      report.modelObserved !== 'gpt-6-sol' || report.visualInputObserved !== true ||
+      report.modelObserved !== 'gpt-6-sol-instant' || report.visualInputObserved !== true ||
       report.hostObservation?.protocolVersion !== 2 || report.hostObservation?.source !== 'browser-ui' ||
       report.hostObservation?.traceId !== `art-${runRef}` ||
-      report.hostObservation?.selectedModel !== 'gpt-6-sol' || report.hostObservation?.reasoning !== 'high' ||
+      report.hostObservation?.selectedModel !== 'gpt-6-sol-instant' || report.hostObservation?.reasoning !== 'low' ||
       report.hostObservation?.image?.ref !== report.image?.ref ||
       report.hostObservation?.image?.sha256 !== report.image?.sha256 ||
       report.hostObservation?.image?.bytes !== report.image?.size ||
@@ -1028,7 +1038,7 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
         current.pendingArtReview !== report.artRequestSha256 ||
         JSON.stringify(current.pendingArtRequest) !== JSON.stringify({
           image: report.image, brief: report.brief, sources: report.sources,
-          modelObserved: 'gpt-6-sol',
+          modelObserved: 'gpt-6-sol-instant',
         })) throw new Error('ART_REVIEW_STALE');
     const imported = current.events.find(event => event.kind === 'IMAGE_IMPORTED')?.manual;
     if (!imported || imported.output.outputPath !== report.image.path ||
@@ -1053,7 +1063,7 @@ export function recordNativeArtReview(projectDir, runRef, expectedHeadSha256, re
     const receipt = { schemaVersion: 1, index, projectId: current.run.projectId,
       runId: current.run.runId, runHeadSha256: expectedHeadSha256,
       prevSha256: history.length ? sha256(serial(history.at(-1))) : expectedHeadSha256,
-      at: new Date().toISOString(), provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
+      at: new Date().toISOString(), provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol-instant',
       visualInputObserved: true, artRequestSha256: report.artRequestSha256,
       hostObservation: report.hostObservation, image: report.image, brief: report.brief,
       sources: report.sources, verdict: report.verdict, reasonCode: report.reasonCode,

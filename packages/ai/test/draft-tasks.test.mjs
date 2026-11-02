@@ -22,10 +22,10 @@ function game(t, { receipt = true } = {}) {
 }
 
 const observedDev = { available: true, reasonCode: 'AVAILABLE', transportVerified: true,
-  entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol' };
+  entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol-instant' };
 const observedDevV2 = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
-  modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
-  reasoningRequired: 'high', preflight: { authenticated: true, newChat: true,
+  modelRouteAvailable: 'chatgpt-web/gpt-6-sol-instant', browserObservationV2Available: true,
+  reasoningRequired: 'low', preflight: { authenticated: true, newChat: true,
     url: 'https://chatgpt.com/', solAvailable: true } };
 
 test('v2 browser preflight cannot journal a text-only draft without actual text observation support', async t => {
@@ -76,7 +76,7 @@ test('a witnessed DEV capability makes a reviewable art-concept task ready', t =
     { discover: () => observedDev });
   assert.equal(result.status, 'READY');
   assert.equal(result.selectedRoute, 'web-dev');
-  assert.equal(result.modelObserved, 'gpt-6-sol');
+  assert.equal(result.modelObserved, 'gpt-6-sol-instant');
   assert.equal(result.nextAction.kind, 'REVIEW_DRAFT_ROUTE');
 });
 
@@ -84,7 +84,7 @@ test('Web DEV rejects a verified but non-approved Web model for every draft kind
   const { project, run } = game(t);
   const fullContext = artSources(project);
   for (const taskKind of ['art-concept', 'episode-script']) {
-    for (const modelObserved of ['gpt-5.6-sol', 'gpt-7-sol', 'gpt-6-terra']) {
+    for (const modelObserved of ['gpt-6-sol', 'gpt-5.6-sol', 'gpt-7-sol', 'gpt-6-terra']) {
       const result = planDevDraft(project, { run, taskKind, brief: 'brief.md',
         sources: taskKind === 'art-concept' ? fullContext : ['src/main.js'],
         contextReviewed: taskKind === 'art-concept' },
@@ -186,7 +186,7 @@ test('selected reference text is actually present in the source-bound host envel
   const result = await executeDevDraft(plan, { apply: true, host: observedHost(async request => {
     assert.match(request.prompt, /Original user code/);
     return { status: 'HOST_OBSERVED', text: 'Scene draft, unreviewed',
-      modelObserved: 'gpt-6-sol', routeObserved: 'web-dev' };
+      modelObserved: 'gpt-6-sol-instant', routeObserved: 'web-dev' };
   }) });
   assert.equal(result.status, 'PENDING_REVIEW');
 });
@@ -211,7 +211,7 @@ function readyDraft(project, run) {
 }
 
 const observedHost = (turn = async () => ({ status: 'HOST_OBSERVED', text: 'Draft dialogue\nNot reviewed.',
-  modelObserved: 'gpt-6-sol', routeObserved: 'web-dev' })) => ({
+  modelObserved: 'gpt-6-sol-instant', routeObserved: 'web-dev' })) => ({
   probe: async () => observedDev, turn,
 });
 
@@ -230,12 +230,12 @@ test('explicit DEV apply journals a request before host turn and preserves an un
     assert.equal(request.taskId, run);
     assert.match(request.prompt, /boat reaches the port/);
     return { status: 'HOST_OBSERVED', text: 'Draft dialogue\nNot reviewed.',
-      modelObserved: 'gpt-6-sol', routeObserved: 'web-dev' };
+      modelObserved: 'gpt-6-sol-instant', routeObserved: 'web-dev' };
   }) });
   assert.equal(called, 1);
   assert.equal(result.status, 'PENDING_REVIEW');
   assert.equal(result.provenance, 'HOST_OBSERVED');
-  assert.equal(result.modelObserved, 'gpt-6-sol');
+  assert.equal(result.modelObserved, 'gpt-6-sol-instant');
   const state = (await import('../src/store.mjs')).readNativeRun(project, run);
   assert.equal(state.status, 'EXECUTED_UNVERIFIED');
   assert.equal(state.pendingExecutor, null);
@@ -278,8 +278,8 @@ test('uncertain host timeout remains pending, blocks duplicate invocation and ch
 
 test('invalid host text and model mismatch do not create accepted drafts', async t => {
   for (const response of [
-    { status: 'HOST_OBSERVED', text: ' ', modelObserved: 'gpt-6-sol', routeObserved: 'web-dev' },
-    { status: 'HOST_OBSERVED', text: 'x'.repeat(262145), modelObserved: 'gpt-6-sol', routeObserved: 'web-dev' },
+    { status: 'HOST_OBSERVED', text: ' ', modelObserved: 'gpt-6-sol-instant', routeObserved: 'web-dev' },
+    { status: 'HOST_OBSERVED', text: 'x'.repeat(262145), modelObserved: 'gpt-6-sol-instant', routeObserved: 'web-dev' },
     { status: 'HOST_OBSERVED', text: 'Narrative PASS', modelObserved: 'gpt-6-terra', routeObserved: 'web-dev' },
   ]) {
     const { project, run } = game(t);

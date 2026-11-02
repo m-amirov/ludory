@@ -41,6 +41,77 @@ node packages/studio/bin/ludory.mjs qa simulate --target vk-games \
 
 The command checks *local* archive integrity, receipt, simulated SDK/bridge contracts, declaration consistency and optional promo bytes. It does **not** visit the real platform, start a browser, judge content/visual quality, authenticate licenses, run official moderation or grant publication authority. Reports always state `actualModeration: NOT_RUN`, `releaseReady: false`, `publicationAllowed: false`. The pinned VK policy sources are currently unverified, and a locally green gate cannot replace a platform or human review.
 
+## Sequential independent Web visual review (P3c.2, opt-in)
+
+After producing a P3b `qa capture` evidence directory and a P3c.1
+`qa handoff`-compatible metadata/promo packet, preview the five original images
+that would be sent to the isolated Web DEV reviewer:
+
+```sh
+node packages/studio/bin/ludory.mjs qa review --target vk-games \
+  --archive candidate.zip --receipt receipt.json --rights rights.json \
+  --metadata listing.json --promo-root promo --evidence-dir browser-evidence \
+  --output new-review-session --json
+
+# Only after inspecting the preview and authorizing five Web uploads:
+node packages/studio/bin/ludory.mjs qa review --target vk-games \
+  --archive candidate.zip --receipt receipt.json --rights rights.json \
+  --metadata listing.json --promo-root promo --evidence-dir browser-evidence \
+  --output new-review-session --apply --json
+
+# Local recorded state; never a new host/browser attestation:
+node packages/studio/bin/ludory.mjs qa review-status \
+  --output new-review-session --json
+```
+
+For Yandex, supply matching `--sdk-evidence` and `--rights`; optionally pin
+`--report-sha256` to the original capture report. Preview is read-only, never
+discovers the helper and never transmits image bytes. `--apply` requires an
+authenticated, independently observed `chatgpt-web/gpt-6-sol-instant` Web DEV
+helper with `low` reasoning and browser observation protocol V2. It sends exactly
+one original image per independent turn in this order: desktop 1000×720, mobile
+390×844, landscape 667×375, promo icon and promo cover. Each turn must prove an
+upload creation request, completed processing and a visible image attachment
+chip with matching image hash, byte count and trace ID. Model JSON output alone
+is never accepted as browser evidence. Listing/policy material remains
+user-declared or unverified, not authoritative instructions or policy clearance.
+
+Before each Web call the new, exclusive local output directory records a
+`REQUESTED` intent. A missing response, image/provenance mismatch or an uncertain
+write leaves `PENDING_RECOVERY` and stops without retrying any image. Do not
+re-run `qa review --apply` against the same directory. Only after confirming the
+old reviewer is stopped, explicitly authorize a **new five-upload session**:
+
+```sh
+node packages/studio/bin/ludory.mjs qa review-restart --target vk-games \
+  --archive candidate.zip --receipt receipt.json --rights rights.json \
+  --metadata listing.json --promo-root promo --evidence-dir browser-evidence \
+  --previous new-review-session --output fresh-restart-session \
+  --confirm-reviewer-stopped --apply --json
+```
+
+Journal creation and event publication flush both file bytes and directory
+entries and anchor writes to the checked physical directory. If a host OS or
+filesystem cannot verify those flushes (including Windows configurations that
+do not allow Node to flush directories), `--apply` fails closed **before Web
+transmission**, potentially leaving an unused output directory; choose a new
+output path after correcting the host prerequisites. Do not interpret a missing
+record after a hardware failure as permission to repeat a paid upload.
+
+The restart revalidates all original source files, requires a distinct output
+directory and may use additional account quota. A readable/edited local audit
+is deliberately **not** a trusted replay of live host observations:
+`qa review-status` returns `RECORDED_REVIEWED`, `RECORDED_ISSUES_FOUND` or
+`PENDING_RECOVERY`, always with `browserAttested:false` and
+`reviewProvenance:'LOCAL_RECORD_ONLY'`. The immediate apply response can say
+`HOST_OBSERVED` only for that live, verified session. Exits: `0` for preview/
+recorded review or observed no findings, `1` for findings, `2` for blocked
+verification and `3` for uncertain pending recovery. All paths keep
+`actualModeration:'NOT_RUN'`, `releaseReady:false` and
+`publicationAllowed:false`. No command submits to Yandex/VK or publishes.
+Production host smoke remains owner-operated; automated tests use fake V2
+observations and do not establish real browser compatibility.
+
 ## Fresh local and LAN game preview (new Studio games)
 
 ```sh
@@ -407,7 +478,7 @@ node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio
 node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task image --json
 ```
 
-Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` prefers authenticated **GPT-6 Sol (Web)** DEV; `art-concept` prefers that same Web DEV **only if** the primary agent explicitly reviewed four distinct scene/character/location/style references, otherwise the primary model writes the art brief. `image` creates an agent handoff to a **separate Codex image-generator subagent**, inheriting the primary model and invoking built-in `$imagegen`. It returns `NEEDS_AGENT_ACTION`/`SPAWN_IMAGE_AGENT`, never a claimed automatic spawn or invocation. Programmatic `terra` and `sol` are retained only for explicitly pinned historical in-process adapters. Read-only routing invokes no provider.
+Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` prefers authenticated **GPT-6 Sol Instant (Web)** DEV; `art-concept` prefers that same Web DEV **only if** the primary agent explicitly reviewed four distinct scene/character/location/style references, otherwise the primary model writes the art brief. `image` creates an agent handoff to a **separate Codex image-generator subagent**, inheriting the primary model and invoking built-in `$imagegen`. It returns `NEEDS_AGENT_ACTION`/`SPAWN_IMAGE_AGENT`, never a claimed automatic spawn or invocation. Programmatic `terra` and `sol` are retained only for explicitly pinned historical in-process adapters. Read-only routing invokes no provider.
 
 `workflow route` never writes project files or workflow events; it rejects `--apply`. Exit code `0` covers a valid preview, including a manual handoff; `2` means the project is blocked (for example, no Studio creation receipt); `1` means invalid arguments or inspection error. Historical games stay frozen. No image, script, art review, independent acceptance, or Release PASS is produced by a route preview.
 JSON previews preserve `reasonCode` and, when available, `capabilityReasonCode`. The built-in ImageGen route uses `modelSelection: provider-default`, `qualityPreference: highest-available` and `modelObserved: null`; it cannot set or attest a hidden execution model. Historical in-process routes retain their Terra/SOL evidence fields.
@@ -425,7 +496,7 @@ node packages/studio/bin/ludory.mjs workflow draft --project /path/to/new-studio
   --source narrative/graph.json --json
 
 # Explicit execution. Invokes DEV only if the installed isolated helper attests
-# actual authenticated transport, effective selected GPT-6 Sol (Web), and browser-only mode.
+# actual authenticated transport, effective selected GPT-6 Sol Instant (Web), and browser-only mode.
 node packages/studio/bin/ludory.mjs workflow draft --project /path/to/new-studio-game \
   --run RUN_ID --task art-concept --brief narrative/art-brief.md \
   --source 'scene:narrative/scene.txt;characters:narrative/characters.txt;location:narrative/location.txt;style:narrative/art-style.txt' \
@@ -467,7 +538,7 @@ An interrupted import can leave an unreferenced uniquely named draft in the priv
 
 ### Automatic narrative review (StoryScope-inspired)
 
-For a new Studio game, `workflow draft --task episode-script --apply` automatically makes a second **independent** GPT-6 Sol (Web) review turn after the draft has been saved. `workflow draft-import --task episode-script --apply` also requests review when the authenticated helper is available. The first call writes immutable draft bytes; the second reviews those bytes alongside the selected brief/context. There is no API key or alternate provider. The first and second turns are independently recorded as generation provenance and `NARRATIVE_REVIEW_REQUESTED` / `NARRATIVE_REVIEW_RESULT` events.
+For a new Studio game, `workflow draft --task episode-script --apply` automatically makes a second **independent** GPT-6 Sol Instant (Web) review turn after the draft has been saved. `workflow draft-import --task episode-script --apply` also requests review when the authenticated helper is available. The first call writes immutable draft bytes; the second reviews those bytes alongside the selected brief/context. There is no API key or alternate provider. The first and second turns are independently recorded as generation provenance and `NARRATIVE_REVIEW_REQUESTED` / `NARRATIVE_REVIEW_RESULT` events.
 
 ```sh
 # Read-only preview; no paid/host request.
@@ -544,7 +615,7 @@ node packages/studio/bin/ludory.mjs workflow art-review --project /path/to/new-s
   --context-reviewed --apply --json
 ```
 
-Only a capability-verified isolated `chatgpt-web/gpt-6-sol` helper (`reasoning: high`)
+Only a capability-verified isolated `chatgpt-web/gpt-6-sol-instant` helper (`reasoning: low`, Instant)
 may evaluate the image. Ludory passes the **actual PNG/JPEG/WebP bytes**, max
 10 MiB, in the helper's `prepared.images` envelope and requires a witnessed
 `image_attached` event plus `imageInputObserved`, image reference and matching
@@ -552,8 +623,8 @@ SHA-256 on the final result. The compatibility helper must emit `ready` with
 `protocolVersion: 1`, a verified `capabilities` frame including
 `imageInputVerified: true`, and those attachment observations from its browser
 worker. For a visual receipt, the attachment event and result must additionally
-carry the same `hostObservation` protocol v2: browser-selected `gpt-6-sol` with
-`reasoning: high`, plus the attached ref, SHA-256 and byte length. Requested
+carry the same `hostObservation` protocol v2: browser-selected `gpt-6-sol-instant` with
+`reasoning: low`, plus the attached ref, SHA-256 and byte length. Requested
 model settings and helper declarations are not observations. **The upstream unmodified `codex-chatgpt-web` browser helper currently
 does not supply that complete Ludory attestation protocol.** Its binary-image
 support alone does not satisfy the gate. An incompatible/older helper yields

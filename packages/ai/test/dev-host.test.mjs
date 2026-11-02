@@ -59,7 +59,7 @@ readline.createInterface({input:process.stdin}).on('line', line => {
   if (message.type === 'capabilities') {
     send({ type: 'capabilities', id:message.id, ...(accepted ? {
       transportVerified:true, entitlementVerified:true, routeObserved:'web-dev',
-      modelObserved:'gpt-6-sol', localToolsEnabled:false
+      modelObserved:'gpt-6-sol-instant', localToolsEnabled:false
     } : { transportVerified:true, entitlementVerified:false }) });
   } else if (message.type === 'run') {
     send({ type:'event', id:message.id, event:'prepared_selected' });
@@ -69,7 +69,7 @@ readline.createInterface({input:process.stdin}).on('line', line => {
   } else if (message.type === 'send_activation_ack') {
     if (submit) send({ type:'event', id:message.id, event:'submitted' });
     send({ type:'result', id:message.id, text:'# Draft\\nA new scene',
-      ...(accepted ? {modelObserved:'gpt-6-sol', routeObserved:'web-dev',
+      ...(accepted ? {modelObserved:'gpt-6-sol-instant', routeObserved:'web-dev',
         transportVerified:true, entitlementVerified:true, localToolsEnabled:false} : {}) });
   }
 });
@@ -202,11 +202,11 @@ test('witnessed helper route permits one source-bound browser-only text turn', a
   assert.equal(host.available, false); // Installation is not entitlement.
   const cap = await host.probe();
   assert.equal(cap.available, true);
-  assert.equal(cap.modelObserved, 'gpt-6-sol');
+  assert.equal(cap.modelObserved, 'gpt-6-sol-instant');
   const result = await host.turn({ prompt: 'source-bound instructions', taskId: 'test-run-1' });
   assert.equal(result.status, 'HOST_OBSERVED');
   assert.equal(result.text, '# Draft\nA new scene');
-  assert.equal(result.modelObserved, 'gpt-6-sol');
+  assert.equal(result.modelObserved, 'gpt-6-sol-instant');
 });
 
 test('helper without model-entitlement observation never becomes runnable', async t => {
@@ -236,7 +236,7 @@ test('legacy helper without capability handshake is closed after a bounded probe
 });
 
 test('DEV host refuses non-GPT-6 Sol Web route before accepting a task', async t => {
-  const { home, stableHome, root } = fixture(helper().replaceAll('gpt-6-sol', 'gpt-5.6-sol'));
+  const { home, stableHome, root } = fixture(helper().replaceAll('gpt-6-sol-instant', 'gpt-5.6-sol'));
   const dev = discoverDevHost({ devHome: home, stableHome });
   cleanupHost(t, root, dev);
   const cap = await dev.probe();
@@ -277,7 +277,7 @@ send({type:'ready',protocolVersion:1});
 readline.createInterface({input:process.stdin}).on('line', line => {
   const message = JSON.parse(line);
   if (message.type === 'capabilities') send({type:'capabilities',id:message.id,
-    transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',modelObserved:'gpt-6-sol',localToolsEnabled:false});
+    transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',modelObserved:'gpt-6-sol-instant',localToolsEnabled:false});
   if (message.type === 'run') {
     for(let i=0;i<120;i++) send({type:'event',id:'foreign-'+i,event:'noise',padding:'x'.repeat(100000)});
   }
@@ -311,7 +311,7 @@ rl.on('line', line => {
   const item = JSON.parse(line);
   if(item.type==='capabilities') {
     send({type:'capabilities',id:item.id,transportVerified:true,entitlementVerified:true,
-      routeObserved:'web-dev',modelObserved:'gpt-6-sol',localToolsEnabled:false});
+      routeObserved:'web-dev',modelObserved:'gpt-6-sol-instant',localToolsEnabled:false});
     rl.pause();
   }
 });`;
@@ -342,10 +342,10 @@ rl.createInterface({input:process.stdin}).on('line', line => {
   const item = JSON.parse(line);
   if (item.type==='capabilities') send({type:'capabilities',id:item.id,
     transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',
-    modelObserved:'gpt-6-sol',localToolsEnabled:false});
+    modelObserved:'gpt-6-sol-instant',localToolsEnabled:false});
   if (item.type==='run') {
     send({type:'event',id:item.id,event:'submitted'});
-    send({type:'result',id:item.id,text:'Fabricated',modelObserved:'gpt-6-sol',
+    send({type:'result',id:item.id,text:'Fabricated',modelObserved:'gpt-6-sol-instant',
       transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',localToolsEnabled:false});
   }
 });`;
@@ -366,7 +366,7 @@ rl.createInterface({input:process.stdin}).on('line', line => {
  const item=JSON.parse(line);
  if(item.type==='capabilities') send({type:'capabilities',id:item.id,
   transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',
-  modelObserved:'gpt-6-sol',localToolsEnabled:false});
+  modelObserved:'gpt-6-sol-instant',localToolsEnabled:false});
  if(item.type==='run') {
   // Deliver all premature frames in one transport batch: separate writes can
   // race the parent's ACK write on slower CI runners and become post-ACK frames.
@@ -374,7 +374,7 @@ rl.createInterface({input:process.stdin}).on('line', line => {
    {type:'event',id:item.id,event:'prepared_selected'},
    {type:'event',id:item.id,event:'send_activated'},
    {type:'event',id:item.id,event:'submitted'},
-   {type:'result',id:item.id,text:'Fake',modelObserved:'gpt-6-sol',
+   {type:'result',id:item.id,text:'Fake',modelObserved:'gpt-6-sol-instant',
     transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',localToolsEnabled:false}
   ].map(frame => JSON.stringify(frame)).join('\\n')+'\\n');
  }
@@ -400,7 +400,7 @@ rl.createInterface({input:process.stdin}).on('line', line => {
  const item=JSON.parse(line);
  if(item.type==='capabilities') {
   send({type:'capabilities',id:item.id,transportVerified:true,entitlementVerified:true,
-   modelObserved:'gpt-6-sol',routeObserved:'web-dev',localToolsEnabled:false});
+   modelObserved:'gpt-6-sol-instant',routeObserved:'web-dev',localToolsEnabled:false});
   ${afterCapabilities}
  }
 });`;
@@ -427,7 +427,7 @@ readline.createInterface({input:process.stdin}).on('line', line => {
  const item=JSON.parse(line);
  if(item.type==='capabilities') send({type:'capabilities',id:item.id,
   transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',
-  modelObserved:'gpt-6-sol',localToolsEnabled:false,imageInputVerified:true});
+  modelObserved:'gpt-6-sol-instant',localToolsEnabled:false,imageInputVerified:true});
  if(item.type==='run') send({type:'event',id:item.id,event:'prepared_selected'});
  if(item.type==='prepared_selected_ack') {
   const image=item.prepared.images[0];
@@ -435,15 +435,15 @@ readline.createInterface({input:process.stdin}).on('line', line => {
   const bytes=Buffer.from(image.imageUrl.split(',')[1],'base64');
   observed={ref:image.ref,sha256:crypto.createHash('sha256').update(bytes).digest('hex'),bytes:bytes.length};
   send({type:'event',id:item.id,event:'image_attached',imageRef:observed.ref,imageSha256:observed.sha256,
-   hostObservation:{protocolVersion:2,source:'browser-ui',selectedModel:'gpt-6-sol',reasoning:'high',image:observed}});
+   hostObservation:{protocolVersion:2,source:'browser-ui',selectedModel:'gpt-6-sol-instant',reasoning:'low',image:observed}});
   send({type:'event',id:item.id,event:'send_activated'});
  }
  if(item.type==='send_activation_ack') {
   send({type:'event',id:item.id,event:'submitted'});
   send({type:'result',id:item.id,text:'review payload',transportVerified:true,
-   entitlementVerified:true,routeObserved:'web-dev',modelObserved:'gpt-6-sol',
+   entitlementVerified:true,routeObserved:'web-dev',modelObserved:'gpt-6-sol-instant',
    localToolsEnabled:false,imageInputObserved:true,imageRef:observed.ref,imageSha256:observed.sha256,
-   hostObservation:{protocolVersion:2,source:'browser-ui',selectedModel:'gpt-6-sol',reasoning:'high',image:observed}});
+   hostObservation:{protocolVersion:2,source:'browser-ui',selectedModel:'gpt-6-sol-instant',reasoning:'low',image:observed}});
  }
 });`;
   const { home, stableHome, root } = fixture(script);
@@ -455,9 +455,9 @@ readline.createInterface({input:process.stdin}).on('line', line => {
   assert.equal(result.imageInputObserved, true);
   assert.equal(result.imageSha256, expectedHash);
   assert.equal(result.imageRef, 'candidate-1');
-  assert.equal(result.modelObserved, 'gpt-6-sol');
+  assert.equal(result.modelObserved, 'gpt-6-sol-instant');
   assert.deepEqual(result.hostObservation, { protocolVersion: 2, source: 'browser-ui',
-    selectedModel: 'gpt-6-sol', reasoning: 'high', image: { ref: 'candidate-1',
+    selectedModel: 'gpt-6-sol-instant', reasoning: 'low', image: { ref: 'candidate-1',
       sha256: expectedHash, bytes: payload.length } });
 });
 
@@ -474,7 +474,7 @@ readline.createInterface({input:process.stdin}).on('line', line => {
  const item=JSON.parse(line);
  if(item.type==='capabilities') send({type:'capabilities',id:item.id,
   transportVerified:true,entitlementVerified:true,routeObserved:'web-dev',
-  modelObserved:'gpt-6-sol',localToolsEnabled:false,imageInputVerified:true});
+  modelObserved:'gpt-6-sol-instant',localToolsEnabled:false,imageInputVerified:true});
  if(item.type==='run') send({type:'event',id:item.id,event:'prepared_selected'});
  if(item.type==='prepared_selected_ack') {
   const image=item.prepared.images[0];
@@ -485,7 +485,7 @@ readline.createInterface({input:process.stdin}).on('line', line => {
  if(item.type==='send_activation_ack') {
   send({type:'event',id:item.id,event:'submitted'});
   send({type:'result',id:item.id,text:'declared-only',transportVerified:true,
-   entitlementVerified:true,routeObserved:'web-dev',modelObserved:'gpt-6-sol',
+   entitlementVerified:true,routeObserved:'web-dev',modelObserved:'gpt-6-sol-instant',
    localToolsEnabled:false,imageInputObserved:true,imageRef:observed.ref,imageSha256:observed.sha256});
  }
 });`;
@@ -520,14 +520,19 @@ send({type:'ready',features:['browser_observation_v2']});
 readline.createInterface({input:process.stdin}).on('line', line => {
  const item=JSON.parse(line);
  if(item.type==='inspect') send({type:'result',id:item.id,value:{authenticated:true,newChat:true,url:'https://chatgpt.com/',solAvailable:true,extraHighAvailable:false,proAvailable:true}});
- if(item.type==='run') send({type:'event',id:item.id,event:'prepared_selected',reused:false});
+ if(item.type==='run') {
+  if(item.turn.reasoning!=='low' || item.turn.modelId!=='gpt-5.6-sol' || item.turn.modelFamily!=='6') process.exit(18);
+  send({type:'event',id:item.id,event:'prepared_selected',reused:false});
+ }
  if(item.type==='prepared_selected_ack') {
   const image=item.prepared.images[0];
   if(!image) { send({type:'event',id:item.id,event:'send_activated'}); return; }
   const bytes=Buffer.from(image.imageUrl.split(',')[1],'base64');
   const sha=crypto.createHash('sha256').update(bytes).digest('hex');
   send({type:'event',id:item.id,event:'browser_observation_v2',observation:{version:2,traceId:item.id,source:'chatgpt-web-browser',
-    model:{canonicalId:'chatgpt-web/gpt-6-sol',backendModelId:'gpt-5.6-sol',family:'6',effort:'high',selectionLabel:'High'},
+    model:item.id==='art-review-v2-high'
+      ? {canonicalId:'chatgpt-web/gpt-6-sol',backendModelId:'gpt-5.6-sol',family:'6',effort:'high',selectionLabel:'High'}
+      : {canonicalId:'chatgpt-web/gpt-6-sol-instant',backendModelId:'gpt-5.6-sol',family:'6',effort:'low',selectionLabel:'Instant'},
     attachments:[{ref:image.ref,name:'candidate.png',mimeType:'image/png',sha256:sha,bytes:bytes.length,
       upload:{creationRequestObserved:true,processingRequestObserved:true,processingRequestKind:'process_upload_stream',processingEvent:'file.processing.completed',processingCompleted:true,visibleAttachmentChip:true}}]}});
   send({type:'event',id:item.id,event:'send_activated'});
@@ -549,12 +554,17 @@ readline.createInterface({input:process.stdin}).on('line', line => {
   const result = await host.turn({ prompt: 'source-bound visual task', taskId: 'art-review-v2',
     images: [{ ref: 'candidate', mimeType: 'image/png', bytes: payload, sha256: expectedHash }] });
   assert.equal(result.status, 'HOST_OBSERVED');
-  assert.equal(result.modelObserved, 'gpt-6-sol');
+  assert.equal(result.modelObserved, 'gpt-6-sol-instant');
   assert.equal(result.traceId, 'art-review-v2');
   assert.equal(result.imageSha256, expectedHash);
   assert.equal(result.imageBytes, payload.length);
   assert.equal(result.hostObservation.protocolVersion, 2);
+  assert.equal(result.hostObservation.selectedModel, 'gpt-6-sol-instant');
+  assert.equal(result.hostObservation.reasoning, 'low');
   assert.equal(result.hostObservation.upload.processingCompleted, true);
+  await assert.rejects(host.turn({ prompt: 'must not accept prior High preset', taskId: 'art-review-v2-high',
+    images: [{ ref: 'candidate', mimeType: 'image/png', bytes: payload, sha256: expectedHash }] }),
+  /DEV_BROWSER_OBSERVATION_UNVERIFIED/);
 });
 
 test('upstream v2 refuses a missing attachment without sending', async t => {

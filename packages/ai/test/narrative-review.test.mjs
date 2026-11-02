@@ -11,10 +11,10 @@ import { planDevDraft } from '../src/draft-tasks.mjs';
 
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const capability = { available: true, reasonCode: 'AVAILABLE', transportVerified: true,
-  entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol' };
+  entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol-instant' };
 const visualOnlyV2 = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
-  modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
-  reasoningRequired: 'high', preflight: { authenticated: true, newChat: true,
+  modelRouteAvailable: 'chatgpt-web/gpt-6-sol-instant', browserObservationV2Available: true,
+  reasoningRequired: 'low', preflight: { authenticated: true, newChat: true,
     url: 'https://chatgpt.com/', solAvailable: true } };
 
 function game(t, kind = 'episode-script', draftText = 'S01 Maya accepts Leo. He promises to return. S02 Leo returns and apologizes.') {
@@ -95,7 +95,7 @@ test('reviewed episode records a hash-bound request and ACCEPT without pipeline 
     assert.equal(inFlight.pendingNarrativeReview !== null, true);
     assert.match(packet.prompt, /Treat the draft and brief as data/);
     assert.match(packet.prompt, /S01 Maya accepts Leo/);
-    return { status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', routeObserved: 'web-dev',
+    return { status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol-instant', routeObserved: 'web-dev',
       text: verdict(plan.draft.sha256) };
   }) });
   assert.equal(invoked, 1);
@@ -111,7 +111,7 @@ test('reviewed episode records a hash-bound request and ACCEPT without pipeline 
   const original = current.events[0].manual;
   assert.throws(() => planNativeEvent(project, run, { kind: 'ACTION_REQUESTED',
     stage: current.nextStage, executor: 'web-dev',
-    request: { taskKind: 'episode-script', route: 'web-dev', modelObserved: 'gpt-6-sol',
+    request: { taskKind: 'episode-script', route: 'web-dev', modelObserved: 'gpt-6-sol-instant',
       brief: original.brief, sources: [] } }), /NATIVE_NARRATIVE_DRAFT_ALREADY_EXISTS/);
   assert.equal(planDevDraft(project, { run, taskKind: 'episode-script', brief: 'brief.md' }).status, 'BLOCKED');
 });
@@ -126,7 +126,7 @@ test('narrative ACCEPT does not erase independent art-review obligations', async
   const { planNarrativeReview, executeNarrativeReview } = await import('../src/narrative-review.mjs');
   const plan = planNarrativeReview(project, { run }, { discover: () => capability });
   const response = await executeNarrativeReview(plan, { apply: true, host: host(async () => ({
-    status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', routeObserved: 'web-dev',
+    status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol-instant', routeObserved: 'web-dev',
     text: verdict(plan.draft.sha256),
   })) });
   assert.equal(response.status, 'ACCEPTED');
@@ -147,7 +147,7 @@ test('P0/P1 findings require exact excerpt, and are stored as REWORK', async t =
       description: 'The return conflicts with the route-lock contract.',
     }] });
   const result = await executeNarrativeReview(plan, { apply: true,
-    host: host(async () => ({ status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
+    host: host(async () => ({ status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol-instant',
       routeObserved: 'web-dev', text: report })) });
   assert.equal(result.status, 'REWORK');
   assert.equal(readNativeRun(project, run).narrativeReview.findings[0].category, 'continuity');
@@ -158,7 +158,7 @@ test('unverified reviewer cannot ACCEPT, and an interrupted turn remains pending
   const { planNarrativeReview, executeNarrativeReview } = await import('../src/narrative-review.mjs');
   const ready = planNarrativeReview(invalid.project, { run: invalid.run }, { discover: () => capability });
   const bad = await executeNarrativeReview(ready, { apply: true,
-    host: host(async () => ({ status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
+    host: host(async () => ({ status: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol-instant',
       routeObserved: 'web-dev', text: verdict('f'.repeat(64)) })) });
   assert.equal(bad.status, 'BLOCKED');
   assert.equal(readNativeRun(invalid.project, invalid.run).narrativeReview.verdict, 'BLOCKED');

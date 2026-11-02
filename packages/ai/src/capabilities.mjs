@@ -24,16 +24,16 @@ function normalizeHost(record, kind) {
   if (kind === 'webDev' && isRecord(record) && ownData(record, 'browserObservationV2Available') === true) {
     const preflight = ownData(record, 'preflight');
     if (ownData(record, 'available') !== true || ownData(record, 'reasonCode') !== 'AVAILABLE' ||
-        ownData(record, 'routeAvailable') !== 'web-dev' || ownData(record, 'modelRouteAvailable') !== 'chatgpt-web/gpt-6-sol' ||
-        ownData(record, 'reasoningRequired') !== 'high' || !isRecord(preflight) ||
+        ownData(record, 'routeAvailable') !== 'web-dev' || ownData(record, 'modelRouteAvailable') !== 'chatgpt-web/gpt-6-sol-instant' ||
+        ownData(record, 'reasoningRequired') !== 'low' || !isRecord(preflight) ||
         ownData(preflight, 'authenticated') !== true || ownData(preflight, 'newChat') !== true ||
         ownData(preflight, 'solAvailable') !== true ||
         typeof ownData(preflight, 'url') !== 'string' || !ownData(preflight, 'url')) {
       return unavailable('AI_ROUTING_WEB_OBSERVATION_V2_UNVERIFIED');
     }
     return { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
-      modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
-      reasoningRequired: 'high', preflight, inspect: ownData(record, 'inspect') };
+      modelRouteAvailable: 'chatgpt-web/gpt-6-sol-instant', browserObservationV2Available: true,
+      reasoningRequired: 'low', preflight, inspect: ownData(record, 'inspect') };
   }
   const modelObserved = ownData(record, 'modelObserved');
   const available = ownData(record, 'available');
@@ -45,8 +45,8 @@ function normalizeHost(record, kind) {
   if (!validModelId(modelObserved)) return unavailable('AI_ROUTING_MODEL_UNVERIFIED');
   if (kind === 'webDev') {
     if (ownData(record, 'routeObserved') !== 'web-dev') return unavailable('AI_ROUTING_ROUTE_UNVERIFIED');
-    // The owner explicitly selected GPT-6 Sol (Web) for every Web DEV agent task.
-    if (modelObserved !== 'gpt-6-sol') return unavailable('AI_ROUTING_MODEL_UNVERIFIED');
+    // The owner explicitly selected GPT-6 Sol Instant (Web) for every Web DEV task.
+    if (modelObserved !== 'gpt-6-sol-instant') return unavailable('AI_ROUTING_MODEL_UNVERIFIED');
   } else {
     if (ownData(record, 'imageGenCallable') !== true) return unavailable('AI_ROUTING_IMAGE_GEN_UNVERIFIED');
     if (!(kind === 'imageTerra' ? /^gpt-\d+(?:\.\d+)?-terra$/i

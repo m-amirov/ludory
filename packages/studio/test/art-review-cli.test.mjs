@@ -11,8 +11,8 @@ import { readNativeArtReviews, readNativeRun } from '../../ai/src/store.mjs';
 
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const capability = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
-  modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
-  reasoningRequired: 'high', preflight: { authenticated: true, newChat: true,
+  modelRouteAvailable: 'chatgpt-web/gpt-6-sol-instant', browserObservationV2Available: true,
+  reasoningRequired: 'low', preflight: { authenticated: true, newChat: true,
     url: 'https://chatgpt.com/', solAvailable: true, extraHighAvailable: false, proAvailable: false } };
 
 async function setup(t) {
@@ -50,10 +50,10 @@ function host(verdict = 'PASS_ART', findings = [], mutate = () => {}) {
       assert.equal(images.length, 1);
       assert.deepEqual(images[0].bytes, png);
       mutate();
-      return { status: 'HOST_OBSERVED', routeObserved: 'web-dev', traceId: taskId, modelObserved: 'gpt-6-sol',
+      return { status: 'HOST_OBSERVED', routeObserved: 'web-dev', traceId: taskId, modelObserved: 'gpt-6-sol-instant',
         imageInputObserved: true, imageRef: images[0].ref, imageSha256: hash(png), imageBytes: images[0].bytes.length,
-        hostObservation: { protocolVersion: 2, source: 'browser-ui', selectedModel: 'gpt-6-sol',
-          reasoning: 'high', traceId: taskId, image: { ref: images[0].ref, sha256: hash(png), bytes: images[0].bytes.length },
+        hostObservation: { protocolVersion: 2, source: 'browser-ui', selectedModel: 'gpt-6-sol-instant',
+          reasoning: 'low', traceId: taskId, image: { ref: images[0].ref, sha256: hash(png), bytes: images[0].bytes.length },
           upload: { creationRequestObserved: true, processingRequestObserved: true, processingRequestKind: 'process_upload_stream',
             processingEvent: 'file.processing.completed', processingCompleted: true, visibleAttachmentChip: true } },
         text: JSON.stringify({ schemaVersion: 1, imageVisible: true, imageSha256: hash(png),
@@ -118,7 +118,7 @@ test('art-review observed Web image yields immutable, source-locked artistic rec
   const receipts = readNativeArtReviews(item.project, item.run);
   assert.equal(receipts.length, 1);
   assert.equal(receipts[0].verdict, 'PASS_ART');
-  assert.equal(receipts[0].modelObserved, 'gpt-6-sol');
+  assert.equal(receipts[0].modelObserved, 'gpt-6-sol-instant');
   assert.equal(receipts[0].image.sha256, hash(png));
   assert.deepEqual(receipts[0].sources.map(x => x.role), ['scene', 'characters', 'location', 'style']);
   const file = path.join(item.project, '.ludory', 'ai', 'runs', item.run, 'reviews', '000001.json');
