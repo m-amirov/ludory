@@ -39,6 +39,12 @@ async function observeNarrative({ projectDir, outputDir }) {
         }
       });
       try {
+        const screenshots = [];
+        const capture = async stage => {
+          const file = `${name}-${stage}.png`;
+          const bytes = await page.screenshot({ path: path.join(outputDir, file), fullPage: true });
+          screenshots.push({ stage, file, sha256: sha256(bytes) });
+        };
         await page.goto(server.url);
         await page.getByText('Маяк мигнул трижды.').waitFor();
         const orientation = await page.locator('.ludory-narrative').getAttribute('data-orientation');
@@ -59,11 +65,16 @@ async function observeNarrative({ projectDir, outputDir }) {
         await page.getByRole('button', { name: 'Журнал' }).click();
         await page.getByText('Снимок у маяка').waitFor();
         await page.getByText('Белая ракушка').waitFor();
+        const albumImage = page.locator('.ludory-narrative__journal img');
+        await albumImage.waitFor();
+        await albumImage.evaluate(img => img.decode());
+        await capture('journal');
         await page.getByRole('button', { name: 'Скрыть журнал' }).click();
         await page.locator('#save').click();
         await page.getByText('Сохранено').waitFor();
         await page.reload();
         await page.getByText('Чуть позже Мира заметила снимок').waitFor();
+        await capture('restored');
         if (await page.getByRole('button', { name: 'Назад' }).count()) {
           throw new Error('F5 transient Back history survived save/reload');
         }
@@ -84,8 +95,7 @@ async function observeNarrative({ projectDir, outputDir }) {
         }
         await page.getByRole('button', { name: 'Начать заново' }).click();
         await page.getByText('Маяк мигнул трижды.').waitFor();
-        const filename = `${name}.png`;
-        const png = await page.screenshot({ path: path.join(outputDir, filename), fullPage: true });
+        await capture('replay');
         if (pageErrors.length || externalRequests.length || consoleErrors.length) {
           throw new Error(`F5 ${name} browser errors: ${JSON.stringify({ pageErrors, externalRequests, consoleErrors })}`);
         }
@@ -94,7 +104,7 @@ async function observeNarrative({ projectDir, outputDir }) {
             'start', 'back', 'photo', 'keepsake', 'message-echo', 'journal', 'save-reload',
             'upgrade-conflict', 'corrupt-save', 'replay',
           ], pageErrors, consoleErrors, externalRequests,
-          screenshot: { file: filename, sha256: sha256(png) } });
+          screenshots });
 
         if (name === 'android-portrait-emulated') {
           await context.setOffline(true);

@@ -6,11 +6,35 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { deflateSync } from 'node:zlib';
 import { unzipSync } from 'fflate';
 import { runF5Fixture } from '../../../scripts/f5-fixture-evidence.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
-const smallPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2NtWMAAAAASUVORK5CYII=', 'base64');
+
+function png(width, height) {
+  const signature = Buffer.from('89504e470d0a1a0a', 'hex');
+  const chunk = (type, data) => {
+    const header = Buffer.alloc(4);
+    header.writeUInt32BE(data.length);
+    const content = Buffer.concat([Buffer.from(type), data]);
+    let crc = 0xffffffff;
+    for (const byte of content) {
+      crc ^= byte;
+      for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+    }
+    const checksum = Buffer.alloc(4);
+    checksum.writeUInt32BE((crc ^ 0xffffffff) >>> 0);
+    return Buffer.concat([header, content, checksum]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 2;
+  return Buffer.concat([signature, chunk('IHDR', header),
+    chunk('IDAT', deflateSync(Buffer.alloc(height * (width * 3 + 1)))), chunk('IEND', Buffer.alloc(0))]);
+}
 
 function setup(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-f5-test-'));
@@ -34,10 +58,15 @@ test('F5 new disposable games produce verifiable SDK ZIP hashes and honest block
   const result = await runF5Fixture({ outputDir, observeNarrative: async ({ outputDir: evidenceDir }) => {
     const cases = [];
     for (const name of ['desktop-wide', 'android-portrait-emulated']) {
-      const file = `${name}.png`;
-      const bytes = smallPng;
-      fs.writeFileSync(path.join(evidenceDir, file), bytes);
-      cases.push({ name, status: 'PASS', screenshot: { file, sha256: sha(bytes) },
+      const viewport = name === 'desktop-wide' ? { width: 1000, height: 720 } : { width: 412, height: 915 };
+      const screenshots = [];
+      for (const stage of ['journal', 'restored', 'replay']) {
+        const file = `${name}-${stage}.png`;
+        const bytes = png(viewport.width, viewport.height);
+        fs.writeFileSync(path.join(evidenceDir, file), bytes);
+        screenshots.push({ stage, file, sha256: sha(bytes) });
+      }
+      cases.push({ name, viewport, status: 'PASS', screenshots,
         pageErrors: [], externalRequests: [] });
     }
     return { status: 'OBSERVED_PASS', cases, offlineStartup: 'BLOCKED_OFFLINE_STARTUP' };
@@ -80,7 +109,9 @@ test('F5 new disposable games produce verifiable SDK ZIP hashes and honest block
   }
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(outputDir, 'f5-evidence.json'), 'utf8')), result);
   for (const item of result.browser.cases) {
-    assert.equal(sha(fs.readFileSync(path.join(outputDir, item.screenshot.file))), item.screenshot.sha256);
+    for (const shot of item.screenshots) {
+      assert.equal(sha(fs.readFileSync(path.join(outputDir, shot.file))), shot.sha256);
+    }
   }
 });
 
@@ -105,4 +136,24 @@ test('F5 rejects forged observer screenshots and preserves failure receipt', { t
   assert.equal(receipt.browser.reasonCode, 'F5_BROWSER_OBSERVATION_FAILED');
   assert.equal(receipt.releaseReady, false);
   assert.match(receipt.failure.reasonCode, /^F5_/);
+});
+
+test('F5 rejects 1x1 screenshots spoofed as a desktop and portrait browser run', { timeout: 90000 }, async t => {
+  const { outputDir } = setup(t);
+  await assert.rejects(() => runF5Fixture({ outputDir, observeNarrative: async ({ outputDir: evidenceDir }) => {
+    const cases = [];
+    for (const [name, viewport] of [['desktop-wide', { width: 1000, height: 720 }],
+      ['android-portrait-emulated', { width: 412, height: 915 }]]) {
+      const screenshots = [];
+      for (const stage of ['journal', 'restored', 'replay']) {
+        const file = `${name}-${stage}.png`;
+        const bytes = png(1, 1);
+        fs.writeFileSync(path.join(evidenceDir, file), bytes);
+        screenshots.push({ stage, file, sha256: sha(bytes) });
+      }
+      cases.push({ name, viewport, status: 'PASS', screenshots, pageErrors: [], externalRequests: [] });
+    }
+    return { status: 'OBSERVED_PASS', cases, offlineStartup: 'BLOCKED_OFFLINE_STARTUP' };
+  } }), /viewport PNG/i);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(outputDir, 'f5-evidence.json'), 'utf8')).status, 'ISSUES_FOUND');
 });

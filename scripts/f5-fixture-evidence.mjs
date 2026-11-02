@@ -82,21 +82,35 @@ function verifyBrowserObservation(result, outputDir) {
   for (const item of result.cases) {
     if (item.status !== 'PASS' || !Array.isArray(item.pageErrors) || item.pageErrors.length ||
         !Array.isArray(item.consoleErrors ?? []) || (item.consoleErrors ?? []).length ||
-        !Array.isArray(item.externalRequests) || item.externalRequests.length ||
-        !safeScreenshot.test(item.screenshot?.file) || !shaPattern.test(item.screenshot?.sha256)) {
+        !Array.isArray(item.externalRequests) || item.externalRequests.length) {
       throw new Error(`F5 browser observation invalid for ${item.name}`);
     }
-    const file = path.join(outputDir, item.screenshot.file);
-    const stat = fs.lstatSync(file);
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      throw new Error(`F5 browser screenshot is missing or does not match: ${item.name}`);
+    const expectedViewport = item.name === 'desktop-wide' ? { minWidth: 800, minHeight: 600 } :
+      { minWidth: 320, minHeight: 500 };
+    if (!item.viewport || !Number.isInteger(item.viewport.width) ||
+        !Number.isInteger(item.viewport.height) ||
+        item.viewport.width < expectedViewport.minWidth ||
+        item.viewport.height < expectedViewport.minHeight ||
+        !Array.isArray(item.screenshots) || item.screenshots.length !== 3 ||
+        JSON.stringify(item.screenshots.map(shot => shot.stage)) !== JSON.stringify(['journal', 'restored', 'replay'])) {
+      throw new Error(`F5 browser observation missing viewport or story-state screenshots: ${item.name}`);
     }
-    const png = fs.readFileSync(file);
-    if (sha256(png) !== item.screenshot.sha256 || png.length < 33 ||
-        png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' ||
-        png.toString('ascii', 12, 16) !== 'IHDR' ||
-        png.readUInt32BE(16) === 0 || png.readUInt32BE(20) === 0) {
-      throw new Error(`F5 browser screenshot is not a matching PNG: ${item.name}`);
+    for (const shot of item.screenshots) {
+      if (!safeScreenshot.test(shot.file) || !shot.file.startsWith(`${item.name}-`) ||
+          !shaPattern.test(shot.sha256)) throw new Error(`F5 browser screenshot metadata invalid: ${item.name}`);
+      const file = path.join(outputDir, shot.file);
+      const stat = fs.lstatSync(file);
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        throw new Error(`F5 browser screenshot is missing or does not match: ${item.name}`);
+      }
+      const png = fs.readFileSync(file);
+      if (sha256(png) !== shot.sha256 || png.length < 33 ||
+          png.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a' ||
+          png.toString('ascii', 12, 16) !== 'IHDR' ||
+          png.readUInt32BE(16) < item.viewport.width ||
+          png.readUInt32BE(20) < item.viewport.height) {
+        throw new Error(`F5 browser screenshot is not a matching viewport PNG: ${item.name}`);
+      }
     }
   }
   if (!['BLOCKED_OFFLINE_STARTUP', 'PASS_OFFLINE'].includes(result.offlineStartup)) {

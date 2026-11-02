@@ -13,7 +13,7 @@ This is a **partial F5 run**, not acceptance of Ludory v1 and not permission to 
 
 | Scope | Evidence and verdict |
 | --- | --- |
-| Story lifecycle | The same disposable `narrative-interactive` Studio game is previewed on wide desktop and emulated Android portrait: start, Back, photo, keepsake, message echo, journal, save/reload, upgrade conflict, corrupt save, replay. Real Playwright screenshots and page/network errors are captured; only CI with browsers can attest these cases. |
+| Story lifecycle | The same disposable `narrative-interactive` Studio game is previewed on wide desktop and emulated Android portrait: start, Back, photo, keepsake, message echo, journal, save/reload, upgrade conflict, corrupt save, replay. Three SHA-256-bound, viewport-checked Playwright screenshots per viewport show the populated journal, restored game and replay; page/network errors are captured. Only CI with browsers can attest these cases. |
 | Native AI handoff | Studio creates a native production-art run from a fixture-owned brief; route and image handoff produce `NEEDS_AGENT_ACTION`, with no image-generation call and zero external host invocations. Model actually used: `null`; live AI: `NOT_RUN`. |
 | Yandex dry-run ZIP | A second, independent `yandex-runtime` Studio-created, single-target fixture yields a candidate ZIP; builder SHA-256 is independently checked against ZIP bytes and every archived member. No live SDK or publication claim. |
 | VK dry-run ZIP | A third, independent `vk-runtime` Studio-created, single-target fixture yields an analogous SHA-256-verified ZIP. No live VK or publication claim. |
