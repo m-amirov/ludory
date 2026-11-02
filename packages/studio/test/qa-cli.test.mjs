@@ -142,3 +142,25 @@ test('Studio QA capture is explicit, asynchronous and fails closed before browse
   assert.equal(report.publicationAllowed, false);
   assert.equal(fs.existsSync(outputDir), false);
 });
+
+test('Studio QA handoff CLI is read-only and blocks unverified source data', async t => {
+  const data = await fixture(t, 'vk-games');
+  const before = fs.readdirSync(data.folder).sort();
+  let stdout = '', stderr = '';
+  const result = runCli(['qa', 'handoff', '--target', 'vk-games',
+    '--archive', path.join(data.folder, 'absent.zip'), '--receipt', data.receiptPath,
+    '--metadata', path.join(data.folder, 'missing-metadata.json'),
+    '--promo-root', data.folder, '--evidence-dir', data.folder, '--json'], {
+    out: text => { stdout += text; }, err: text => { stderr += text; },
+  });
+  assert.equal(result, 2, stderr);
+  const report = JSON.parse(stdout);
+  assert.equal(report.kind, 'qa-review-handoff');
+  assert.equal(report.status, 'BLOCKED');
+  assert.equal(report.packet, null);
+  assert.equal(report.reviewProvenance, 'NOT_RUN');
+  assert.equal(report.actualModeration, 'NOT_RUN');
+  assert.equal(report.releaseReady, false);
+  assert.equal(report.publicationAllowed, false);
+  assert.deepEqual(fs.readdirSync(data.folder).sort(), before);
+});
