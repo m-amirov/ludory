@@ -2,6 +2,13 @@
 
 Read-only local Yandex candidate verification. No network calls, uploads, publication, moderation or mutation of games/artifacts.
 
+Official Yandex documentation is watched separately by the repository-level
+weekly [Requirements Watch](../../docs/policy-watch/README.md) workflow. It
+detects source changes and opens an advisory issue; it does **not** update
+these deterministic rules, assert moderation compliance, or enable publishing.
+VK rule sources remain explicitly unverified until readable official policy
+content is available.
+
 ## P3b: opt-in Playwright browser capture for trusted Ludory candidates
 
 `stageQaCandidate({ target, archivePath, candidateSha256 })` copies a
