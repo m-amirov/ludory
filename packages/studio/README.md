@@ -112,6 +112,75 @@ verification and `3` for uncertain pending recovery. All paths keep
 Production host smoke remains owner-operated; automated tests use fake V2
 observations and do not establish real browser compatibility.
 
+## Source-scoped two-round QA repair handoff (P3d)
+
+This workflow is for a **new, host-trusted Studio game** with a finished P3c
+five-image review containing at least one P0/P1 finding. It does not repair
+older/frozen games, run Codex/Web from Node or infer real moderation approval.
+
+```sh
+# Inspect the proposed mutation allowlist; no writes:
+node packages/studio/bin/ludory.mjs qa repair --project /path/to/new-game \
+  --review-output /path/to/first-web-review \
+  --output /path/to/new-qa-repair-session \
+  --in-scope 'src/main.js;src/styles.css' \
+  --mutation-boundary 'Only repair observed P0/P1 mobile dialogue defects' --json
+
+# One explicit owner consent; starts an immutable two-round budget (no source edits):
+node packages/studio/bin/ludory.mjs qa repair --project /path/to/new-game \
+  --review-output /path/to/first-web-review \
+  --output /path/to/new-qa-repair-session \
+  --in-scope 'src/main.js;src/styles.css' \
+  --mutation-boundary 'Only repair observed P0/P1 mobile dialogue defects' \
+  --repair --apply --json
+
+# The primary Codex agent records intent before changing source:
+node packages/studio/bin/ludory.mjs qa repair-next \
+  --output /path/to/new-qa-repair-session --apply --json
+
+# After that agent fixes approved files, independently rebuilds, reruns P3b
+# qa capture and obtains a NEW five-image P3c qa review --apply session:
+node packages/studio/bin/ludory.mjs qa repair-record \
+  --output /path/to/new-qa-repair-session \
+  --review-output /path/to/fresh-web-review --apply --json
+
+node packages/studio/bin/ludory.mjs qa repair-status \
+  --output /path/to/new-qa-repair-session --json
+```
+
+The `--in-scope` list contains **existing individual files**, never a broad
+directory or glob. Verify it matches the intended new game's source; the
+example `src/styles.css` is illustrative, not present in every template.
+The new repair-session output must be outside the game and original review
+directory. Consent also writes a separate immutable checkpoint into Studio's
+host-owned trust registry; each round writes another checkpoint. If this
+registry is unavailable, changed or out of sync after a crash, stop and ask
+the owner to inspect the records (never bypass the independent pin or delete
+history to force a retry). The tool pins the entire non-generated source inventory, including
+user-owned files, and disallows Studio ownership, protected configs, credentials,
+rights and SDK/vendor files. Any unexpected edit produces `ESCALATE` and is
+preserved for inspection; there is **no automatic rollback**.
+
+One `--repair --apply` consent authorizes **at most two** primary-agent repair
+rounds. Each `repair-next --apply` appends an exclusive durable intent before
+the agent edits. A started round is `PENDING_RECOVERY` on later status reads:
+do not start/retry another while a Codex executor or Web helper may still be
+active. Only `repair-record --apply` can finish it, after a changed source
+inventory, **different candidate ZIP digest**, matching target and a completed
+fresh P3b/P3c capture/review audit. A first-round P0/P1 finding permits the
+second round; a P0 regression or persistent P0/P1 after round two escalates.
+P2-only/no-blocking findings are `RECHECK_RECORDED`, **not** QA or release PASS.
+
+**Important remaining evidence boundary:** the local P3c journal proves only
+its internal audit chain, not independent authentication of a historical Web
+session; Node cannot cryptographically prove that the newly built ZIP came
+from the changed game source. The primary Codex agent must verify that source→
+build linkage and the *live*, actually attested Web inspection before accepting
+any round. If its host is unavailable, stop at `PENDING_RECOVERY`/`BLOCKED`;
+do not fabricate review or claim `QA_SIMULATION_PASS`. `repair-record` is a
+locally recorded checkpoint, not a compliance decision. Every response retains
+`actualModeration: 'NOT_RUN'`, `releaseReady: false`, `publicationAllowed: false`.
+
 ## Fresh local and LAN game preview (new Studio games)
 
 ```sh

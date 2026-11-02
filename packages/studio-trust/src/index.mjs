@@ -184,6 +184,48 @@ export function advanceComponentTrust(project, expected, nextStateSha256) {
 export function hostTrustDigest(bytes) { return hash(bytes); }
 export function isMissingHostTrust(error) { return error?.code === 'TRUST_MISSING'; }
 
+// Separate, host-owned checkpoints bind source-repair consent and journal events.
+// A game-local SHA chain alone is not an authorization boundary: a game editor
+// can recompute its hashes, but must not be able to silently re-pin this registry.
+function qaRepairCheckpointPath(project, output, index) {
+  if (typeof project !== 'string' || typeof output !== 'string' ||
+      !path.isAbsolute(project) || !path.isAbsolute(output) ||
+      !Number.isInteger(index) || index < 0 || index > 4) throw trustError('invalid QA repair checkpoint');
+  const locations = recordPath(project);
+  const basename = hash(Buffer.from(`${path.resolve(project)}\0${path.resolve(output)}`));
+  return { ...locations, checkpoint: path.join(locations.root, `qa-repair-${basename}-${index}.json`) };
+}
+
+export function pinQaRepairCheckpoint(project, output, index, receiptSha256) {
+  if (typeof receiptSha256 !== 'string' || !digest.test(receiptSha256)) {
+    throw trustError('invalid QA repair receipt digest');
+  }
+  const locations = qaRepairCheckpointPath(project, output, index);
+  return withRecordLock(locations, () => {
+    const receipt = { schemaVersion: 1, project: path.resolve(project),
+      output: path.resolve(output), index, receiptSha256 };
+    const fd = fs.openSync(locations.checkpoint, fs.constants.O_WRONLY | fs.constants.O_CREAT |
+      fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0), 0o600);
+    try { fs.writeFileSync(fd, encode(receipt)); fs.fsyncSync(fd); }
+    finally { fs.closeSync(fd); }
+    syncDir(locations.root);
+    return receipt;
+  });
+}
+
+export function assertQaRepairCheckpoint(project, output, index, receiptSha256) {
+  const locations = qaRepairCheckpointPath(project, output, index);
+  let record;
+  try { record = JSON.parse(readSecure(locations.checkpoint).toString('utf8')); }
+  catch { throw trustError('missing or invalid QA repair checkpoint'); }
+  const expected = { schemaVersion: 1, project: path.resolve(project),
+    output: path.resolve(output), index, receiptSha256 };
+  if (!encode(expected).equals(encode(record)) || !digest.test(receiptSha256 ?? '')) {
+    throw trustError('QA repair consent or event no longer matches host checkpoint');
+  }
+  return expected;
+}
+
 function checkedStudioFile(project, name) {
   const filename = path.join(project, name);
   let descriptor;
