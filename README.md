@@ -132,7 +132,8 @@ See [Studio's built-in ImageGen instructions](packages/studio/README.md#codex-bu
 
 The experimental `workflow art-review` accepts an imported image original and
 four checked scene/character/location/style references. An independent **GPT-6
-Sol (Web)** DEV session must actually receive the image; Ludory refuses to
+Sol Instant (Web)** DEV session must actually receive the image with `low`
+reasoning; Ludory refuses to
 infer visual acceptance from text or from a configured model label. Explicit
 `--apply` writes append-only hash-bound artistic receipts, with P0/P1 rework,
 P2-only nonblocking notes, and an escalation after two serious rework reports.

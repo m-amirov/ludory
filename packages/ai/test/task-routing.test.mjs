@@ -56,7 +56,7 @@ test('frozen projects remain blocked without invoking any external capability di
 });
 
 const verifiedDev = { available: true, transportVerified: true,
-  entitlementVerified: true, modelObserved: 'gpt-6-sol', routeObserved: 'web-dev' };
+  entitlementVerified: true, modelObserved: 'gpt-6-sol-instant', routeObserved: 'web-dev' };
 const verifiedTerra = { available: true, transportVerified: true,
   entitlementVerified: true, modelObserved: 'gpt-5.6-terra', imageGenCallable: true };
 const verifiedSol = { available: true, transportVerified: true,
@@ -65,8 +65,8 @@ const verifiedSol = { available: true, transportVerified: true,
 test('Web DEV v2 route verifies browser preflight but never promises unsupported text-only turns', t => {
   const project = freshStudioGame(t);
   const v2 = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
-    modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
-    reasoningRequired: 'high', preflight: { authenticated: true, newChat: true,
+    modelRouteAvailable: 'chatgpt-web/gpt-6-sol-instant', browserObservationV2Available: true,
+    reasoningRequired: 'low', preflight: { authenticated: true, newChat: true,
       url: 'https://chatgpt.com/', solAvailable: true } };
   for (const taskKind of ['episode-script', 'art-concept']) {
     const preview = planTaskRoute(project, { taskKind }, {
@@ -74,6 +74,14 @@ test('Web DEV v2 route verifies browser preflight but never promises unsupported
     });
     assert.equal(preview.status, 'NEEDS_USER_ACTION');
     assert.equal(preview.reasonCode, 'AI_ROUTING_WEB_TEXT_V2_UNSUPPORTED');
+  }
+  for (const oldPreset of [
+    { modelRouteAvailable: 'chatgpt-web/gpt-6-sol', reasoningRequired: 'high' },
+    { modelRouteAvailable: 'chatgpt-web/gpt-6-sol-instant', reasoningRequired: 'high' },
+  ]) {
+    const cap = discoverTaskCapabilities(project, { taskKind: 'art-concept',
+      hostProbe: () => ({ webDev: { ...v2, ...oldPreset } }) });
+    assert.equal(cap.webDev.available, false, JSON.stringify(oldPreset));
   }
   for (const [label, preflight] of [
     ['no browser preflight', {}],
@@ -148,7 +156,7 @@ test('DEV requires a verified transport, entitlement, and real selected route', 
   const forged = discoverTaskCapabilities(project, { checkCodex: () => ({ ok: false }),
     hostProbe: () => ({ webDev: { ...verifiedDev, routeObserved: 'general-web' } }) });
   assert.equal(planTaskRoute(project, { taskKind: 'episode-script' }, { discover: () => forged }).status, 'NEEDS_USER_ACTION');
-  for (const modelObserved of ['gpt-5.6-sol', 'gpt-7-sol']) {
+  for (const modelObserved of ['gpt-6-sol', 'gpt-5.6-sol', 'gpt-7-sol']) {
     const wrongModel = discoverTaskCapabilities(project, { hostProbe: () => ({
       webDev: { ...verifiedDev, modelObserved },
     }) });

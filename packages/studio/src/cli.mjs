@@ -90,7 +90,7 @@ the provider-selected model, whose identity cannot be attested by this CLI.
 workflow image --apply returns a source-bound agent handoff only; the CLI cannot call Codex tools.
 The primary agent imports the subagent's original with --handoff-sha256 from the generation packet.
 image-import stores checked original PNG/JPEG/WebP bytes as USER_DECLARED; neither route grants art, rights or release PASS.
-art-review --apply requires independent GPT-6 Sol(Web), source-locked references and an attested visual upload.
+art-review --apply requires independent GPT-6 Sol Instant(Web) at low reasoning, source-locked references and an attested visual upload.
 P0/P1 requires REWORK, P2 alone does not; after two REWORK receipts the task ESCALATES to the owner.
 Artistic PASS_ART is never human, rights, platform or release acceptance. Actual Web host smoke is owner-operated.
 Opt-in --executor codex executes a bounded Codex CLI task on --apply for new Studio-created games.

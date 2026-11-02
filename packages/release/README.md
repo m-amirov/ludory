@@ -110,6 +110,9 @@ and original promo bytes against the recorded hashes. No files are written.
 `READY_FOR_HANDOFF` means the packet contains three intact screenshot byte
 references and actual icon/cover file references, with exact hashes, a pinned
 policy-source list, user-declared listing and a fixed visual/content/promo rubric.
+It nominates `chatgpt-web/gpt-6-sol-instant` with `reviewerEffort: low` for
+the future image-capable independent reviewer; these fields are requested
+settings, never evidence of an actual selected browser model.
 It **does not** prove a browser captured the frames or that Web DEV received or
 looked at them. The caller must explicitly supply those actual image files to
 an independent image-capable Web DEV session and independently verify receipt

@@ -43,8 +43,8 @@
   "protocol": {
     "kind": "browser-observation-v2",
     "features": ["browser_observation_v2"],
-    "visualModel": "chatgpt-web/gpt-6-sol",
-    "visualReasoning": "high",
+    "visualModel": "chatgpt-web/gpt-6-sol-instant",
+    "visualReasoning": "low",
     "compatibilityV1VisualFallback": false
   },
   "licenses": {

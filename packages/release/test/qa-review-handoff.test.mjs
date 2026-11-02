@@ -90,6 +90,8 @@ for (const target of ['vk-games', 'yandex-games']) {
     assert.deepEqual(result.packet.promoInputs.map(x => x.kind), ['icon', 'cover']);
     assert.equal(result.packet.metadata.source, 'USER_DECLARED');
     assert.equal(result.packet.reviewerRoute, 'INDEPENDENT_IMAGE_CAPABLE_WEB_DEV');
+    assert.equal(result.packet.reviewerModel, 'chatgpt-web/gpt-6-sol-instant');
+    assert.equal(result.packet.reviewerEffort, 'low');
     assert.equal(result.packet.transfer, 'NOT_SENT');
     assert.equal(result.packet.review, 'NOT_RUN');
     assert.equal(result.browserAttested, false);

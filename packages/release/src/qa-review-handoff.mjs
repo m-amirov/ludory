@@ -119,6 +119,8 @@ export function prepareQaReviewPacket({
       technicalFindings: Object.freeze(local.findings),
       rubric,
       reviewerRoute: 'INDEPENDENT_IMAGE_CAPABLE_WEB_DEV',
+      reviewerModel: 'chatgpt-web/gpt-6-sol-instant',
+      reviewerEffort: 'low',
       transfer: 'NOT_SENT',
       review: 'NOT_RUN',
       provenance: 'LOCAL_BYTES_ONLY',

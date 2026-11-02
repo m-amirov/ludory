@@ -407,7 +407,7 @@ node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio
 node packages/studio/bin/ludory.mjs workflow route --project /path/to/new-studio-game --task image --json
 ```
 
-Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` prefers authenticated **GPT-6 Sol (Web)** DEV; `art-concept` prefers that same Web DEV **only if** the primary agent explicitly reviewed four distinct scene/character/location/style references, otherwise the primary model writes the art brief. `image` creates an agent handoff to a **separate Codex image-generator subagent**, inheriting the primary model and invoking built-in `$imagegen`. It returns `NEEDS_AGENT_ACTION`/`SPAWN_IMAGE_AGENT`, never a claimed automatic spawn or invocation. Programmatic `terra` and `sol` are retained only for explicitly pinned historical in-process adapters. Read-only routing invokes no provider.
+Supported task kinds: `mechanics` and `functional-check` prefer Codex CLI; `episode-script` prefers authenticated **GPT-6 Sol Instant (Web)** DEV; `art-concept` prefers that same Web DEV **only if** the primary agent explicitly reviewed four distinct scene/character/location/style references, otherwise the primary model writes the art brief. `image` creates an agent handoff to a **separate Codex image-generator subagent**, inheriting the primary model and invoking built-in `$imagegen`. It returns `NEEDS_AGENT_ACTION`/`SPAWN_IMAGE_AGENT`, never a claimed automatic spawn or invocation. Programmatic `terra` and `sol` are retained only for explicitly pinned historical in-process adapters. Read-only routing invokes no provider.
 
 `workflow route` never writes project files or workflow events; it rejects `--apply`. Exit code `0` covers a valid preview, including a manual handoff; `2` means the project is blocked (for example, no Studio creation receipt); `1` means invalid arguments or inspection error. Historical games stay frozen. No image, script, art review, independent acceptance, or Release PASS is produced by a route preview.
 JSON previews preserve `reasonCode` and, when available, `capabilityReasonCode`. The built-in ImageGen route uses `modelSelection: provider-default`, `qualityPreference: highest-available` and `modelObserved: null`; it cannot set or attest a hidden execution model. Historical in-process routes retain their Terra/SOL evidence fields.
@@ -425,7 +425,7 @@ node packages/studio/bin/ludory.mjs workflow draft --project /path/to/new-studio
   --source narrative/graph.json --json
 
 # Explicit execution. Invokes DEV only if the installed isolated helper attests
-# actual authenticated transport, effective selected GPT-6 Sol (Web), and browser-only mode.
+# actual authenticated transport, effective selected GPT-6 Sol Instant (Web), and browser-only mode.
 node packages/studio/bin/ludory.mjs workflow draft --project /path/to/new-studio-game \
   --run RUN_ID --task art-concept --brief narrative/art-brief.md \
   --source 'scene:narrative/scene.txt;characters:narrative/characters.txt;location:narrative/location.txt;style:narrative/art-style.txt' \
@@ -467,7 +467,7 @@ An interrupted import can leave an unreferenced uniquely named draft in the priv
 
 ### Automatic narrative review (StoryScope-inspired)
 
-For a new Studio game, `workflow draft --task episode-script --apply` automatically makes a second **independent** GPT-6 Sol (Web) review turn after the draft has been saved. `workflow draft-import --task episode-script --apply` also requests review when the authenticated helper is available. The first call writes immutable draft bytes; the second reviews those bytes alongside the selected brief/context. There is no API key or alternate provider. The first and second turns are independently recorded as generation provenance and `NARRATIVE_REVIEW_REQUESTED` / `NARRATIVE_REVIEW_RESULT` events.
+For a new Studio game, `workflow draft --task episode-script --apply` automatically makes a second **independent** GPT-6 Sol Instant (Web) review turn after the draft has been saved. `workflow draft-import --task episode-script --apply` also requests review when the authenticated helper is available. The first call writes immutable draft bytes; the second reviews those bytes alongside the selected brief/context. There is no API key or alternate provider. The first and second turns are independently recorded as generation provenance and `NARRATIVE_REVIEW_REQUESTED` / `NARRATIVE_REVIEW_RESULT` events.
 
 ```sh
 # Read-only preview; no paid/host request.
@@ -544,7 +544,7 @@ node packages/studio/bin/ludory.mjs workflow art-review --project /path/to/new-s
   --context-reviewed --apply --json
 ```
 
-Only a capability-verified isolated `chatgpt-web/gpt-6-sol` helper (`reasoning: high`)
+Only a capability-verified isolated `chatgpt-web/gpt-6-sol-instant` helper (`reasoning: low`, Instant)
 may evaluate the image. Ludory passes the **actual PNG/JPEG/WebP bytes**, max
 10 MiB, in the helper's `prepared.images` envelope and requires a witnessed
 `image_attached` event plus `imageInputObserved`, image reference and matching
@@ -552,8 +552,8 @@ SHA-256 on the final result. The compatibility helper must emit `ready` with
 `protocolVersion: 1`, a verified `capabilities` frame including
 `imageInputVerified: true`, and those attachment observations from its browser
 worker. For a visual receipt, the attachment event and result must additionally
-carry the same `hostObservation` protocol v2: browser-selected `gpt-6-sol` with
-`reasoning: high`, plus the attached ref, SHA-256 and byte length. Requested
+carry the same `hostObservation` protocol v2: browser-selected `gpt-6-sol-instant` with
+`reasoning: low`, plus the attached ref, SHA-256 and byte length. Requested
 model settings and helper declarations are not observations. **The upstream unmodified `codex-chatgpt-web` browser helper currently
 does not supply that complete Ludory attestation protocol.** Its binary-image
 support alone does not satisfy the gate. An incompatible/older helper yields

@@ -13,9 +13,10 @@ const MAX_STDOUT_BYTES = 8 * 1024 * 1024;
 const MAX_TEXT_BYTES = 2 * 1024 * 1024;
 const MAX_INPUT_IMAGE_BYTES = 10 * 1024 * 1024;
 const UPSTREAM_INPUT_IMAGE_BYTES = 20_000_000;
-const WEB_DEV_MODEL = 'gpt-6-sol';
-const WEB_DEV_CANONICAL_MODEL = 'chatgpt-web/gpt-6-sol';
+const WEB_DEV_MODEL = 'gpt-6-sol-instant';
+const WEB_DEV_CANONICAL_MODEL = 'chatgpt-web/gpt-6-sol-instant';
 const WEB_DEV_BACKEND_MODEL = 'gpt-5.6-sol';
+const WEB_DEV_EFFORT = 'low'; // ChatGPT Web's Instant preset; backend ID is an adapter detail.
 const BROWSER_OBSERVATION_V2 = 'browser_observation_v2';
 const BROWSER_OBSERVATION_CALLBACK_TIMEOUT_MS = 10_000;
 const UPSTREAM_POST_SUBMISSION_EVENTS = new Set([
@@ -172,18 +173,18 @@ function validatedImages(images, maxBytes = MAX_INPUT_IMAGE_BYTES) {
 function observedBrowserAttachment(value, image) {
   const attachment = ownData(value, 'image');
   if (ownData(value, 'protocolVersion') !== 2 || ownData(value, 'source') !== 'browser-ui' ||
-      ownData(value, 'selectedModel') !== WEB_DEV_MODEL || ownData(value, 'reasoning') !== 'high' ||
+      ownData(value, 'selectedModel') !== WEB_DEV_MODEL || ownData(value, 'reasoning') !== WEB_DEV_EFFORT ||
       !attachment || typeof attachment !== 'object' || Array.isArray(attachment) ||
       ownData(attachment, 'ref') !== image.ref || ownData(attachment, 'sha256') !== image.sha256 ||
       ownData(attachment, 'bytes') !== image.bytes.length) return null;
   return { protocolVersion: 2, source: 'browser-ui', selectedModel: WEB_DEV_MODEL,
-    reasoning: 'high', image: { ref: image.ref, sha256: image.sha256, bytes: image.bytes.length } };
+    reasoning: WEB_DEV_EFFORT, image: { ref: image.ref, sha256: image.sha256, bytes: image.bytes.length } };
 }
 
 function upstreamAttachment(value, image, traceId) {
   if (!value || value.version !== 2 || value.traceId !== traceId || value.source !== 'chatgpt-web-browser' ||
       value.model?.canonicalId !== WEB_DEV_CANONICAL_MODEL || value.model?.backendModelId !== WEB_DEV_BACKEND_MODEL ||
-      value.model?.family !== '6' || value.model?.effort !== 'high' || typeof value.model.selectionLabel !== 'string' ||
+      value.model?.family !== '6' || value.model?.effort !== WEB_DEV_EFFORT || typeof value.model.selectionLabel !== 'string' ||
       !value.model.selectionLabel.trim() || !Array.isArray(value.attachments) || value.attachments.length !== 1) return null;
   const attachment = value.attachments[0];
   const extension = image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType.replace('image/', '');
@@ -195,7 +196,7 @@ function upstreamAttachment(value, image, traceId) {
       upload.processingEvent !== 'file.processing.completed' || upload.processingCompleted !== true ||
       upload.visibleAttachmentChip !== true) return null;
   return { protocolVersion: 2, source: 'browser-ui', traceId, selectedModel: WEB_DEV_MODEL,
-    reasoning: 'high', image: { ref: image.ref, sha256: image.sha256, bytes: image.bytes.length },
+    reasoning: WEB_DEV_EFFORT, image: { ref: image.ref, sha256: image.sha256, bytes: image.bytes.length },
     upload: { creationRequestObserved: true, processingRequestObserved: true,
       processingRequestKind: upload.processingRequestKind, processingEvent: upload.processingEvent,
       processingCompleted: true, visibleAttachmentChip: true } };
@@ -462,7 +463,7 @@ class BrowserDevHost {
         !this.helperFeatures.has(BROWSER_OBSERVATION_V2)) return null;
     return { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
       modelRouteAvailable: WEB_DEV_CANONICAL_MODEL, browserObservationV2Available: true,
-      reasoningRequired: 'high', preflight: { authenticated: true, newChat: true, url: value.url,
+      reasoningRequired: WEB_DEV_EFFORT, preflight: { authenticated: true, newChat: true, url: value.url,
         solAvailable: true, extraHighAvailable: value.extraHighAvailable === true,
         proAvailable: value.proAvailable === true }, inspect: value };
   }
@@ -502,13 +503,13 @@ class BrowserDevHost {
         ? { type: 'inspect', id, config: { appName: 'ludory-web-art-review', browserHostDescriptorPath: this.descriptorPath }, detectCapabilities: true }
         : { type: 'run', id, config: { appName: 'ludory-web-art-review', browserHostDescriptorPath: this.descriptorPath,
             turnTimeoutMs: this.turnTimeoutMs, autoApproveToolCalls: false }, turn: { traceId: id, modelId: WEB_DEV_BACKEND_MODEL,
-            modelFamily: '6', reasoning: 'high', capabilities: { localToolsEnabled: false,
+            modelFamily: '6', reasoning: WEB_DEV_EFFORT, capabilities: { localToolsEnabled: false,
               solAvailable: this.capability.inspect.solAvailable, extraHighAvailable: this.capability.inspect.extraHighAvailable ?? false,
               proAvailable: this.capability.inspect.proAvailable ?? false }, requireBrowserObservationV2: true } })
       : this.send({ type: kind === 'probe' ? 'capabilities' : 'run', id,
         ...(kind === 'run' && { config: { autoApproveToolCalls: false, useSavedChats: false },
           turn: { traceId: id, modelId: this.capability.modelObserved,
-            requestedModel: `chatgpt-web/${this.capability.modelObserved}`, reasoning: 'high', capabilities: { localToolsEnabled: false } } }) });
+            requestedModel: `chatgpt-web/${this.capability.modelObserved}`, reasoning: WEB_DEV_EFFORT, capabilities: { localToolsEnabled: false } } }) });
     try { await Promise.race([sending, answer]); }
     catch (error) {
       this.rejectPending(id, 'DEV_HELPER_SEND_FAILED');

@@ -92,12 +92,12 @@ export function planNarrativeReview(projectDir, { run = 'latest' } = {}, { disco
   const visualOnlyV2 = isVerifiedCapability(capability, 'webDev') &&
     ownData(capability, 'browserObservationV2Available') === true;
   if (visualOnlyV2 || !isVerifiedCapability(capability, 'webDev') ||
-      ownData(capability, 'modelObserved') !== 'gpt-6-sol') {
+      ownData(capability, 'modelObserved') !== 'gpt-6-sol-instant') {
     return { ...base, status: 'NEEDS_USER_ACTION', selectedRoute: 'manual',
       reasonCode: visualOnlyV2 ? 'REVIEW_WEB_TEXT_V2_UNSUPPORTED' : 'REVIEW_WEB_DEV_UNAVAILABLE', writes: [],
       nextAction: { kind: 'AWAIT_VERIFIED_REVIEWER', executable: false } };
   }
-  return { ...base, modelObserved: 'gpt-6-sol', status: 'READY',
+  return { ...base, modelObserved: 'gpt-6-sol-instant', status: 'READY',
     nextAction: { kind: 'RUN_INDEPENDENT_REVIEW', executable: false } };
 }
 
@@ -117,13 +117,13 @@ export async function executeNarrativeReview(plan, { apply = false, host = null 
     throw new Error('REVIEW_PLAN_STALE');
   }
   const { prompt, draft } = reviewPrompt(fresh);
-  const review = { taskKind: 'episode-script', modelObserved: 'gpt-6-sol',
+  const review = { taskKind: 'episode-script', modelObserved: 'gpt-6-sol-instant',
     draft: fresh.draft, brief: fresh.brief, sources: fresh.sources };
   commitNativeEvent(planNativeEvent(fresh.project, fresh.runId,
     { kind: 'NARRATIVE_REVIEW_REQUESTED', stage: fresh.stage, review }));
   const response = await host.turn({ prompt, taskId: `${fresh.runId}-narrative-review` });
   const trusted = response && response.status === 'HOST_OBSERVED' &&
-    response.modelObserved === 'gpt-6-sol' && response.routeObserved === 'web-dev';
+    response.modelObserved === 'gpt-6-sol-instant' && response.routeObserved === 'web-dev';
   let report;
   let parsed = false;
   try { if (!trusted) throw new Error('REVIEW_RESPONSE_UNVERIFIED');
@@ -135,7 +135,7 @@ export async function executeNarrativeReview(plan, { apply = false, host = null 
   try { reviewPrompt(fresh); }
   catch { freshInputs = false; report = blockedNarrativeVerdict(fresh.draft.sha256, 'REVIEW_SOURCE_STALE'); }
   const finalCode = trusted && parsed && freshInputs ? 'HOST_OBSERVED' : 'REVIEW_RESPONSE_UNVERIFIED';
-  const result = { code: finalCode, modelObserved: finalCode === 'HOST_OBSERVED' ? 'gpt-6-sol' : null,
+  const result = { code: finalCode, modelObserved: finalCode === 'HOST_OBSERVED' ? 'gpt-6-sol-instant' : null,
     report };
   const current = commitNativeEvent(planNativeEvent(fresh.project, fresh.runId, {
     kind: 'NARRATIVE_REVIEW_RESULT', stage: fresh.stage, reviewResult: result,

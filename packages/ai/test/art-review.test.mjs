@@ -14,8 +14,8 @@ import { planWorkflow, executeWorkflow } from '../src/workflows.mjs';
 
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const observedWeb = { available: true, reasonCode: 'AVAILABLE', routeAvailable: 'web-dev',
-  modelRouteAvailable: 'chatgpt-web/gpt-6-sol', browserObservationV2Available: true,
-  reasoningRequired: 'high', preflight: { authenticated: true, newChat: true,
+  modelRouteAvailable: 'chatgpt-web/gpt-6-sol-instant', browserObservationV2Available: true,
+  reasoningRequired: 'low', preflight: { authenticated: true, newChat: true,
     url: 'https://chatgpt.com/', solAvailable: true, extraHighAvailable: false, proAvailable: false } };
 
 function sources(project) {
@@ -46,17 +46,53 @@ const discovered = { discover: () => observedWeb };
 function witnessedArt(plan) {
   const traceId = `art-${plan.runId}`;
   const hostObservation = { protocolVersion: 2, source: 'browser-ui', traceId,
-    selectedModel: 'gpt-6-sol', reasoning: 'high',
+    selectedModel: 'gpt-6-sol-instant', reasoning: 'low',
     image: { ref: plan.image.ref, sha256: plan.image.sha256, bytes: plan.image.size },
     upload: { creationRequestObserved: true, processingRequestObserved: true,
       processingRequestKind: 'process_upload_stream', processingEvent: 'file.processing.completed',
       processingCompleted: true, visibleAttachmentChip: true } };
-  return { status: 'HOST_OBSERVED', routeObserved: 'web-dev', modelObserved: 'gpt-6-sol',
+  return { status: 'HOST_OBSERVED', routeObserved: 'web-dev', modelObserved: 'gpt-6-sol-instant',
     imageInputObserved: true, traceId, imageRef: plan.image.ref, imageSha256: plan.image.sha256,
     imageBytes: plan.image.size, hostObservation,
     text: JSON.stringify({ schemaVersion: 1, imageVisible: true, imageSha256: plan.image.sha256,
       verdict: 'PASS_ART', summary: 'Scene matches source.', findings: [] }) };
 }
+
+test('previously signed High Web art receipts remain readable after switching new reviews to Instant', async t => {
+  const item = await imported(t);
+  const plan = planArtReview(item.project, options(item), discovered);
+  const requested = commitNativeEvent(planNativeEvent(item.project, item.run, {
+    kind: 'ART_REVIEW_REQUESTED', stage: plan.stage,
+    artReview: { image: plan.image, brief: plan.brief, sources: plan.sources,
+      modelObserved: 'gpt-6-sol' },
+  }));
+  const gameState = readNativeRun(item.project, item.run);
+  const historical = {
+    schemaVersion: 1, index: 1, projectId: gameState.run.projectId,
+    runId: item.run, runHeadSha256: requested.headSha256,
+    prevSha256: requested.headSha256, at: '2026-10-27T00:00:00.000Z',
+    provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', visualInputObserved: true,
+    artRequestSha256: requested.pendingArtReview,
+    hostObservation: { ...witnessedArt(plan).hostObservation,
+      selectedModel: 'gpt-6-sol', reasoning: 'high' },
+    image: plan.image, brief: plan.brief, sources: plan.sources, verdict: 'PASS_ART',
+    reasonCode: 'ART_REPORT_STRUCTURED', summary: 'Historical acceptance.', findings: [],
+  };
+  const folder = path.join(item.project, '.ludory', 'ai', 'runs', item.run, 'reviews');
+  fs.mkdirSync(folder, { recursive: true });
+  const receiptPath = path.join(folder, '000001.json');
+  const markerPath = path.join(folder, '000001.commit.json');
+  const historicalBytes = `${JSON.stringify(historical, null, 2)}\n`;
+  fs.writeFileSync(receiptPath, historicalBytes);
+  fs.writeFileSync(markerPath, `${JSON.stringify({ schemaVersion: 1, index: 1,
+    sha256: sha(historicalBytes) }, null, 2)}\n`);
+  commitNativeEvent(planNativeEvent(item.project, item.run, {
+    kind: 'ART_REVIEW_RESULT', stage: plan.stage,
+    artRequestSha256: requested.pendingArtReview,
+    artReviewResult: { code: 'ART_REVIEW_OBSERVED', receiptSha256: sha(historicalBytes) },
+  }));
+  assert.equal(readNativeArtReviews(item.project, item.run)[0].modelObserved, 'gpt-6-sol');
+});
 
 test('a timed-out art host leaves durable intent and never silently resubmits a paid review', async t => {
   const item = await imported(t);
@@ -224,11 +260,11 @@ test('recover preserves a witnessed art receipt when the final native event was 
   const requested = commitNativeEvent(planNativeEvent(item.project, item.run, {
     kind: 'ART_REVIEW_REQUESTED', stage: original.stage,
     artReview: { image: original.image, brief: original.brief, sources: original.sources,
-      modelObserved: 'gpt-6-sol' },
+      modelObserved: 'gpt-6-sol-instant' },
   }));
   const report = witnessedArt(original);
   const receipt = recordNativeArtReview(item.project, item.run, requested.headSha256, {
-    provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', visualInputObserved: true,
+    provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol-instant', visualInputObserved: true,
     artRequestSha256: requested.pendingArtReview, verdict: 'PASS_ART',
     reasonCode: 'ART_REPORT_STRUCTURED', summary: 'Scene matches source.', findings: [],
     hostObservation: report.hostObservation, image: original.image,
@@ -250,13 +286,13 @@ test('stale interrupted-recovery plan cannot override a newly committed witnesse
   const requested = commitNativeEvent(planNativeEvent(item.project, item.run, {
     kind: 'ART_REVIEW_REQUESTED', stage: original.stage,
     artReview: { image: original.image, brief: original.brief, sources: original.sources,
-      modelObserved: 'gpt-6-sol' },
+      modelObserved: 'gpt-6-sol-instant' },
   }));
   const stale = planWorkflow(item.project, 'recover', { run: item.run, confirmNoExecutor: true });
   assert.equal(stale.nativePlan.event.artReviewResult.code, 'ART_REVIEW_INTERRUPTED');
   const witness = witnessedArt(original);
   recordNativeArtReview(item.project, item.run, requested.headSha256, {
-    provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol', visualInputObserved: true,
+    provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol-instant', visualInputObserved: true,
     artRequestSha256: requested.pendingArtReview, verdict: 'PASS_ART',
     reasonCode: 'ART_REPORT_STRUCTURED', summary: 'Scene matches source.', findings: [],
     hostObservation: witness.hostObservation, image: original.image,
@@ -275,9 +311,9 @@ test('the same pending visual request cannot produce two REWORK receipts', async
   const requested = commitNativeEvent(planNativeEvent(item.project, item.run, {
     kind: 'ART_REVIEW_REQUESTED', stage: original.stage,
     artReview: { image: original.image, brief: original.brief, sources: original.sources,
-      modelObserved: 'gpt-6-sol' },
+      modelObserved: 'gpt-6-sol-instant' },
   }));
-  const report = { provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol',
+  const report = { provenance: 'HOST_OBSERVED', modelObserved: 'gpt-6-sol-instant',
     visualInputObserved: true, artRequestSha256: requested.pendingArtReview,
     verdict: 'REWORK', reasonCode: 'ART_REPORT_STRUCTURED',
     summary: 'Wrong location.', findings: [{ severity: 'P1', category: 'location',
@@ -331,7 +367,7 @@ test('art review preview only accepts a recorded original and carries exact imag
   const preview = planArtReview(item.project, options(item), discovered);
   assert.equal(preview.status, 'READY');
   assert.equal(preview.selectedRoute, 'web-dev');
-  assert.equal(preview.modelObserved, 'gpt-6-sol');
+  assert.equal(preview.modelObserved, 'gpt-6-sol-instant');
   assert.equal(preview.image.sha256, sha(png));
   assert.equal(preview.brief.path, 'image-brief.md');
   assert.deepEqual(preview.sources.map(x => x.role), ['scene', 'characters', 'location', 'style']);
@@ -354,9 +390,9 @@ test('art review requires explicit context and verified Web image route', async 
 test('inherited or accessor-supplied v2 host preflight cannot authorize a paid browser turn', async t => {
   const item = await imported(t);
   const legacy = { available: true, reasonCode: 'AVAILABLE', transportVerified: true,
-    entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol' };
+    entitlementVerified: true, routeObserved: 'web-dev', modelObserved: 'gpt-6-sol-instant' };
   const inherited = Object.assign(Object.create({ browserObservationV2Available: true,
-    routeAvailable: 'web-dev', modelRouteAvailable: 'chatgpt-web/gpt-6-sol', reasoningRequired: 'high',
+    routeAvailable: 'web-dev', modelRouteAvailable: 'chatgpt-web/gpt-6-sol-instant', reasoningRequired: 'low',
     preflight: observedWeb.preflight }), legacy);
   let accessorReads = 0;
   const accessors = { ...legacy };
@@ -444,10 +480,10 @@ test('visual review passes only one attested imported image into independent Web
       assert.equal(images.length, 1);
       assert.deepEqual(images[0].bytes, png);
       return { status: 'HOST_OBSERVED', routeObserved: 'web-dev', traceId: `art-${item.run}`,
-        modelObserved: 'gpt-6-sol', imageInputObserved: true,
+        modelObserved: 'gpt-6-sol-instant', imageInputObserved: true,
         imageRef: images[0].ref, imageSha256: sha(png), imageBytes: images[0].bytes.length,
-        hostObservation: { protocolVersion: 2, source: 'browser-ui', selectedModel: 'gpt-6-sol',
-          reasoning: 'high', traceId: `art-${item.run}`, image: { ref: images[0].ref, sha256: sha(png), bytes: images[0].bytes.length },
+        hostObservation: { protocolVersion: 2, source: 'browser-ui', selectedModel: 'gpt-6-sol-instant',
+          reasoning: 'low', traceId: `art-${item.run}`, image: { ref: images[0].ref, sha256: sha(png), bytes: images[0].bytes.length },
           upload: { creationRequestObserved: true, processingRequestObserved: true, processingRequestKind: 'process_upload_stream',
             processingEvent: 'file.processing.completed', processingCompleted: true, visibleAttachmentChip: true } },
         text: JSON.stringify({ schemaVersion: 1, imageSha256: sha(png), imageVisible: true,
@@ -465,7 +501,7 @@ test('art review blocks declared host fields without a matching browser observat
   const result = await executeArtReview(plan, { apply: true, host: {
     probe: async () => observedWeb,
     turn: async ({ images }) => ({ status: 'HOST_OBSERVED', routeObserved: 'web-dev', traceId: `art-${item.run}`,
-      modelObserved: 'gpt-6-sol', imageInputObserved: true, imageRef: images[0].ref,
+      modelObserved: 'gpt-6-sol-instant', imageInputObserved: true, imageRef: images[0].ref,
       imageSha256: sha(png), imageBytes: images[0].bytes.length, text: JSON.stringify({ schemaVersion: 1, imageSha256: sha(png),
         imageVisible: true, verdict: 'PASS_ART', summary: 'Declared only.', findings: [] }) }),
   } });
