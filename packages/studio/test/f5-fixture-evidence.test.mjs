@@ -69,13 +69,14 @@ test('F5 new disposable games produce verifiable SDK ZIP hashes and honest block
       cases.push({ name, viewport, status: 'PASS', screenshots,
         pageErrors: [], externalRequests: [] });
     }
-    return { status: 'OBSERVED_PASS', cases, offlineStartup: 'BLOCKED_OFFLINE_STARTUP' };
+    return { status: 'OBSERVED_PASS', cases, offlineStartup: 'NOT_REQUIRED' };
   } });
   assert.match(result.runId, /^f5-[a-f0-9-]{36}$/);
   assert.equal(result.checkedHead, execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim());
   assert.match(result.checkedHead, /^[0-9a-f]{40}$/);
   assert.equal(result.status, 'PARTIAL_BLOCKED');
   assert.equal(result.browser.status, 'OBSERVED_PASS');
+  assert.equal(result.browser.offlineStartup, 'NOT_REQUIRED');
   assert.equal(result.ai.hostInvocations, 0);
   assert.equal(result.ai.image.status, 'NEEDS_AGENT_ACTION');
   assert.equal(result.ai.image.modelObserved, null);
@@ -153,7 +154,7 @@ test('F5 rejects 1x1 screenshots spoofed as a desktop and portrait browser run',
       }
       cases.push({ name, viewport, status: 'PASS', screenshots, pageErrors: [], externalRequests: [] });
     }
-    return { status: 'OBSERVED_PASS', cases, offlineStartup: 'BLOCKED_OFFLINE_STARTUP' };
+    return { status: 'OBSERVED_PASS', cases, offlineStartup: 'NOT_REQUIRED' };
   } }), /viewport PNG/i);
   assert.equal(JSON.parse(fs.readFileSync(path.join(outputDir, 'f5-evidence.json'), 'utf8')).status, 'ISSUES_FOUND');
 });

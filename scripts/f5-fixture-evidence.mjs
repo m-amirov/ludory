@@ -113,8 +113,8 @@ function verifyBrowserObservation(result, outputDir) {
       }
     }
   }
-  if (!['BLOCKED_OFFLINE_STARTUP', 'PASS_OFFLINE'].includes(result.offlineStartup)) {
-    throw new Error('F5 browser must report the actual offline-startup outcome');
+  if (result.offlineStartup !== 'NOT_REQUIRED') {
+    throw new Error('F5 offline startup is excluded by the owner and must be marked NOT_REQUIRED');
   }
   return result;
 }

@@ -18,13 +18,12 @@ This is a **partial F5 run**, not acceptance of Ludory v1 and not permission to 
 | Yandex dry-run ZIP | A second, independent `yandex-runtime` Studio-created, single-target fixture yields a candidate ZIP; builder SHA-256 is independently checked against ZIP bytes and every archived member. No live SDK or publication claim. |
 | VK dry-run ZIP | A third, independent `vk-runtime` Studio-created, single-target fixture yields an analogous SHA-256-verified ZIP. No live VK or publication claim. |
 | Cross-target story packaging | **BLOCKED: `STORY_TARGET_PACKAGING_BLOCKED`.** Neither platform ZIP contains the interactive narrative game. Their SDK-specific templates require different, trusted Studio origins and one target each. Do not combine them into one game's release evidence. |
-| Offline startup | The browser attempts a new navigation while offline; the report distinguishes a demonstrated `PASS_OFFLINE` from `BLOCKED_OFFLINE_STARTUP`, with the observed navigation error. An online page kept in memory does not count as offline startup. |
+| Offline startup | **NOT_REQUIRED** by owner decision on 2026-11-02. No offline navigation is run or required by the F5 gate. Deterministic game interactions without a paid runtime AI/server remain a separate architectural requirement. |
 | Devices, moderation, Web reviewer, platform accounts | **NOT_RUN**; no credentials or physical devices were exercised. `releaseReady: false`, `publicationAllowed: false` unconditionally. |
 
 ## F5 still outstanding
 
 1. Build **the same** tested narrative/Phaser game into genuine separately validated Yandex and VK packages with valid Studio provenance, without weakening existing package admission rules.
 2. Exercise any optional Phaser scene and pause/audio under the same whole-game fixture, beyond separate SDK/runtime browser suites.
-3. Implement or explicitly product-decide offline startup if the new navigation cannot load while offline. A bounded game preview does not imply Service Worker/offline support.
-4. Complete real device, live Web-reviewer and platform moderation gates only from direct evidence and owner-authorized environments. These are not inferred from emulation or mocked SDK tests.
-5. At the exact candidate release HEAD, perform F6 roadmap/contract/licensing/security review and obtain owner sign-off before tagging. No version tag is part of this run.
+3. Complete real device, live Web-reviewer and platform moderation gates only from direct evidence and owner-authorized environments. These are not inferred from emulation or mocked SDK tests.
+4. At the exact candidate release HEAD, perform F6 roadmap/contract/licensing/security review and obtain owner sign-off before tagging. No version tag is part of this run.

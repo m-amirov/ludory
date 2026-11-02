@@ -20,8 +20,6 @@ async function observeNarrative({ projectDir, outputDir }) {
     server = await startPreviewServer({ root: built.root, port: 0, buildSha256: built.buildSha256 });
     browser = await chromium.launch({ headless: true });
     const results = [];
-    let offlineStartup = 'BLOCKED_OFFLINE_STARTUP';
-    let offlineFailure = null;
     for (const [name, options] of [
       ['desktop-wide', { viewport: { width: 1000, height: 720 } }],
       ['android-portrait-emulated', { ...devices['Pixel 7'] }],
@@ -106,22 +104,10 @@ async function observeNarrative({ projectDir, outputDir }) {
           ], pageErrors, consoleErrors, externalRequests,
           screenshots });
 
-        if (name === 'android-portrait-emulated') {
-          await context.setOffline(true);
-          const offlinePage = await context.newPage();
-          try {
-            await offlinePage.goto(server.url, { waitUntil: 'domcontentloaded', timeout: 5_000 });
-            await offlinePage.getByText('Маяк мигнул трижды.').waitFor({ timeout: 2_000 });
-            offlineStartup = 'PASS_OFFLINE';
-          } catch (error) {
-            offlineStartup = 'BLOCKED_OFFLINE_STARTUP';
-            offlineFailure = String(error.message).slice(0, 400);
-          } finally { await offlinePage.close(); await context.setOffline(false); }
-        }
       } finally { await context.close(); }
     }
     return { status: 'OBSERVED_PASS', previewBuildSha256: built.buildSha256,
-      offlineStartup, offlineFailure, cases: results };
+      offlineStartup: 'NOT_REQUIRED', cases: results };
   } finally {
     if (browser) await browser.close();
     if (server) await server.close();

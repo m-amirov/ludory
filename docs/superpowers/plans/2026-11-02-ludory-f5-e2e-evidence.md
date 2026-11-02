@@ -13,6 +13,7 @@
 ## Global Constraints
 
 - Only throwaway Studio-created projects under process-owned temporary directories; no frozen games or CEOS mutation.
+- Offline startup is `NOT_REQUIRED` per owner decision on 2026-11-02; do not run an offline navigation or count it as an F5 failure.
 - `yandex-runtime` and `vk-runtime` provenance are single-target and cannot be disguised as packaged `narrative-interactive` game artifacts.
 - No real Yandex/VK publication, actual moderation, authenticated Web agent, physical-device or live SDK claim.
 - Receipt must capture actual local Git HEAD, run ID, fixture and ZIP SHA-256 hashes, screenshot SHA-256 hashes, honest blockers, and non-destructive assertions.
@@ -55,7 +56,7 @@
 - Playwright adapter passed to `runF5Fixture`; records screenshot basename/hash, viewport, narrative steps and browser errors. It uses Studio `planPreviewBuild`, `buildPreview`, `startPreviewServer`.
 - CI executes this script after N3 smoke, uploading F5 evidence even on failure.
 
-- [ ] **Step 1:** Write a browser smoke first: wide desktop and emulated portrait, story start → Back → photo and keepsake → compose/send echo → Save/reload; a separate corrupt/upgrade save conflict check; offline navigation observation classified truthfully, with screenshot hashes.
+- [ ] **Step 1:** Write a browser smoke first: wide desktop and emulated portrait, story start → Back → photo and keepsake → compose/send echo → Save/reload; a separate corrupt/upgrade save conflict check; screenshot hashes. Offline startup must be recorded `NOT_REQUIRED` without attempting offline navigation.
 - [ ] **Step 2:** Run locally where browser available, otherwise verify syntax and execute on browser-enabled CI (record local NOT_RUN reason).
 - [ ] **Step 3:** Wire `smoke:f5` and GitHub Action upload-artifact with failure-safe artifact collection; no release flag becomes true.
 - [ ] **Step 4:** Check targeted Node tests and full checks, commit Task 2.
@@ -66,7 +67,7 @@
 - Create: `docs/qa/f5-e2e-status.md`
 
 **Interfaces:**
-- Document what the exact run attests and the unresolved packaging / external host / offline/device gates; do not declare F5 fully accepted.
+- Document what the exact run attests and the unresolved packaging / external host / device gates; offline startup is explicitly not required, and F5 must not be declared fully accepted yet.
 
 - [ ] **Step 1:** Compare receipts to F5 spec and list outstanding observations, including Phaser if unexercised.
 - [ ] **Step 2:** Run full checks and independent whole-branch review; address important findings.
