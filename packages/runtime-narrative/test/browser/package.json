@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": { "smoke": "node smoke.mjs", "smoke:n3": "node studio-n3-smoke.mjs" },
+  "scripts": {
+    "smoke": "node smoke.mjs",
+    "smoke:n3": "node studio-n3-smoke.mjs",
+    "smoke:f5b3": "node f5b3-platform-smoke.mjs"
+  },
   "devDependencies": { "playwright": "1.56.1" }
 }

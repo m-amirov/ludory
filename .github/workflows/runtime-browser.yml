@@ -87,3 +87,15 @@ jobs:
           name: narrative-n3-studio-browser
           path: packages/runtime-narrative/test/browser/artifacts/n3/
           if-no-files-found: ignore
+      - name: F5b3 paired SDK narrative browser acceptance
+        run: npm run smoke:f5b3
+        working-directory: packages/runtime-narrative/test/browser
+        env:
+          LUDORY_F5B3_ARTIFACT_DIR: artifacts/f5b3
+      - name: Upload F5b3 mock SDK browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: narrative-f5b3-mock-sdk-browser
+          path: packages/runtime-narrative/test/browser/artifacts/f5b3/f5b3-mock-browser.json
+          if-no-files-found: error

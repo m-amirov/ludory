@@ -10,6 +10,9 @@ import { planPreviewBuild } from '../src/preview-build.mjs';
 import { planNarrativePlatformExport, materializeNarrativePlatformSource,
   buildNarrativePlatformCandidates, verifyNarrativePlatformCandidates } from '../src/narrative-platform-export.mjs';
 import { inspectYandexArchive, inspectVkArchive } from '@ludory/release';
+import { F5B3_BROWSER_CASES, F5B3_ADVERSE_CASES, F5B3_STORY_PATH,
+  validateF5b3Evidence, buildF5b3Evidence } from '../../runtime-narrative/test/browser/f5b3-evidence.mjs';
+import { isF5b3DirectInvocation } from '../../runtime-narrative/test/browser/f5b3-runner-path.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 
@@ -341,4 +344,84 @@ test('F5b2 does not create external receipts in source after their parent is rep
   for (const filename of ['yandex.build.json', 'vk.build.json', 'paired.export.json']) {
     assert.equal(fs.existsSync(path.join(project, filename)), false, `${filename} cannot reach source`);
   }
+});
+
+test('F5b3 evidence refuses mock browser PASS if target, engine, scenario or hashes are incomplete', () => {
+  const archiveSha256 = { yandex: 'a'.repeat(64), vk: 'b'.repeat(64) };
+  const results = ['yandex', 'vk'].flatMap(target => [
+    ...F5B3_BROWSER_CASES.map(({ browser, device }) => ({
+      target, browser, device, status: 'PASS', sourceDigest: 'c'.repeat(64),
+      archiveSha256: archiveSha256[target], externalRequests: 0, mockSdkOnly: true,
+      observedStoryPath: [...F5B3_STORY_PATH],
+      sdkCalls: target === 'yandex'
+        ? ['sdk:init', 'loading:ready', 'player:getData', 'player:setData', 'gameplay:start']
+        : ['VKWebAppInit', 'VKWebAppStorageGet', 'VKWebAppStorageSet'],
+    })),
+    ...F5B3_ADVERSE_CASES.map(scenario => ({
+      target, browser: 'chromium', device: 'desktop', scenario, status: 'PASS',
+      sourceDigest: 'c'.repeat(64), archiveSha256: archiveSha256[target],
+      externalRequests: 0, mockSdkOnly: true,
+    })),
+  ]);
+  const receipt = { schemaVersion: 1, sourceDigest: 'c'.repeat(64), archiveSha256,
+    results, mockSdkOnly: true, releaseReady: false, publicationAllowed: false,
+    fixtureChecks: 'PASS', status: 'MOCK_SDK_BROWSER_PASS',
+    httpSdkSubstitutions: { yandex: '/sdk.js', vk: '/assets/vk-bridge.js' },
+    archiveMembersUnchanged: true };
+  assert.equal(validateF5b3Evidence(receipt).ok, true);
+  const rejected = [
+    { ...receipt, results: results.slice(1) },
+    { ...receipt, results: results.map((row, index) => index === 0 ? { ...row, status: 'NOT_RUN' } : row) },
+    { ...receipt, results: results.map((row, index) => index === 0 ? { ...row, archiveSha256: 'f'.repeat(64) } : row) },
+    { ...receipt, results: results.map((row, index) => index === 0 ? { ...row, observedStoryPath: ['spoofed'] } : row) },
+    { ...receipt, results: results.map((row, index) => index === 0 ? { ...row, sdkCalls: {} } : row) },
+    { ...receipt, results: results.map(row => row.scenario ? row : {
+      ...row, scenario: 'normal', observedStoryPath: undefined, sdkCalls: undefined,
+    }) },
+    { ...receipt, results: results.map(row => row.scenario ? row : {
+      ...row, scenario: ['normal'], observedStoryPath: undefined, sdkCalls: undefined,
+    }) },
+    { ...receipt, results: results.map((row, index) => index === 0 ? { ...row, target: ['yandex'] } : row) },
+    { ...receipt, results: results.map((row, index) => index === 0 ? { ...row, browser: ['chromium'] } : row) },
+    { ...receipt, results: results.map((row, index) => index === 0 ? { ...row, device: ['desktop'] } : row) },
+    { ...receipt, results: results.map((row, index) => index === 0 ? { ...row, scenario: null } : row) },
+    { ...receipt, results: results.map((row, index) => index === 0 ? { ...row, scenario: {} } : row) },
+    { ...receipt, results: results.map((row, index) => index === 0 ? {
+      ...row, scenario: '', observedStoryPath: undefined, sdkCalls: undefined,
+    } : row) },
+    { ...receipt, results: [...results, results[0]] },
+    { ...receipt, sourceDigest: 'not-a-digest' },
+    { ...receipt, mockSdkOnly: false },
+    { ...receipt, fixtureChecks: 'NOT_RUN' },
+    { ...receipt, httpSdkSubstitutions: { yandex: '/different-sdk.js', vk: '/assets/vk-bridge.js' } },
+    { ...receipt, archiveMembersUnchanged: false },
+    { ...receipt, releaseReady: true },
+    { ...receipt, publicationAllowed: true },
+  ];
+  for (const tampered of rejected) {
+    assert.equal(validateF5b3Evidence(tampered).ok, false,
+      'a partial or forged receipt must never attest mock-browser PASS');
+  }
+  assert.equal(buildF5b3Evidence({ sourceDigest: receipt.sourceDigest,
+    archiveSha256, results: results.slice(1), fixtureChecks: 'PASS' }).status, 'BLOCKED');
+  const accepted = buildF5b3Evidence({ sourceDigest: receipt.sourceDigest,
+    archiveSha256, results, fixtureChecks: 'PASS' });
+  assert.equal(accepted.status, 'MOCK_SDK_BROWSER_PASS');
+  assert.equal(accepted.releaseReady, false);
+  assert.equal(accepted.publicationAllowed, false);
+  assert.deepEqual(accepted.httpSdkSubstitutions, receipt.httpSdkSubstitutions);
+  assert.equal(accepted.archiveMembersUnchanged, true);
+});
+
+test('F5b3 direct runner does not silently skip paths with spaces or Windows drive letters', () => {
+  const linuxScript = '/tmp/ludory f5b3/#build/f5b3-platform-smoke.mjs';
+  const linuxUrl = new URL('file:///tmp/ludory%20f5b3/%23build/f5b3-platform-smoke.mjs');
+  assert.equal(isF5b3DirectInvocation(linuxScript, linuxUrl, 'linux'), true);
+  assert.equal(isF5b3DirectInvocation('/tmp/other/script.mjs', linuxUrl, 'linux'), false);
+  assert.equal(isF5b3DirectInvocation(undefined, linuxUrl, 'linux'), false);
+  const winScript = 'D:\\HardWork\\LUDORY Dev\\f5b3-platform-smoke.mjs';
+  const winUrl = new URL('file:///D:/HardWork/LUDORY%20Dev/f5b3-platform-smoke.mjs');
+  assert.equal(isF5b3DirectInvocation(winScript, winUrl, 'win32'), true);
+  assert.equal(isF5b3DirectInvocation(winScript.toLowerCase(), winUrl, 'win32'), true);
+  assert.equal(isF5b3DirectInvocation('D:\\Other\\f5b3-platform-smoke.mjs', winUrl, 'win32'), false);
 });
