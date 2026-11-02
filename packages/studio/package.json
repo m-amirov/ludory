@@ -4,8 +4,21 @@
   "description": "Safe project metadata adoption CLI for Ludory",
   "type": "module",
   "private": true,
-  "engines": { "node": ">=22" },
-  "bin": { "ludory": "./bin/ludory.mjs" },
-  "dependencies": { "@ludory/core": "0.1.0", "@ludory/ai": "0.1.0", "@ludory/studio-trust": "0.1.0", "@ludory/release": "0.1.0" },
-  "license": "UNLICENSED"
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "ludory": "./bin/ludory.mjs"
+  },
+  "dependencies": {
+    "@ludory/core": "0.1.0",
+    "@ludory/ai": "0.1.0",
+    "@ludory/studio-trust": "0.1.0",
+    "@ludory/release": "0.1.0",
+    "playwright": "1.56.1"
+  },
+  "license": "UNLICENSED",
+  "exports": {
+    "./qa-capture": "./src/qa-capture.mjs"
+  }
 }

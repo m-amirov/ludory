@@ -11,8 +11,8 @@
   },
   "scripts": {
     "precheck": "npm run check:release && npm run check:preview",
-    "check:preview": "node --check packages/studio/src/preview-build.mjs && node --check packages/studio/src/preview-server.mjs && node --check packages/studio/src/preview-cli.mjs && node --check packages/runtime/src/portable-sha256.mjs",
-    "check:release": "node --check packages/release/src/archive.mjs && node --check packages/release/src/check.mjs && node --check packages/release/src/vk-check.mjs && node --check packages/release/src/plan.mjs && node --check packages/release/src/moderation-rules.mjs && node --check packages/release/src/moderation-evidence.mjs && node --check packages/release/src/promo-image.mjs && node --check packages/release/src/moderation-simulation.mjs && node --check packages/release/src/index.mjs && node --check packages/studio/src/cli.mjs",
+    "check:preview": "node --check packages/studio/src/preview-build.mjs && node --check packages/studio/src/preview-server.mjs && node --check packages/studio/src/preview-cli.mjs && node --check packages/runtime/src/portable-sha256.mjs && node --check packages/studio/src/qa-capture.mjs && node --check packages/studio/src/qa-flow.mjs",
+    "check:release": "node --check packages/release/src/archive.mjs && node --check packages/release/src/check.mjs && node --check packages/release/src/vk-check.mjs && node --check packages/release/src/plan.mjs && node --check packages/release/src/moderation-rules.mjs && node --check packages/release/src/moderation-evidence.mjs && node --check packages/release/src/promo-image.mjs && node --check packages/release/src/moderation-simulation.mjs && node --check packages/release/src/index.mjs && node --check packages/studio/src/cli.mjs && node --check packages/release/src/qa-staging.mjs && node --check packages/release/src/qa-evidence.mjs",
     "build:windows-pin": "node-gyp rebuild --directory packages/studio/native",
     "build:runtime-template": "node scripts/build-runtime-template.mjs",
     "build:yandex-template": "node scripts/build-yandex-template.mjs",

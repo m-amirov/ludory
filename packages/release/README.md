@@ -2,6 +2,102 @@
 
 Read-only local Yandex candidate verification. No network calls, uploads, publication, moderation or mutation of games/artifacts.
 
+## P3b: opt-in Playwright browser capture for trusted Ludory candidates
+
+`stageQaCandidate({ target, archivePath, candidateSha256 })` copies a
+verified C5/V5 ZIP into a private temporary directory, rechecks original ZIP
+identity and every extracted member SHA-256, and removes files using an
+ownership-checked cleanup. The original project and archive are unchanged.
+
+For **trusted, owner-authorized** games only, use the separate opt-in command:
+
+```sh
+node packages/studio/bin/ludory.mjs qa capture \
+  --trusted --target yandex-games \
+  --archive /path/to/candidate.zip --receipt /path/to/receipt.json \
+  --output /path/to/new-qa-evidence-directory --json
+
+node packages/studio/bin/ludory.mjs qa capture \
+  --trusted --target vk-games \
+  --archive /path/to/vk-candidate.zip --receipt /path/to/receipt.json \
+  --output /path/to/new-vk-evidence-directory --engine chromium --json
+```
+
+Playwright 1.56.1 is a declared dependency of `@ludory/studio`, installed by
+root `npm ci`; install browser engines with `npx playwright install`. The capture
+runner is exported as `@ludory/studio/qa-capture` and is not owned by test files.
+The test-browser package uses that same Studio interface.
+Docker is **not used**. The browser runs locally on Windows/Linux without
+mandatory container isolation. It uses fresh browser contexts, a temporary
+loopback server, blocks non-candidate-origin browser requests, and records
+original PNG screenshots with SHA-256 and viewport metadata. This request
+filtering is not a security boundary. **Do not run arbitrary or untrusted
+third-party game JavaScript**.
+
+A new evidence directory (outside the candidate/archive directory) is
+required; existing evidence is never overwritten. The operator may choose
+`--engine chromium|firefox|webkit` and `--timeout-ms 1000..30000`.
+The smoke test is `npm run smoke:qa-capture` from the browser test package.
+
+Optional `--flow /path/to/flow.json` runs an explicitly declared game-specific
+interaction sequence in every viewport after startup. The flow must match
+the verified target and ZIP SHA, contain at most 30 steps and use only
+`click`, `fill`, `expect-text`, `reload` or `browser-back`.
+UI Back buttons use `click`, followed by an `expect-text` assertion.
+A save survives reload **only if** the flow asserts the restored game state;
+simply performing a reload is not acceptance evidence.
+
+Example:
+
+```json
+{
+  "schemaVersion": 1,
+  "target": "vk-games",
+  "candidateSha256": "<actual candidate ZIP SHA-256>",
+  "steps": [
+    { "kind": "click", "selector": "#start" },
+    { "kind": "expect-text", "selector": "#scene", "text": "Chapter 2" },
+    { "kind": "reload" },
+    { "kind": "expect-text", "selector": "#scene", "text": "Chapter 2" },
+    { "kind": "click", "selector": "#back" },
+    { "kind": "expect-text", "selector": "#scene", "text": "Chapter 1" }
+  ]
+}
+```
+
+A flow report has its input-byte hash, per-step results, and
+`STARTUP_AND_DECLARED_FLOW` observation scope; this is not proof of all
+game branches, SDK behaviors or storage modes. A forged or stale flow is
+blocked before the browser starts.
+
+`STARTUP_OBSERVED` means only the initial page rendered in emulated desktop,
+mobile portrait and landscape without the bounded observed errors. An observed
+exception, network denial, HTTP failure or overflow is reported as an issue.
+Other interaction paths, Back/save/reload, advertisements, live SDK behavior,
+physical phones, visual/content review and actual moderation are **NOT_RUN**.
+The JSON on disk (`capture.json`) and screenshot digests are evidence for
+later review, not authenticated platform receipts. Ordinary
+`ludory qa simulate` remains read-only and its browser rule remains
+`BLOCKED/BROWSER_NOT_RUN` until a source-bound P3b integration reconciles
+capture evidence. Neither command grants publication authority.
+
+### Capture evidence integrity (P3b.4)
+
+`verifyQaCaptureIntegrity({ evidenceDir, target, candidateSha256, reportSha256? })`
+is a separate, read-only check of exported `capture.json` and the original
+screenshots. It checks the report SHA-256 if supplied, target/ZIP binding,
+declared case order/status, screenshots' byte SHA-256, PNG dimensions, and
+missing/renamed files. A capture also runs this verifier after writing the
+evidence; failed post-write validation returns `BLOCKED`.
+
+`INTEGRITY_VERIFIED` establishes **only local byte consistency**, never
+authenticated browser provenance, visible-pixel quality or independent
+platform moderation. `browserAttested:false`,
+`actualModeration:'NOT_RUN'`, `releaseReady:false` and
+`publicationAllowed:false` remain fixed. A JSON report plus hashes can be
+re-created by the file owner, so P3c must inspect original PNG pixels and
+use an independently evidenced review route before making subjective claims.
+
 ## P3a: Read-only pre-moderation QA simulation (Yandex / VK)
 
 Use `simulateModeration()` or the Studio command to inspect a **specific, already built** candidate. P3a does not run the game, open a browser, contact Yandex/VK, upload assets, submit to moderation, or mutate the ZIP/project. The owner must designate the candidate; a ZIP alone cannot independently prove Studio origin.

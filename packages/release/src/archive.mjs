@@ -87,7 +87,7 @@ function checkRange(bytes, offset, size, end = bytes.length) {
 }
 
 /** Narrow ZIP reader: candidate builders emit stored single-volume ZIPs without extensions. */
-function inspectStoredArchive(archivePath, { required, target, platform }) {
+function inspectStoredArchive(archivePath, { required, target, platform, includeFileContents = false }) {
   const bytes = readRegularBytes(archivePath, MAX_ARCHIVE_BYTES);
   if (bytes.length < 22 || bytes.readUInt32LE(bytes.length - 22) !== 0x06054b50) {
     fail('ARCHIVE_EOCD', 'ZIP end-of-central-directory is missing or has an unsupported comment');
@@ -212,7 +212,8 @@ function inspectStoredArchive(archivePath, { required, target, platform }) {
   }
   files.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)));
   return { sha256: sha256(bytes), projectId: manifest.id, projectVersion: manifest.version, files,
-    mediaFiles: files.filter(file => file.path.startsWith('assets/') && MEDIA.has(path.posix.extname(file.path).toLowerCase())) };
+    mediaFiles: files.filter(file => file.path.startsWith('assets/') && MEDIA.has(path.posix.extname(file.path).toLowerCase())),
+    ...(includeFileContents ? { fileContents } : {}) };
 }
 
 /** Existing Yandex C5 inspection semantics; no VK bundles or licenses are admitted. */
@@ -225,4 +226,18 @@ export function inspectYandexArchive(archivePath) {
 export function inspectVkArchive(archivePath) {
   return inspectStoredArchive(archivePath, { required: VK_REQUIRED,
     target: 'vk-games', platform: 'VK' });
+}
+
+/** Stage-only inspection: reuse the same CRC, path and size checks as Release.
+ *  The returned content map must never be exposed to a moderation verdict. */
+export function inspectCandidateForQaStaging(archivePath, target) {
+  if (target === 'yandex-games') {
+    return inspectStoredArchive(archivePath, { required: YANDEX_REQUIRED,
+      target, platform: 'Yandex', includeFileContents: true });
+  }
+  if (target === 'vk-games') {
+    return inspectStoredArchive(archivePath, { required: VK_REQUIRED,
+      target, platform: 'VK', includeFileContents: true });
+  }
+  fail('QA_TARGET_INVALID', 'Unknown target for QA candidate staging');
 }

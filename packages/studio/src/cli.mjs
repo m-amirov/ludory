@@ -45,6 +45,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory release plan --archive <candidate.zip> --receipt <build-receipt.json> --sdk-evidence <yandex-c5-contract.json> --rights <rights.json> [--field-evidence <self-report.json>] [--json]
   ludory release vk-check --archive <vk-candidate.zip> --receipt <vk-build-receipt.json> [--json]
   ludory qa simulate --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> [--sdk-evidence <json>] [--rights <json>] [--metadata <json> --promo-root <directory>] [--json]
+  ludory qa capture --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> --output <new-directory> --trusted [--engine <chromium|firefox|webkit>] [--flow <flow.json>] [--timeout-ms <1000..30000>] [--json]
   ludory workflow doctor --project <game-directory> [--json]
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--context-reviewed] [--apply] [--json]
@@ -113,6 +114,8 @@ function argumentsFor(command, argv) {
   const allowed = command === 'preview' ? new Set([...common, '--target', '--lan', '--port'])
     : command === 'qa-simulate'
     ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--json'])
+    : command === 'qa-capture'
+    ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--output', '--trusted', '--engine', '--flow', '--timeout-ms', '--json'])
     : command.startsWith('quality-')
     ? new Set(command === 'quality-enable' ? [...common, '--apply']
       : command === 'quality-check' ? [...common, '--tier', '--apply']
@@ -158,7 +161,7 @@ function argumentsFor(command, argv) {
     const key = argv[i];
     if (!allowed.has(key)) throw new Error(`Unknown option: ${key}`);
     if (flags.has(key)) throw new Error(`Duplicate option: ${key}`);
-    if (key === '--apply' || key === '--json' || key === '--lan' || key === '--confirm-no-executor' || key === '--context-reviewed') {
+    if (key === '--apply' || key === '--json' || key === '--lan' || key === '--trusted' || key === '--confirm-no-executor' || key === '--context-reviewed') {
       flags.set(key, true);
       continue;
     }
@@ -166,7 +169,7 @@ function argumentsFor(command, argv) {
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
     flags.set(key, value);
   }
-  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check', 'release-plan', 'release-vk-check', 'qa-simulate'].includes(command) && !flags.get('--project')) {
+  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check', 'release-plan', 'release-vk-check', 'qa-simulate', 'qa-capture'].includes(command) && !flags.get('--project')) {
     throw new Error('--project is required');
   }
   if (command === 'release-check' || command === 'release-plan') {
@@ -176,6 +179,11 @@ function argumentsFor(command, argv) {
   }
   if (command === 'release-vk-check' && (!flags.has('--archive') || !flags.has('--receipt'))) {
     throw new Error('VK release check requires --archive and --receipt');
+  }
+  if (command === 'qa-capture') {
+    for (const option of ['--target', '--archive', '--receipt', '--output', '--trusted']) {
+      if (!flags.has(option)) throw new Error(`${option} is required for trusted QA capture`);
+    }
   }
   if (command === 'qa-simulate') {
     for (const option of ['--target', '--archive', '--receipt']) {
@@ -469,6 +477,27 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'qa') {
       const [operation, ...args] = rest;
+      if (operation === 'capture') {
+        const flags = argumentsFor('qa-capture', args);
+        return import('./qa-capture.mjs').then(({ captureTrustedCandidate }) =>
+          captureTrustedCandidate({ target: flags.get('--target'), archivePath: flags.get('--archive'),
+            receiptPath: flags.get('--receipt'), sdkEvidencePath: flags.get('--sdk-evidence'),
+            rightsPath: flags.get('--rights'), metadataPath: flags.get('--metadata'),
+            promoRoot: flags.get('--promo-root'), outputDir: flags.get('--output'),
+            flowPath: flags.get('--flow'),
+            engine: flags.get('--engine') ?? 'chromium', timeoutMs: flags.has('--timeout-ms') ? Number(flags.get('--timeout-ms')) : 10000,
+            trusted: flags.has('--trusted') }))
+          .then(result => {
+            if (flags.has('--json')) out(`${JSON.stringify(result, null, 2)}\n`);
+            else out(`${result.status} · ${result.target ?? flags.get('--target')} · ${result.candidateSha256 ?? 'unverified'} · ${result.reasonCode ?? 'startup evidence only'}\n`);
+            return result.status === 'STARTUP_OBSERVED' ? 0 : result.status === 'BLOCKED' ? 2 : 1;
+          }).catch(error => {
+            if (flags.has('--json')) out(`${JSON.stringify({ status: 'BLOCKED', reasonCode: 'QA_CAPTURE_UNAVAILABLE', message: error.message,
+              releaseReady: false, publicationAllowed: false, actualModeration: 'NOT_RUN' })}\n`);
+            else err(`Ludory QA capture: ${error.message}\n`);
+            return 2;
+          });
+      }
       if (operation !== 'simulate') throw new Error(`Unknown QA operation: ${operation || '(missing)'}`);
       const flags = argumentsFor('qa-simulate', args);
       const report = simulateModeration({
