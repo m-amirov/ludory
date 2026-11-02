@@ -19,6 +19,7 @@ on:
       - 'scripts/build-vk-candidate.mjs'
       - 'scripts/build-yandex-candidate.mjs'
       - 'scripts/yandex-c5-evidence.mjs'
+      - 'scripts/f5-fixture-evidence.mjs'
       - '.github/workflows/runtime-browser.yml'
       - 'package*.json'
   workflow_dispatch:
@@ -87,3 +88,15 @@ jobs:
           name: narrative-n3-studio-browser
           path: packages/runtime-narrative/test/browser/artifacts/n3/
           if-no-files-found: ignore
+      - name: F5 disposable end-to-end Studio journey and platform candidates
+        run: npm run smoke:f5
+        working-directory: packages/runtime-narrative/test/browser
+        env:
+          LUDORY_F5_ARTIFACT_DIR: artifacts/f5
+      - name: Upload F5 evidence and dry-run candidate ZIPs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ludory-f5-disposable-e2e
+          path: packages/runtime-narrative/test/browser/artifacts/f5/
+          if-no-files-found: warn
