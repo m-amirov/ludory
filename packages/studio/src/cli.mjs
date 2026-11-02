@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { defineGame } from '@ludory/core';
-import { checkYandexRelease, checkVkCandidate, planYandexFieldTests, simulateModeration } from '@ludory/release';
+import { checkYandexRelease, checkVkCandidate, planYandexFieldTests, simulateModeration, prepareQaReviewPacket } from '@ludory/release';
 import { inspectProject, planInit, planMigration, applyPlan } from './projects.mjs';
 import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
@@ -46,6 +46,7 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory release vk-check --archive <vk-candidate.zip> --receipt <vk-build-receipt.json> [--json]
   ludory qa simulate --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> [--sdk-evidence <json>] [--rights <json>] [--metadata <json> --promo-root <directory>] [--json]
   ludory qa capture --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> --output <new-directory> --trusted [--engine <chromium|firefox|webkit>] [--flow <flow.json>] [--timeout-ms <1000..30000>] [--json]
+  ludory qa handoff --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> --metadata <json> --promo-root <directory> --evidence-dir <directory> [--sdk-evidence <json>] [--rights <json>] [--report-sha256 <sha256>] [--json]
   ludory workflow doctor --project <game-directory> [--json]
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--context-reviewed] [--apply] [--json]
@@ -116,6 +117,8 @@ function argumentsFor(command, argv) {
     ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--json'])
     : command === 'qa-capture'
     ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--output', '--trusted', '--engine', '--flow', '--timeout-ms', '--json'])
+    : command === 'qa-handoff'
+    ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--evidence-dir', '--report-sha256', '--json'])
     : command.startsWith('quality-')
     ? new Set(command === 'quality-enable' ? [...common, '--apply']
       : command === 'quality-check' ? [...common, '--tier', '--apply']
@@ -169,7 +172,7 @@ function argumentsFor(command, argv) {
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
     flags.set(key, value);
   }
-  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check', 'release-plan', 'release-vk-check', 'qa-simulate', 'qa-capture'].includes(command) && !flags.get('--project')) {
+  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check', 'release-plan', 'release-vk-check', 'qa-simulate', 'qa-capture', 'qa-handoff'].includes(command) && !flags.get('--project')) {
     throw new Error('--project is required');
   }
   if (command === 'release-check' || command === 'release-plan') {
@@ -179,6 +182,11 @@ function argumentsFor(command, argv) {
   }
   if (command === 'release-vk-check' && (!flags.has('--archive') || !flags.has('--receipt'))) {
     throw new Error('VK release check requires --archive and --receipt');
+  }
+  if (command === 'qa-handoff') {
+    for (const option of ['--target', '--archive', '--receipt', '--metadata', '--promo-root', '--evidence-dir']) {
+      if (!flags.has(option)) throw new Error(`${option} is required for QA review handoff`);
+    }
   }
   if (command === 'qa-capture') {
     for (const option of ['--target', '--archive', '--receipt', '--output', '--trusted']) {
@@ -477,6 +485,23 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'qa') {
       const [operation, ...args] = rest;
+      if (operation === 'handoff') {
+        const flags = argumentsFor('qa-handoff', args);
+        const result = prepareQaReviewPacket({
+          target: flags.get('--target'), archivePath: flags.get('--archive'),
+          receiptPath: flags.get('--receipt'), sdkEvidencePath: flags.get('--sdk-evidence'),
+          rightsPath: flags.get('--rights'), metadataPath: flags.get('--metadata'),
+          promoRoot: flags.get('--promo-root'), evidenceDir: flags.get('--evidence-dir'),
+          reportSha256: flags.get('--report-sha256'),
+        });
+        if (flags.has('--json')) out(`${JSON.stringify(result, null, 2)}\n`);
+        else {
+          out(`${result.status} · ${result.target ?? 'unknown'} · ${result.candidateSha256 ?? 'unverified'}\n`);
+          if (result.reasonCode) out(`  reason: ${result.reasonCode}\n`);
+          out('  review: NOT_RUN · moderation: NOT_RUN · publication: NOT_AUTHORIZED\n');
+        }
+        return result.status === 'READY_FOR_HANDOFF' ? 0 : result.status === 'BLOCKED' ? 2 : 1;
+      }
       if (operation === 'capture') {
         const flags = argumentsFor('qa-capture', args);
         return import('./qa-capture.mjs').then(({ captureTrustedCandidate }) =>
