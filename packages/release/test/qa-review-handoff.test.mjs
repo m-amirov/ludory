@@ -80,6 +80,7 @@ for (const target of ['vk-games', 'yandex-games']) {
   test('P3c prepares source-bound '+target+' packet with no reviewer authority or filesystem writes', t => {
     const d = fixture(t, target);
     const before = fs.readdirSync(d.folder).sort();
+    const originalArchiveHash = hash(fs.readFileSync(d.archivePath));
     const result = prepareQaReviewPacket(d);
     assert.equal(result.status, 'READY_FOR_HANDOFF', JSON.stringify(result, null, 2));
     assert.equal(result.candidateSha256, d.candidateSha256);
@@ -97,7 +98,7 @@ for (const target of ['vk-games', 'yandex-games']) {
     assert.equal(result.publicationAllowed, false);
     assert.equal(result.actualModeration, 'NOT_RUN');
     assert.deepEqual(fs.readdirSync(d.folder).sort(), before);
-    assert.deepEqual(fs.readFileSync(d.archivePath), fs.readFileSync(d.archivePath));
+    assert.equal(hash(fs.readFileSync(d.archivePath)), originalArchiveHash);
   });
 }
 
