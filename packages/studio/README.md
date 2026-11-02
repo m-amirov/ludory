@@ -41,6 +41,77 @@ node packages/studio/bin/ludory.mjs qa simulate --target vk-games \
 
 The command checks *local* archive integrity, receipt, simulated SDK/bridge contracts, declaration consistency and optional promo bytes. It does **not** visit the real platform, start a browser, judge content/visual quality, authenticate licenses, run official moderation or grant publication authority. Reports always state `actualModeration: NOT_RUN`, `releaseReady: false`, `publicationAllowed: false`. The pinned VK policy sources are currently unverified, and a locally green gate cannot replace a platform or human review.
 
+## Sequential independent Web visual review (P3c.2, opt-in)
+
+After producing a P3b `qa capture` evidence directory and a P3c.1
+`qa handoff`-compatible metadata/promo packet, preview the five original images
+that would be sent to the isolated Web DEV reviewer:
+
+```sh
+node packages/studio/bin/ludory.mjs qa review --target vk-games \
+  --archive candidate.zip --receipt receipt.json --rights rights.json \
+  --metadata listing.json --promo-root promo --evidence-dir browser-evidence \
+  --output new-review-session --json
+
+# Only after inspecting the preview and authorizing five Web uploads:
+node packages/studio/bin/ludory.mjs qa review --target vk-games \
+  --archive candidate.zip --receipt receipt.json --rights rights.json \
+  --metadata listing.json --promo-root promo --evidence-dir browser-evidence \
+  --output new-review-session --apply --json
+
+# Local recorded state; never a new host/browser attestation:
+node packages/studio/bin/ludory.mjs qa review-status \
+  --output new-review-session --json
+```
+
+For Yandex, supply matching `--sdk-evidence` and `--rights`; optionally pin
+`--report-sha256` to the original capture report. Preview is read-only, never
+discovers the helper and never transmits image bytes. `--apply` requires an
+authenticated, independently observed `chatgpt-web/gpt-6-sol-instant` Web DEV
+helper with `low` reasoning and browser observation protocol V2. It sends exactly
+one original image per independent turn in this order: desktop 1000×720, mobile
+390×844, landscape 667×375, promo icon and promo cover. Each turn must prove an
+upload creation request, completed processing and a visible image attachment
+chip with matching image hash, byte count and trace ID. Model JSON output alone
+is never accepted as browser evidence. Listing/policy material remains
+user-declared or unverified, not authoritative instructions or policy clearance.
+
+Before each Web call the new, exclusive local output directory records a
+`REQUESTED` intent. A missing response, image/provenance mismatch or an uncertain
+write leaves `PENDING_RECOVERY` and stops without retrying any image. Do not
+re-run `qa review --apply` against the same directory. Only after confirming the
+old reviewer is stopped, explicitly authorize a **new five-upload session**:
+
+```sh
+node packages/studio/bin/ludory.mjs qa review-restart --target vk-games \
+  --archive candidate.zip --receipt receipt.json --rights rights.json \
+  --metadata listing.json --promo-root promo --evidence-dir browser-evidence \
+  --previous new-review-session --output fresh-restart-session \
+  --confirm-reviewer-stopped --apply --json
+```
+
+Journal creation and event publication flush both file bytes and directory
+entries and anchor writes to the checked physical directory. If a host OS or
+filesystem cannot verify those flushes (including Windows configurations that
+do not allow Node to flush directories), `--apply` fails closed **before Web
+transmission**, potentially leaving an unused output directory; choose a new
+output path after correcting the host prerequisites. Do not interpret a missing
+record after a hardware failure as permission to repeat a paid upload.
+
+The restart revalidates all original source files, requires a distinct output
+directory and may use additional account quota. A readable/edited local audit
+is deliberately **not** a trusted replay of live host observations:
+`qa review-status` returns `RECORDED_REVIEWED`, `RECORDED_ISSUES_FOUND` or
+`PENDING_RECOVERY`, always with `browserAttested:false` and
+`reviewProvenance:'LOCAL_RECORD_ONLY'`. The immediate apply response can say
+`HOST_OBSERVED` only for that live, verified session. Exits: `0` for preview/
+recorded review or observed no findings, `1` for findings, `2` for blocked
+verification and `3` for uncertain pending recovery. All paths keep
+`actualModeration:'NOT_RUN'`, `releaseReady:false` and
+`publicationAllowed:false`. No command submits to Yandex/VK or publishes.
+Production host smoke remains owner-operated; automated tests use fake V2
+observations and do not establish real browser compatibility.
+
 ## Fresh local and LAN game preview (new Studio games)
 
 ```sh

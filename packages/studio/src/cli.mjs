@@ -10,6 +10,9 @@ import { planComponentUpdate, componentStatus, applyComponentPlan,
   previewComponentTrust, acceptComponentTrust } from './component-updates.mjs';
 import { inspectWindowsDirectoryPin } from './windows-directory-pin.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
+import { planQaWebReview } from './qa-review-contract.mjs';
+import { inspectQaJournal } from './qa-review-journal.mjs';
+import { executeQaWebReview, restartQaWebReview } from './qa-review.mjs';
 import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNativeRun,
   planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport,
   planNarrativeReview, executeNarrativeReview,
@@ -47,6 +50,9 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory qa simulate --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> [--sdk-evidence <json>] [--rights <json>] [--metadata <json> --promo-root <directory>] [--json]
   ludory qa capture --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> --output <new-directory> --trusted [--engine <chromium|firefox|webkit>] [--flow <flow.json>] [--timeout-ms <1000..30000>] [--json]
   ludory qa handoff --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> --metadata <json> --promo-root <directory> --evidence-dir <directory> [--sdk-evidence <json>] [--rights <json>] [--report-sha256 <sha256>] [--json]
+  ludory qa review --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> --metadata <json> --promo-root <directory> --evidence-dir <directory> --output <new-directory> [--sdk-evidence <json>] [--rights <json>] [--report-sha256 <sha256>] [--apply] [--json]
+  ludory qa review-status --output <existing-directory> [--json]
+  ludory qa review-restart --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> --metadata <json> --promo-root <directory> --evidence-dir <directory> --previous <pending-directory> --output <new-directory> [--sdk-evidence <json>] [--rights <json>] [--report-sha256 <sha256>] [--confirm-reviewer-stopped] [--apply] [--json]
   ludory workflow doctor --project <game-directory> [--json]
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--context-reviewed] [--apply] [--json]
@@ -104,6 +110,11 @@ Release R2 plans real Yandex field tests; self-reported PASS never becomes verif
 PASS_LOCAL and READY_FOR_FIELD_TEST never grant rights clearance, SDK approval or publication authority.
 QA simulation examines candidate-bound local evidence only; browser, visual, content and real platform moderation remain NOT_RUN.
 The QA report never grants release readiness, a moderation verdict, or permission to publish.
+qa review previews five original images without uploads by default. --apply uses a separate, verified Web DEV turn per image;
+each upload must have browser-observed creation, processing completion and visible attachment evidence.
+An uncertain request stops in PENDING_RECOVERY without auto-retry. review-status reads a local audit, not a live browser attestation.
+review-restart requires original inputs, a fresh output directory, explicit stopped-reviewer confirmation and --apply;
+the fresh review uploads all five originals again, potentially consuming quota. Neither review authorizes release or publication.
 Native development workflow accepts dirty or unversioned projects; Release verification is separate.
 The legacy metadata-only migrate command requires clean Git and Starter Kit game-spec.yaml schema 2;
 do not run it against frozen existing games. CEOS history import is not planned.
@@ -119,6 +130,11 @@ function argumentsFor(command, argv) {
     ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--output', '--trusted', '--engine', '--flow', '--timeout-ms', '--json'])
     : command === 'qa-handoff'
     ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--evidence-dir', '--report-sha256', '--json'])
+    : command === 'qa-review' || command === 'qa-review-restart'
+    ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--evidence-dir', '--report-sha256', '--output', '--apply', '--json',
+      ...(command === 'qa-review-restart' ? ['--previous', '--confirm-reviewer-stopped'] : [])])
+    : command === 'qa-review-status'
+    ? new Set(['--output', '--json'])
     : command.startsWith('quality-')
     ? new Set(command === 'quality-enable' ? [...common, '--apply']
       : command === 'quality-check' ? [...common, '--tier', '--apply']
@@ -164,7 +180,7 @@ function argumentsFor(command, argv) {
     const key = argv[i];
     if (!allowed.has(key)) throw new Error(`Unknown option: ${key}`);
     if (flags.has(key)) throw new Error(`Duplicate option: ${key}`);
-    if (key === '--apply' || key === '--json' || key === '--lan' || key === '--trusted' || key === '--confirm-no-executor' || key === '--context-reviewed') {
+    if (key === '--apply' || key === '--json' || key === '--lan' || key === '--trusted' || key === '--confirm-no-executor' || key === '--confirm-reviewer-stopped' || key === '--context-reviewed') {
       flags.set(key, true);
       continue;
     }
@@ -172,7 +188,7 @@ function argumentsFor(command, argv) {
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
     flags.set(key, value);
   }
-  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check', 'release-plan', 'release-vk-check', 'qa-simulate', 'qa-capture', 'qa-handoff'].includes(command) && !flags.get('--project')) {
+  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check', 'release-plan', 'release-vk-check', 'qa-simulate', 'qa-capture', 'qa-handoff', 'qa-review', 'qa-review-status', 'qa-review-restart'].includes(command) && !flags.get('--project')) {
     throw new Error('--project is required');
   }
   if (command === 'release-check' || command === 'release-plan') {
@@ -187,6 +203,15 @@ function argumentsFor(command, argv) {
     for (const option of ['--target', '--archive', '--receipt', '--metadata', '--promo-root', '--evidence-dir']) {
       if (!flags.has(option)) throw new Error(`${option} is required for QA review handoff`);
     }
+  }
+  if (command === 'qa-review' || command === 'qa-review-restart') {
+    for (const option of ['--target', '--archive', '--receipt', '--metadata', '--promo-root', '--evidence-dir', '--output',
+      ...(command === 'qa-review-restart' ? ['--previous'] : [])]) {
+      if (!flags.has(option)) throw new Error(`${option} is required for QA Web review`);
+    }
+  }
+  if (command === 'qa-review-status' && !flags.has('--output')) {
+    throw new Error('--output is required for QA Web review status');
   }
   if (command === 'qa-capture') {
     for (const option of ['--target', '--archive', '--receipt', '--output', '--trusted']) {
@@ -434,6 +459,72 @@ function createOptions(flags) {
   };
 }
 
+function qaReviewSource(flags) {
+  return { target: flags.get('--target'), archivePath: flags.get('--archive'),
+    receiptPath: flags.get('--receipt'), sdkEvidencePath: flags.get('--sdk-evidence'),
+    rightsPath: flags.get('--rights'), metadataPath: flags.get('--metadata'),
+    promoRoot: flags.get('--promo-root'), evidenceDir: flags.get('--evidence-dir'),
+    reportSha256: flags.get('--report-sha256') };
+}
+
+function displayQaReview(result, json, out) {
+  if (json) { out(`${JSON.stringify(result, null, 2)}\n`); return; }
+  out(`${result.status} · ${result.target ?? 'unknown'} · ${result.candidateSha256 ?? 'unverified'}\n`);
+  if (result.reasonCode) out(`  reason: ${result.reasonCode}\n`);
+  if (result.outputDir) out(`  local audit: ${result.outputDir}\n`);
+  if (result.images) out(`  images: ${result.images.length}\n`);
+  if (result.reviewerModel) out(`  reviewer: ${result.reviewerModel} · effort ${result.reviewerEffort}\n`);
+  for (const image of result.images ?? []) {
+    out(`  ${image.id}: ${image.file ?? '(original path in session)'} · SHA-256 ${image.sha256}`);
+    if (image.verdict) out(` · ${image.verdict}`);
+    out('\n');
+  }
+  for (const finding of result.findings ?? []) {
+    out(`  finding ${finding.severity} · ${finding.imageId ?? 'image'} · ${finding.category}: ${finding.description}\n`);
+  }
+  if (result.warning) out(`  warning: ${result.warning}\n`);
+  if (result.recordedOnly) out('  journal: LOCAL_RECORD_ONLY · not a fresh browser attestation\n');
+  out('  actual moderation: NOT_RUN · release: NOT_READY · publication: NOT_AUTHORIZED\n');
+}
+
+function qaReviewExit(result) {
+  if (result.status === 'PENDING_RECOVERY') return 3;
+  if (result.status === 'BLOCKED') return 2;
+  if (result.status === 'ISSUES_FOUND' || result.status === 'RECORDED_ISSUES_FOUND') return 1;
+  return ['READY', 'REVIEWED', 'RECORDED_REVIEWED'].includes(result.status) ? 0 : 2;
+}
+
+async function runQaReviewCli(operation, flags, { out, devHost }) {
+  const outputDir = path.resolve(flags.get('--output'));
+  let result;
+  if (operation === 'review-status') {
+    result = inspectQaJournal(outputDir);
+  } else {
+    const source = qaReviewSource(flags);
+    const apply = flags.has('--apply');
+    const hostForApply = () => {
+      try { return devHost(); }
+      catch { return null; }
+    };
+    if (operation === 'review') {
+      const plan = planQaWebReview(source);
+      result = apply && plan.status === 'READY'
+        ? await executeQaWebReview(plan, { apply, outputDir, host: hostForApply() })
+        : plan;
+    } else {
+      const options = { previousOutput: path.resolve(flags.get('--previous')), outputDir,
+        confirmReviewerStopped: flags.has('--confirm-reviewer-stopped'), apply };
+      // Validate owner confirmation and the full original source binding before discovering a host.
+      const preview = await restartQaWebReview(source, { ...options, apply: false });
+      result = apply && options.confirmReviewerStopped && preview.status === 'PENDING_RECOVERY' &&
+        preview.reasonCode === 'QA_REVIEW_RESTART_CONFIRMATION_REQUIRED'
+        ? await restartQaWebReview(source, { ...options, host: hostForApply() }) : preview;
+    }
+  }
+  displayQaReview(result, flags.has('--json'), out);
+  return qaReviewExit(result);
+}
+
 function display(result, json, out) {
   if (json) {
     out(`${JSON.stringify(result, null, 2)}\n`);
@@ -485,6 +576,17 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'qa') {
       const [operation, ...args] = rest;
+      if (['review', 'review-status', 'review-restart'].includes(operation)) {
+        const flags = argumentsFor(`qa-${operation}`, args);
+        return runQaReviewCli(operation, flags, { out, devHost }).catch(error => {
+          const failure = { schemaVersion: 1, kind: 'qa-web-review', status: 'BLOCKED',
+            reasonCode: error.code ?? 'QA_REVIEW_COMMAND_FAILED', warning: error.message,
+            browserAttested: false, reviewProvenance: 'NOT_RUN', actualModeration: 'NOT_RUN',
+            releaseReady: false, publicationAllowed: false };
+          displayQaReview(failure, flags.has('--json'), out);
+          return 2;
+        });
+      }
       if (operation === 'handoff') {
         const flags = argumentsFor('qa-handoff', args);
         const result = prepareQaReviewPacket({

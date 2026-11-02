@@ -139,6 +139,34 @@ authority. `browserAttested:false`, `reviewProvenance:'NOT_RUN'`,
 `actualModeration:'NOT_RUN'`, `releaseReady:false` and
 `publicationAllowed:false` remain fixed even for `READY_FOR_HANDOFF`.
 
+## P3c.2: Studio-only opt-in sequential Web DEV review
+
+The Release package remains **read-only and network-free**. Studio's separate
+`qa review` command can, only with `--apply`, transfer the five verified
+original image bytes from the P3c.1 handoff to five independent Web DEV visual
+review turns (desktop, mobile, landscape, icon and cover), one image per turn.
+It requires observed GPT-6 Sol Instant at low reasoning and independently
+attested image upload/processing/chip evidence; a configured model or the
+assistant's own claim cannot substitute for that observation.
+
+`qa review` without `--apply` is a no-write/no-upload preview. Each authorized
+turn has a local `REQUESTED` journal entry *before* sending pixels; a verified
+`OBSERVED` entry is written only after matching host traces and visible image
+evidence. Unknown results stop at `PENDING_RECOVERY` without retry. The operator
+must first confirm the previous helper is stopped, then request `qa
+review-restart --confirm-reviewer-stopped --apply` with all matching original
+source paths and a fresh output directory; this reuploads **all five images**
+and may consume additional quota. `qa review-status --output <directory>`
+reports only `LOCAL_RECORD_ONLY` provenance and never authenticates browser
+activity from editable on-disk records. Full commands and exit codes are in
+the [Studio README](../studio/README.md#sequential-independent-web-visual-review-p3c2-opt-in).
+
+Even a live `HOST_OBSERVED` P3c.2 review establishes only scoped visual/content
+findings. P3a's independent-check blockers remain unchanged; actual official
+moderation, rights clearance, Release readiness and publication permission are
+never granted (`NOT_RUN`, `false`, `false`). Real isolated-browser smoke remains
+an owner-operated validation step; synthetic host tests are not its replacement.
+
 ## P3a: Read-only pre-moderation QA simulation (Yandex / VK)
 
 Use `simulateModeration()` or the Studio command to inspect a **specific, already built** candidate. P3a does not run the game, open a browser, contact Yandex/VK, upload assets, submit to moderation, or mutate the ZIP/project. The owner must designate the candidate; a ZIP alone cannot independently prove Studio origin.
