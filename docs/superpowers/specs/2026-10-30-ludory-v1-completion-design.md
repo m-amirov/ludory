@@ -69,7 +69,7 @@ Build a target-specific, preview-first Release pipeline consuming Studio receipt
 
 ### F5 — End-to-end Ludory test fixture
 
-Use a throwaway Studio-created fixture **inside Ludory tests**, not a commercial game and not a frozen repository. Exercise create -> run/continue -> narrative and optional Phaser scene -> photo/keepsake/message echo -> Back/save/reload -> AI handoff and honest external capability outcome -> two platform-specific dry-run packages. Test wide desktop and portrait mobile emulation, offline startup, pause/audio, corrupt saves, upgrade conflict and replay.
+Use a throwaway Studio-created fixture **inside Ludory tests**, not a commercial game and not a frozen repository. Exercise create -> run/continue -> narrative and optional Phaser scene -> photo/keepsake/message echo -> Back/save/reload -> AI handoff and honest external capability outcome -> two platform-specific dry-run packages. Test wide desktop and portrait mobile emulation, pause/audio, corrupt saves, upgrade conflict and replay. **Owner update (2026-11-02): offline startup is not required** and is not an F5 blocker; this does not remove the separate no-server/no-paid-runtime-AI architectural requirement.
 
 **Gate F5:** CI produces run IDs, exact tested HEAD, logs/screenshots, fixtures' hashes, target ZIP hashes, blocked reasons and non-destructive assertions. No claims of physical devices, live external review or platform moderation without direct evidence.
 
