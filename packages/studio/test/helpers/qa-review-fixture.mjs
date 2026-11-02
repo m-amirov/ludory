@@ -8,14 +8,14 @@ export const qaHash = bytes => createHash('sha256').update(bytes).digest('hex');
 export const qaPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4////fwAJ+wP9CNHoHgAAAABJRU5ErkJggg==', 'base64');
 export const qaCases = ['desktop-1000x720', 'mobile-390x844', 'landscape-667x375'];
 
-export function makeQaReviewFixture(t, target = 'yandex-games') {
+export function makeQaReviewFixture(t, target = 'yandex-games', { sourceText = 'console.log("story")' } = {}) {
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-p3c-web-review-'));
   t.after(() => fs.rmSync(folder, { recursive: true, force: true }));
   const entries = {
     'index.html': '<html><body>Story</body></html>',
     'ludory.project.json': JSON.stringify({ schemaVersion: 1, id: 'review-story', version: '1.0.0',
       title: { en: 'Story' }, engine: 'web', targets: [target] }),
-    'src/main.js': 'console.log("story")',
+    'src/main.js': sourceText,
     ...(target === 'yandex-games' ? { 'assets/ludory-yandex.js': '// adapter' } : {
       'assets/ludory-vk.js': '// adapter', 'assets/vk-bridge.js': '// bridge',
       'licenses/swc-helpers.txt': 'license', 'licenses/vk-bridge.txt': 'license',

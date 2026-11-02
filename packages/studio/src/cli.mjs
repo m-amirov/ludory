@@ -13,6 +13,9 @@ import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } 
 import { planQaWebReview } from './qa-review-contract.mjs';
 import { inspectQaJournal } from './qa-review-journal.mjs';
 import { executeQaWebReview, restartQaWebReview } from './qa-review.mjs';
+import { planQaRepair } from './qa-repair-scope.mjs';
+import { beginQaRepair, inspectQaRepair, startQaRepairRound,
+  completeQaRepairRound } from './qa-repair-journal.mjs';
 import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNativeRun,
   planDevDraft, executeDevDraft, planDevDraftImport, executeDevDraftImport,
   planNarrativeReview, executeNarrativeReview,
@@ -53,6 +56,10 @@ const usage = `Ludory Studio 0.1.0 — native game-development workflows
   ludory qa review --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> --metadata <json> --promo-root <directory> --evidence-dir <directory> --output <new-directory> [--sdk-evidence <json>] [--rights <json>] [--report-sha256 <sha256>] [--apply] [--json]
   ludory qa review-status --output <existing-directory> [--json]
   ludory qa review-restart --target <yandex-games|vk-games> --archive <candidate.zip> --receipt <receipt.json> --metadata <json> --promo-root <directory> --evidence-dir <directory> --previous <pending-directory> --output <new-directory> [--sdk-evidence <json>] [--rights <json>] [--report-sha256 <sha256>] [--confirm-reviewer-stopped] [--apply] [--json]
+  ludory qa repair --project <new-studio-game> --review-output <observed-p3c-journal> --output <new-session-directory> --in-scope <relative;paths> --mutation-boundary <text> [--repair --apply] [--json]
+  ludory qa repair-status --output <session-directory> [--json]
+  ludory qa repair-next --output <session-directory> [--apply] [--json]
+  ludory qa repair-record --output <session-directory> --review-output <fresh-p3c-journal> [--apply] [--json]
   ludory workflow doctor --project <game-directory> [--json]
   ludory workflow route --project <new-studio-game> --task <mechanics|episode-script|art-concept|image|functional-check> [--json]
   ludory workflow draft --project <new-studio-game> --run <id> --task <episode-script|art-concept> --brief <relative-text> [--source <relative;relative>] [--context-reviewed] [--apply] [--json]
@@ -115,6 +122,10 @@ each upload must have browser-observed creation, processing completion and visib
 An uncertain request stops in PENDING_RECOVERY without auto-retry. review-status reads a local audit, not a live browser attestation.
 review-restart requires original inputs, a fresh output directory, explicit stopped-reviewer confirmation and --apply;
 the fresh review uploads all five originals again, potentially consuming quota. Neither review authorizes release or publication.
+qa repair --repair --apply pins one owner consent to two at-most Codex-agent rounds in a new Studio game.
+The repair CLI never edits source or calls Codex/Web; repair-next persists a one-time intent and hands authorized paths to the primary agent.
+After each patch the agent must rebuild, recapture and complete a fresh five-image Web review; repair-record stores only local recorded evidence.
+An uncertain round remains PENDING_RECOVERY, unauthorized edits ESCALATE, and a local journal never grants independent reviewer or platform PASS.
 Native development workflow accepts dirty or unversioned projects; Release verification is separate.
 The legacy metadata-only migrate command requires clean Git and Starter Kit game-spec.yaml schema 2;
 do not run it against frozen existing games. CEOS history import is not planned.
@@ -134,6 +145,14 @@ function argumentsFor(command, argv) {
     ? new Set(['--target', '--archive', '--receipt', '--sdk-evidence', '--rights', '--metadata', '--promo-root', '--evidence-dir', '--report-sha256', '--output', '--apply', '--json',
       ...(command === 'qa-review-restart' ? ['--previous', '--confirm-reviewer-stopped'] : [])])
     : command === 'qa-review-status'
+    ? new Set(['--output', '--json'])
+    : command === 'qa-repair'
+    ? new Set([...common, '--review-output', '--output', '--in-scope', '--mutation-boundary', '--repair', '--apply'])
+    : command === 'qa-repair-record'
+    ? new Set(['--output', '--review-output', '--apply', '--json'])
+    : command === 'qa-repair-next'
+    ? new Set(['--output', '--apply', '--json'])
+    : command === 'qa-repair-status'
     ? new Set(['--output', '--json'])
     : command.startsWith('quality-')
     ? new Set(command === 'quality-enable' ? [...common, '--apply']
@@ -180,7 +199,7 @@ function argumentsFor(command, argv) {
     const key = argv[i];
     if (!allowed.has(key)) throw new Error(`Unknown option: ${key}`);
     if (flags.has(key)) throw new Error(`Duplicate option: ${key}`);
-    if (key === '--apply' || key === '--json' || key === '--lan' || key === '--trusted' || key === '--confirm-no-executor' || key === '--confirm-reviewer-stopped' || key === '--context-reviewed') {
+    if (key === '--apply' || key === '--json' || key === '--lan' || key === '--trusted' || key === '--repair' || key === '--confirm-no-executor' || key === '--confirm-reviewer-stopped' || key === '--context-reviewed') {
       flags.set(key, true);
       continue;
     }
@@ -188,7 +207,7 @@ function argumentsFor(command, argv) {
     if (!value || value.startsWith('--')) throw new Error(`Missing value for ${key}`);
     flags.set(key, value);
   }
-  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check', 'release-plan', 'release-vk-check', 'qa-simulate', 'qa-capture', 'qa-handoff', 'qa-review', 'qa-review-status', 'qa-review-restart'].includes(command) && !flags.get('--project')) {
+  if (!['helper-install', 'components-native', 'profiles-list', 'templates-list', 'profiles-show', 'templates-show', 'release-check', 'release-plan', 'release-vk-check', 'qa-simulate', 'qa-capture', 'qa-handoff', 'qa-review', 'qa-review-status', 'qa-review-restart', 'qa-repair-status', 'qa-repair-next', 'qa-repair-record'].includes(command) && !flags.get('--project')) {
     throw new Error('--project is required');
   }
   if (command === 'release-check' || command === 'release-plan') {
@@ -212,6 +231,20 @@ function argumentsFor(command, argv) {
   }
   if (command === 'qa-review-status' && !flags.has('--output')) {
     throw new Error('--output is required for QA Web review status');
+  }
+  if (command === 'qa-repair') {
+    for (const flag of ['--review-output', '--output', '--in-scope', '--mutation-boundary']) {
+      if (!flags.has(flag)) throw new Error(`${flag} is required for QA repair authorization`);
+    }
+    if (flags.has('--apply') && !flags.has('--repair')) {
+      throw new Error('--apply for QA repair requires explicit --repair consent');
+    }
+  }
+  if (['qa-repair-status', 'qa-repair-next', 'qa-repair-record'].includes(command)) {
+    if (!flags.has('--output')) throw new Error('--output is required for QA repair status/round');
+    if (command === 'qa-repair-record' && !flags.has('--review-output')) {
+      throw new Error('--review-output is required for a fresh QA repair reinspection');
+    }
   }
   if (command === 'qa-capture') {
     for (const option of ['--target', '--archive', '--receipt', '--output', '--trusted']) {
@@ -494,6 +527,33 @@ function qaReviewExit(result) {
   return ['READY', 'REVIEWED', 'RECORDED_REVIEWED'].includes(result.status) ? 0 : 2;
 }
 
+function runQaRepairCli(operation, flags, { out }) {
+  const outputDir = path.resolve(flags.get('--output'));
+  let result;
+  if (operation === 'repair') {
+    const plan = planQaRepair({ project: flags.get('--project'),
+      reviewOutput: path.resolve(flags.get('--review-output')), outputDir,
+      inScope: flags.get('--in-scope'), mutationBoundary: flags.get('--mutation-boundary') });
+    result = flags.has('--apply') ? beginQaRepair(plan, { apply: true }) : plan;
+  } else if (operation === 'repair-status') result = inspectQaRepair(outputDir);
+  else if (operation === 'repair-next') result = startQaRepairRound(outputDir, { apply: flags.has('--apply') });
+  else result = completeQaRepairRound(outputDir, { reviewOutput: path.resolve(flags.get('--review-output')),
+    apply: flags.has('--apply') });
+  if (flags.has('--json')) out(`${JSON.stringify(result, null, 2)}\n`);
+  else {
+    out(`${result.status} · QA repair · ${result.project ?? 'unverified game'}\n`);
+    if (result.reasonCode) out(`  reason: ${result.reasonCode}\n`);
+    if (result.outputDir) out(`  journal: ${result.outputDir}\n`);
+    if (result.maxRepairs !== undefined) out(`  repairs: ${result.roundsUsed}/2 · remaining ${result.remainingRepairs}\n`);
+    if (result.authorization) out(`  allowed files: ${result.authorization.inScope.join('; ')}\n`);
+    if (result.nextAction) out(`  next: primary Codex agent must repair and independently reinspect the fresh build\n`);
+    if (result.warning) out(`  warning: ${result.warning}\n`);
+    out('  independent Web host: NOT_ATTESTED_BY_LOCAL_STATUS · moderation: NOT_RUN · publication: NOT_AUTHORIZED\n');
+  }
+  return result.status === 'PENDING_RECOVERY' || result.status === 'ESCALATE' ? 3
+    : result.status === 'BLOCKED' ? 2 : result.status === 'REWORK' ? 1 : 0;
+}
+
 async function runQaReviewCli(operation, flags, { out, devHost }) {
   const outputDir = path.resolve(flags.get('--output'));
   let result;
@@ -576,6 +636,10 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'qa') {
       const [operation, ...args] = rest;
+      if (['repair', 'repair-status', 'repair-next', 'repair-record'].includes(operation)) {
+        const flags = argumentsFor(`qa-${operation}`, args);
+        return runQaRepairCli(operation, flags, { out });
+      }
       if (['review', 'review-status', 'review-restart'].includes(operation)) {
         const flags = argumentsFor(`qa-${operation}`, args);
         return runQaReviewCli(operation, flags, { out, devHost }).catch(error => {
