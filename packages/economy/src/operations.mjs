@@ -86,6 +86,11 @@ export function applyEconomyOperation(config, state, operation) {
 // Internal replay primitive: callers must validate snapshots before invoking it.
 export function applyUnchecked(config, state, operation) {
   const entry = normalizeOperation(config, operation);
+  // A repeated older date is a clock rollback even if that older claim is in the
+  // journal. Inspect monotonicity before the duplicate-key fast path.
+  if (entry.type === 'GRANT_DAILY' && state.lastDailyClaim && entry.operationId.slice(6) < state.lastDailyClaim) {
+    throw new EconomyError('STALE_DAILY_CLAIM', 'Daily claim cannot move backward');
+  }
   const already = state.journal.find(item => item.operationId === entry.operationId);
   if (already) {
     if (already.type !== entry.type || already.sku !== entry.sku || already.contentId !== entry.contentId) {
@@ -95,9 +100,6 @@ export function applyUnchecked(config, state, operation) {
       state: copyState(state),
       receipt: { operationId: entry.operationId, type: entry.type, applied: false, delta: 0, balance: state.balance },
     };
-  }
-  if (entry.type === 'GRANT_DAILY' && state.lastDailyClaim && entry.operationId.slice(6) < state.lastDailyClaim) {
-    throw new EconomyError('STALE_DAILY_CLAIM', 'Daily claim cannot move backward');
   }
   if (state.journal.length >= MAX_JOURNAL_ENTRIES) throw new EconomyError('CAPACITY_EXCEEDED', 'Economy journal is full');
   const nextBalance = state.balance + entry.delta;
