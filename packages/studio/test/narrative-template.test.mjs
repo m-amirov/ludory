@@ -40,7 +40,7 @@ test('new narrative games opt into portrait metadata without imposing it on othe
     const htmlPath = path.join(project, 'index.html');
     assert.equal(mobileOrientationMeta(fs.readFileSync(htmlPath, 'utf8')), 'portrait', template);
     const receipt = JSON.parse(fs.readFileSync(path.join(project, 'ludory.studio.json')));
-    assert.equal(receipt.template.version, template === 'narrative-interactive' ? '1.2.0' : '1.1.0');
+    assert.equal(receipt.template.version, template === 'narrative-interactive' ? '1.2.1' : '1.1.0');
     // An author can opt out in a newly created game; catalog and the creation receipt remain unchanged.
     const html = fs.readFileSync(htmlPath, 'utf8');
     fs.writeFileSync(htmlPath, html.replace('content="portrait"', 'content="auto"'));
@@ -195,5 +195,15 @@ test('narrative authored entry exports a launch function without starting on imp
   // preview's explicit src/entry.js is allowed to call startNarrative().
   const entry = await import(pathToFileURL(path.join(dir, 'src/main.js')).href);
   assert.equal(typeof entry.startNarrative, 'function');
+  assert.equal(entry.resolveNarrativeTitle({ title: { ru: 'Поцелуй на краю света' } }, 'ru'),
+    'Поцелуй на краю света · Ludory');
+  assert.equal(entry.resolveNarrativeTitle({ title: { ru: 'Поцелуй на краю света' } }, 'en'),
+    'Поцелуй на краю света · Ludory', 'a missing translation must not show the template demo');
+  assert.equal(entry.resolveNarrativeTitle({ title: { ru: 'Поцелуй на краю света', en: 'Kiss at the Edge' } }, 'en'),
+    'Kiss at the Edge · Ludory');
+  assert.equal(entry.resolveNarrativeTitle({ title: { fr: 'Le Phare', ru: 'Маяк' } }, 'it'),
+    'Маяк · Ludory', 'an unknown locale must use the RU title when available');
+  const initialHtml = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
+  assert.doesNotMatch(initialHtml, /Вечер у маяка|Lighthouse Evening/);
   assert.ok(fs.readFileSync(path.join(dir, 'src/entry.js'), 'utf8').includes('startNarrative'));
 });

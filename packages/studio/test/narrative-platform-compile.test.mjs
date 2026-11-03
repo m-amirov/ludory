@@ -25,7 +25,7 @@ function fixture(t) {
   const story = path.join(project, 'src/story.js');
   fs.writeFileSync(story, fs.readFileSync(story, 'utf8').replace('Маяк мигнул трижды.', 'F5B2_CUSTOM_STORY_214'));
   const html = path.join(project, 'index.html');
-  fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace('Вечер у маяка · Ludory', 'F5B2_CUSTOM_TITLE_214'));
+  fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace('Интерактивная история · Ludory', 'F5B2_CUSTOM_TITLE_214'));
   return { dir, project };
 }
 
