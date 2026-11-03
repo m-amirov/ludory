@@ -3,6 +3,13 @@
 `yandex-baseline.json` contains only SHA-256 digests for the editorial Markdown of three **official** Yandex Games documents, not a copy of the platform's text. The approved reference is initially recorded on 2026-11-02. A digest is evidence that the content changed, **not** that it was compliant or reviewed by the platform.
 
 The workflow runs weekly and can be started manually **on the default branch**.
+Its first hosted [GitHub Actions run #1](https://github.com/m-amirov/ludory/actions/runs/41493255297)
+on 2026-11-02 completed successfully in 16 seconds: `status: CLEAR`, and
+`release-notes`, `requirements` and `moderation` each reported `UNCHANGED`.
+The issue-writing step logged `No issue write needed`; the one GitHub notice
+concerned the runner image's `ubuntu-latest` migration to Ubuntu 26, not a
+policy mismatch. This is a **single observed run**, not proof that future
+weekly schedules, network availability or website formats will always work.
 Other branches are deliberately skipped so one shared repository issue cannot
 be updated from an unreviewed branch baseline. The issue carries a hidden
 automation marker and is matched only when owned by `github-actions[bot]`;

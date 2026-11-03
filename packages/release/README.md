@@ -1,6 +1,6 @@
-# @ludory/release — Release MVP R1
+# @ludory/release — local Release and simulated moderation QA
 
-Read-only local Yandex candidate verification. No network calls, uploads, publication, moderation or mutation of games/artifacts.
+Read-only local Yandex/VK candidate verification and simulated moderation QA. The Release package itself performs no network calls, uploads, publication, real moderation or mutation of games/artifacts; Studio owns the separately opt-in browser/Web handoffs.
 
 Official Yandex documentation is watched separately by the repository-level
 weekly [Requirements Watch](../../docs/policy-watch/README.md) workflow. It
@@ -255,7 +255,7 @@ Every shipped media file (image/audio/font) must have exactly one declaration. A
 
 Exit statuses: `PASS_LOCAL` means only the ZIP, builder receipt, C5 simulated-browser results and declarations agree. `BLOCKED` means missing information; `FAIL` means an invalid/mismatched input. Independently of local status, `releaseReady=false`, `publicationAllowed=false`. R1 has no signature trust anchor and no production Yandex receipt. Real Draft, physical-device coverage, human rights clearance and explicit owner authorization remain `NOT_RUN`.
 
-## R2: Field-test readiness plan (offline)
+## R2: Field-test readiness plan (read-only/local)
 
 `planYandexFieldTests` and `ludory release plan` reuse the same four input files as R1. The report inventories 13 real-host, browser and physical-device checks in a deterministic order. If local R1 checks pass, `READY_FOR_FIELD_TEST` means a candidate can **be considered** for separately authorized testing; it does not mean it was tested or may be uploaded.
 
