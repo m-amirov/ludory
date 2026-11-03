@@ -32,7 +32,8 @@ authorizes direct migration of existing games or bypass of Studio-origin trust.
 1. The repository root, all 11 package manifests, root and workspace lockfile
    entries use one coherent Ludory version. Dependencies on another
    `@ludory/*` workspace package use **exact** local versions, not loose
-   semver ranges; lockfile pins match their manifests.
+   semver ranges; lockfile pins, package names and workspace link targets
+   match their manifests.
 2. `npm run check:versions` checks these invariants; `npm run check` runs this
    guard automatically. A partial bump or lockfile drift fails the gate.
 3. The Studio CLI banner reads the version from `packages/studio/package.json`.

@@ -30,6 +30,16 @@ export function validateWorkspaceVersions(rootDir) {
     if (!recorded || recorded.version !== item.manifest.version) {
       failures.push(`lockfile ${item.relative} version ${recorded?.version ?? 'missing'} differs from manifest ${item.manifest.version}`);
     }
+    if (recorded?.name !== item.manifest.name) {
+      failures.push(`lockfile ${item.relative} name ${recorded?.name ?? 'missing'} differs from manifest ${item.manifest.name}`);
+    }
+    const linkPath = `node_modules/${item.manifest.name}`;
+    const linked = lock.packages?.[linkPath];
+    if (!linked) {
+      failures.push(`lockfile ${linkPath} workspace link missing`);
+    } else if (linked.link !== true || linked.resolved !== item.relative) {
+      failures.push(`lockfile ${linkPath} link/resolved mismatch: ${linked.resolved ?? 'missing'}; expected ${item.relative} and link:true`);
+    }
   }
   for (const item of [{ relative: '(root)', manifest }, ...workspaces]) {
     for (const section of dependencySections) {
