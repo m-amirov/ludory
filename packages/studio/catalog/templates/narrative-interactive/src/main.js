@@ -5,6 +5,14 @@ import {
 } from '../assets/ludory-narrative.js';
 import { graphData, catalogData, assets, labels, relationFacts } from './story.js';
 
+/** Use only validated game title data; never substitute the template demo's identity. */
+export function resolveNarrativeTitle(game, locale) {
+  const titles = game.title;
+  const fallback = Object.hasOwn(titles, 'ru') ? 'ru' : Object.keys(titles).sort()[0];
+  const key = typeof locale === 'string' && Object.hasOwn(titles, locale) ? locale : fallback;
+  return `${titles[key]} · Ludory`;
+}
+
 /** Author-owned entrypoint: platform hooks are supplied by an explicit derived SDK bootstrap. */
 export async function startNarrative({ platform = null } = {}) {
 const root = document.querySelector('#game');
@@ -20,7 +28,6 @@ document.documentElement.dataset.mobilePreference = preferredMobileOrientation;
 
 const shell = {
   ru: {
-    title: 'Вечер у маяка · Ludory', documentTitle: 'Ludory — интерактивная история',
     navigation: 'Управление историей', game: 'Интерактивная история', language: 'English',
     save: 'Сохранить', restart: 'Начать заново', new: 'История запущена',
     restored: 'Сохранение восстановлено', saved: 'Сохранено',
@@ -29,7 +36,6 @@ const shell = {
     unavailable: 'Сохранения недоступны', saveFailed: 'Не удалось сохранить',
   },
   en: {
-    title: 'Lighthouse Evening · Ludory', documentTitle: 'Lighthouse Evening · Ludory',
     navigation: 'Story controls', game: 'Interactive story', language: 'Русский',
     save: 'Save', restart: 'Start over', new: 'Story started',
     restored: 'Save restored', saved: 'Saved',
@@ -45,8 +51,9 @@ let stalledAfterRestore = false;
 function updateShell() {
   const ui = shell[locale];
   document.documentElement.lang = locale;
-  document.title = ui.documentTitle;
-  title.textContent = ui.title;
+  const gameTitle = resolveNarrativeTitle(game, locale);
+  document.title = gameTitle;
+  title.textContent = gameTitle;
   navigation.setAttribute('aria-label', ui.navigation);
   root.setAttribute('aria-label', ui.game);
   language.textContent = ui.language;

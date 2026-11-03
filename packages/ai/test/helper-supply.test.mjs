@@ -173,7 +173,7 @@ test('installer writes only the isolated DEV profile and fails closed after repl
     return relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
   }));
   for (const notice of vendoredNotices) {
-    assert.ok(preview.writes.includes(path.join(fixture.runtime, notice)), `preview omits ${notice}`);
+    assert.ok(preview.writes.includes(path.join(canonicalHome, 'runtime', notice)), `preview omits ${notice}`);
   }
   assert.equal(fs.existsSync(path.join(fixture.stableHome, 'browser-helper.cjs')), false);
 

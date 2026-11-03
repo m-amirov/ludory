@@ -44,7 +44,7 @@ async function run(browserOptions, name, isMobile) {
     await page.getByText('The lighthouse flashed three times.').waitFor();
     await page.getByRole('region', { name: 'Narrative' }).waitFor();
     if (await page.locator('html').getAttribute('lang') !== 'en' ||
-        await page.title() !== 'Lighthouse Evening · Ludory' ||
+        await page.title() !== 'Вечер у маяка · Ludory' ||
         !await page.getByRole('navigation', { name: 'Story controls' }).count() ||
         !await page.getByRole('main', { name: 'Interactive story' }).count() ||
         !await page.getByText('Story started').count()) throw new Error('English shell is incomplete');

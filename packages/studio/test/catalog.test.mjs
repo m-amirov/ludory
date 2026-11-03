@@ -32,7 +32,7 @@ test('built-in catalogs are versioned, valid, and only expose public descriptors
   assert.deepEqual(showCatalog('templates', 'narrative-basic').files, ['index.html', 'src/main.js']);
   assert.equal(showCatalog('templates', 'narrative-basic').version, '1.1.0');
   const interactive = showCatalog('templates', 'narrative-interactive');
-  assert.equal(interactive.version, '1.2.0');
+  assert.equal(interactive.version, '1.2.1');
   assert.equal(interactive.profile, 'narrative-game');
   assert.ok(interactive.files.includes('src/story.js'));
   assert.ok(interactive.files.includes('src/entry.js'));
