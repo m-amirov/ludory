@@ -10,12 +10,15 @@ test('public workspace import is side-effect-free and exposes the C1/C2/C3/C4 AP
     assert.deepEqual(Object.keys(exports).sort(), [
       'YANDEX_CONNECT_ERROR_CODES', 'YandexConnectError', 'createYandexConnector',
       'createYandexLifecycle', 'createYandexPlayerStorage', 'createYandexAds',
+      'createYandexEconomyStorage', 'createYandexPurchases',
       'detectYandexCapabilities', 'loadYandexSdkScript',
     ].sort());
     assert.equal(inits, 0);
     assert.equal(typeof exports.createYandexConnector, 'function');
     assert.equal(typeof exports.createYandexPlayerStorage, 'function');
     assert.equal(typeof exports.createYandexAds, 'function');
+    assert.equal(typeof exports.createYandexEconomyStorage, 'function');
+    assert.equal(typeof exports.createYandexPurchases, 'function');
     const connector = exports.createYandexConnector({ sdkLoader: async () => ({ init: async () => ({}) }) });
     const connection = await connector.initialize();
     assert.equal(connector.getStatus(), 'READY');
