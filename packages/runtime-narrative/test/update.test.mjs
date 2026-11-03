@@ -88,3 +88,24 @@ test('restored session starts from saved canonical state with no stale undo stac
   fresh({ deltaMs: 16, inputs: [input('narrative:back')], state, setState(next) { state = next; } });
   assert.equal(fresh.canGoBack(), false);
 });
+
+test('premium authorization hook fails closed on exceptions and rejects forged choice inputs', () => {
+  const { graph, catalog, initialState } = fixture();
+  const calls = [];
+  const update = createNarrativeRuntimeUpdate({ graph, catalog, authorizeChoice: request => {
+    calls.push(request);
+    throw new Error('wallet temporarily unavailable');
+  } });
+  let state = initialState;
+  const tick = action => update({ inputs: [input(action)], state, setState(next) { state = next; } });
+  tick(narrativeAction('next', 'intro'));
+  tick(narrativeAction('interact', 'take_photo', 'take'));
+  tick(narrativeAction('interact', 'take_item', 'shell'));
+  tick(narrativeAction('interact', 'send_message', 'warm'));
+  tick(narrativeAction('next', 'echo'));
+  const before = state;
+  tick(narrativeAction('choose', 'branch', 'together'));
+  assert.strictEqual(state, before);
+  assert.deepEqual(calls, [{ beatId: 'branch', optionId: 'together' }]);
+  assert.equal(resolveNarrativeView(graph, catalog, state.narrative).type, 'choice');
+});
