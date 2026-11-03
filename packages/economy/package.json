@@ -1,0 +1,11 @@
+{
+  "name": "@ludory/economy",
+  "version": "0.1.0",
+  "description": "Pure optional wallet and monetization contracts for Ludory",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "exports": { ".": "./src/index.mjs" },
+  "files": ["src", "README.md"],
+  "sideEffects": false,
+  "license": "UNLICENSED"
+}

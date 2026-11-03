@@ -10,8 +10,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "precheck": "npm run check:versions && npm run check:security-inventory && npm run check:release && npm run check:preview",
+    "precheck": "npm run check:versions && npm run check:economy && npm run check:security-inventory && npm run check:release && npm run check:preview",
     "check:versions": "node scripts/check-workspace-versions.mjs",
+    "check:economy": "node --check packages/economy/src/index.mjs && node --check packages/economy/src/validate.mjs && node --check packages/economy/src/state.mjs && node --check packages/economy/src/operations.mjs && node --check packages/economy/src/errors.mjs",
     "check:security-inventory": "node scripts/f6e-inventory.mjs --check",
     "check:preview": "node --check packages/studio/src/preview-build.mjs && node --check packages/studio/src/narrative-platform-export.mjs && node --check packages/studio/src/narrative-platform-compile.mjs && node --check packages/studio/src/preview-server.mjs && node --check packages/studio/src/preview-cli.mjs && node --check packages/runtime/src/portable-sha256.mjs && node --check packages/studio/src/qa-capture.mjs && node --check packages/studio/src/qa-flow.mjs && node --check packages/studio/src/qa-repair-scope.mjs && node --check packages/studio/src/qa-repair-journal.mjs",
     "check:release": "node --check packages/release/src/archive.mjs && node --check packages/release/src/check.mjs && node --check packages/release/src/vk-check.mjs && node --check packages/release/src/plan.mjs && node --check packages/release/src/moderation-rules.mjs && node --check packages/release/src/moderation-evidence.mjs && node --check packages/release/src/promo-image.mjs && node --check packages/release/src/moderation-simulation.mjs && node --check packages/release/src/index.mjs && node --check packages/studio/src/cli.mjs && node --check packages/release/src/qa-staging.mjs && node --check packages/release/src/qa-evidence.mjs && node --check packages/release/src/qa-review-handoff.mjs && node --check scripts/policy-watch.mjs && node --check scripts/policy-watch-issue.mjs",
@@ -25,6 +26,7 @@
     "check:c5-scripts": "node --check scripts/build-yandex-template.mjs && node --check scripts/build-yandex-candidate.mjs && node --check scripts/yandex-c5-evidence.mjs && node --check packages/runtime/test/browser/yandex-c5-smoke.mjs && node --check packages/runtime-phaser/test/browser/yandex-c5-phaser-smoke.mjs",
     "build:narrative-template": "node scripts/build-narrative-template.mjs",
     "check:narrative-template": "node scripts/build-narrative-template.mjs --check",
+    "pretest": "node --test packages/economy/test/*.test.mjs",
     "test": "node --import ./packages/studio/test/setup-trust-env.mjs --test packages/core/test/*.test.mjs packages/narrative/test/*.test.mjs packages/runtime-narrative/test/*.test.mjs packages/runtime/test/*.test.mjs packages/runtime-phaser/test/*.test.mjs packages/connect-yandex/test/*.test.mjs packages/connect-vk/test/*.test.mjs packages/release/test/*.test.mjs packages/studio/test/*.test.mjs packages/ai/test/*.test.mjs scripts/test/*.test.mjs && node packages/ai/test/quality-checks.integration.mjs",
     "policy:watch": "node scripts/policy-watch.mjs",
     "test:quality-integration": "node packages/ai/test/quality-checks.integration.mjs",
