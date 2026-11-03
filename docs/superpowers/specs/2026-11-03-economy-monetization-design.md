@@ -11,7 +11,7 @@ Introduce an opt-in, reusable economy for Ludory games and visual novels: virtua
 
 The first game, **«Поцелуй на краю света»**, remains **economy-disabled** unless the owner separately opts in. The existing story and old game repositories are not to be modified by this project. The framework may be used in future novels.
 
-Owner-approved: no bespoke server, no mandatory second currency, no energy/ticket gating, no pay-to-win choice or premium-only good ending, avoid interruptions during emotional scenes, adapters for required Yandex/VK targets. Builder defaults (not yet approved as product economics): one currency named `crystals` in example, starter 20, episode reward 3, rewarded ad 5, premium scene 8–15; those are non-production demonstration values. Real SKU prices and exchange rates are game-owner configuration.
+Owner-approved: no bespoke server, no mandatory second currency, no energy/ticket gating, no pay-to-win choice or premium-only good ending, avoid interruptions during emotional scenes, adapters for required Yandex/VK targets. **Approved on 2026-11-03:** premium scenes may affect relationship values, story flags, memories and later dialogue/event echoes; their effects must enrich, not make purchase mandatory for a good ending. Builder defaults (not yet approved as product economics): one currency named `crystals` in example, starter 20, episode reward 3, rewarded ad 5, premium scene 8–15; those are non-production demonstration values. Real SKU prices and exchange rates are game-owner configuration.
 
 ## 2. Approaches and rationale
 
@@ -45,7 +45,7 @@ The economy snapshot has an **independent persistence key and version**. Do not 
 
 ## 5. Public contracts (v1 sketch)
 
-`EconomyConfigV1`: `{schemaVersion:1, enabled:boolean, gameId, currency:{id, displayName, icon}, maxBalance, rewards:{starter, episode, daily, rewarded}, premium:Record<contentId,{cost, type}>, products:Record<sku,{currencyAmount}>}`. Strict validation, safe integer values, unique IDs, bounded values and explicit schema migrations. No prices for portal currency in this file.
+`EconomyConfigV1`: `{schemaVersion:1, enabled:boolean, gameId, configVersion:1, currency:{id, displayName, icon}, maxBalance, rewards:{starter, episode, daily, rewarded}, premium:Record<contentId,{cost, type}>, products:Record<sku,{currencyAmount}>}`. Strict validation, safe integer values, unique IDs, bounded values and explicit schema migrations. No prices for portal currency in this file.
 
 `EconomyStateV1`: `{schemaVersion:1, gameId, configVersion, balance, entitlements, completedGrants, purchaseTokens, journal, lastDailyClaim, revision}`. IDs, positive deltas, spend reasons, causation IDs and journal retention must be validated. Never accept arbitrary amount from a UI event; amounts come from trusted game configuration or validated SDK product mapping. Returned state is copied and immutable to callers.
 
@@ -63,6 +63,8 @@ Safeguards: safe-integer overflow/underflow checks; reject unknown SKUs, malform
 
 Premium metadata is a separate opt-in **sidecar manifest** mapping `(beatId, choiceId)` to `contentId` and cost. This keeps existing Narrative Graph v1 and author's `src/story.js` unchanged and avoids forcing payment metadata into every narrative node. Validate every manifest reference against the graph and verify that at least one free path through the story and all intended routes/endings remains viable. No premium choices may gate required story truth, routing or the only positive ending.
 
+**Narrative effect rule:** an unlocked premium choice executes its *authored narrative effects* exactly like a free choice: `relation_delta`, `flag_set`, `memory_add`, conditional callbacks and later echo/dialogue may differ. Buying the entitlement **alone** has no narrative effects. Premium scenes must be meaningful optional branches, not inert CG-only unlocks; their unique memories and future callbacks are valid premium value. However, any relationship threshold or route/ending requirement that leads to a desired good ending must remain reachable through at least one fully free playthrough. Premium points may accelerate intimacy or add nuances, but cannot purchase the only positive path. Test a free-action trace against each intended good ending.
+
 **Free-path validation contract:** statically remove premium edges and reject any scene with only premium outgoing choices; check remaining graph reachability to at least one ending, conservatively ignoring conditional predicate feasibility. For named routes/endings, the author provides an explicit manifest of intended free terminals plus one deterministic, testable action trace per intended route; validator replays each against the real narrative predicate/effect engine with premium actions disallowed. This documents what is proven rather than claiming full symbolic exploration of all relation/flag states. Future route changes invalidate stale traces.
 
 Monetized runtime flow:
@@ -71,7 +73,7 @@ Monetized runtime flow:
 2. If not unlocked, user explicitly requests unlock. Controller checks config and current persisted economy balance, applies one `UNLOCK_PREMIUM` debit+entitlement in the **same economy record**, and awaits a successful durable save.
 3. After durable save, the player can select the choice through the normal narrative action. If the narrative action fails, entitlement persists and may be retried; no second charge.
 4. At every monetized `narrative:choose` entry point (including crafted input), deny premium content absent entitlement. The older direct public narrative engine remains purely narrative; the published monetized game must use the guarded composition.
-5. Back/Replay rewinds story state only. It never refunds, recharges or removes purchased entitlements. Replay of the unlocked scene is free. No retroactive mutation of relationships or ending scores from a purchase itself.
+5. Back/Replay rewinds story state only. It never refunds, recharges or removes purchased entitlements. Replay of the unlocked scene is free. The narrative engine may reapply the same authored effects to a *fresh or restored narrative state* but never accumulates points across timeline rewinds; the purchase itself never mutates relationships or ending scores. Repeated selection after Back cannot farm additional wallet currency or permanent relation bonuses.
 
 ## 7. Rewards and advertisements
 
@@ -122,7 +124,7 @@ An illustrative demo economy may use 20 starting crystals, +3 per completed epis
 Proposed sequence, each a separate reviewable PR and testable deliverable:
 
 1. **E1 pure economy contracts** — package, validation, deterministic grants/debits/entitlements/journal and idempotency tests.
-2. **E2 runtime/narrative composition** — guarded choice sidecar, Back/Replay semantics, authoring validator, UI demonstration and forged-input tests.
+2. **E2 runtime/narrative composition** — guarded choice sidecar, Back/Replay semantics, premium authored relationship/flag/memory effects and delayed callbacks, free-path/positive-ending tests, authoring validator, UI demonstration and forged-input tests.
 3. **E3 rewards** — daily/episode/starter, integration with Yandex/VK rewarded adapters and error/timeout/retry tests.
 4. **E4 Yandex purchases + cloud** — catalog, platform currency, purchase+unconsumed recovery, persistence-before-consume, failure window tests, explicit no-cloud/no-IAP policy.
 5. **E5 Studio template + QA** — opt-in configuration, docs, policy-watch references, demo, moderation simulation and release readiness checklist. No changes to frozen games.
