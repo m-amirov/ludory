@@ -10,7 +10,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "precheck": "npm run check:versions && npm run check:economy && npm run check:economy-connect && npm run check:security-inventory && npm run check:release && npm run check:preview",
+    "precheck": "npm run check:versions && npm run check:economy && npm run check:economy-connect && npm run check:yandex-template && npm run check:vk-template && npm run check:security-inventory && npm run check:release && npm run check:preview",
     "check:versions": "node scripts/check-workspace-versions.mjs",
     "check:economy": "node --check packages/economy/src/index.mjs && node --check packages/economy/src/validate.mjs && node --check packages/economy/src/state.mjs && node --check packages/economy/src/operations.mjs && node --check packages/economy/src/errors.mjs && node --check packages/runtime-economy/src/index.mjs && node --check packages/runtime-economy/src/manifest.mjs && node --check packages/runtime-economy/src/free-paths.mjs && node --check packages/runtime-economy/src/coordinator.mjs",
     "check:economy-connect": "node --check packages/connect-yandex/src/economy-storage.mjs && node --check packages/connect-yandex/src/purchases.mjs && node --check packages/connect-vk/src/economy-storage.mjs",
