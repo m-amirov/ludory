@@ -112,3 +112,9 @@ this report.
   NOT_RUN and source-to-binary provenance BLOCKED** pending a Bun 1.4.0
   rebuild/byte comparison or explicit owner exception. This addendum does
   not revise the original audit's point-in-time findings or clear release.
+- F6b Yandex candidate output-size hardening checks the final stored ZIP
+  against the 100 MiB Release bound and the exact pretty-printed UTF-8
+  build receipt against the 1 MiB Release input bound, **before** creating
+  the output. Equality, one-byte-over, multibyte text and existing
+  reproducible candidate tests cover this local contract. This does not
+  change live platform or release-readiness status.

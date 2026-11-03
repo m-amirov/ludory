@@ -12,6 +12,7 @@ const required = ['assets/ludory-yandex.js', 'index.html', 'ludory.project.json'
 const mediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2']);
 const maxFileBytes = 25 * 1024 * 1024;
 const maxArchiveBytes = 100 * 1024 * 1024;
+const maxPrettyReceiptBytes = 1024 * 1024;
 const safePart = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const windowsDevice = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 
@@ -219,6 +220,16 @@ function writePinnedOutput(output, { parent, parentIdentity }, archive) {
   } finally { process.chdir(previousCwd); }
 }
 
+/** Match Release input bounds before creating a candidate ZIP on disk. */
+export function validateYandexCandidateOutputSizes(archiveBytes, receipt) {
+  if (archiveBytes.length > maxArchiveBytes) {
+    throw new Error('Yandex candidate archive exceeds 100 MiB limit');
+  }
+  if (Buffer.byteLength(`${JSON.stringify(receipt, null, 2)}\n`, 'utf8') > maxPrettyReceiptBytes) {
+    throw new Error('Yandex candidate receipt exceeds the verifier 1 MiB size limit');
+  }
+}
+
 /** Local SDK-contract candidate; never a certified Release bundle. */
 export async function buildYandexCandidate({ projectDir, outputZip } = {}) {
   if (typeof projectDir !== 'string' || typeof outputZip !== 'string') {
@@ -244,9 +255,10 @@ export async function buildYandexCandidate({ projectDir, outputZip } = {}) {
     files.push({ path: name, sha256: sha256(bytes), size: bytes.length });
   }
   const archive = Buffer.from(zipSync(entries, { level: 0, mtime: new Date(1980, 0, 1) }));
-  const hash = sha256(archive);
+  const receipt = { archivePath: output, sha256: sha256(archive), files };
+  validateYandexCandidateOutputSizes(archive, receipt);
   writePinnedOutput(output, admitted, archive);
-  return { archivePath: output, sha256: hash, files };
+  return receipt;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
