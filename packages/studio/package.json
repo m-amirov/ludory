@@ -19,6 +19,7 @@
   },
   "license": "UNLICENSED",
   "exports": {
-    "./qa-capture": "./src/qa-capture.mjs"
+    "./qa-capture": "./src/qa-capture.mjs",
+    "./narrative-platform-export": "./src/narrative-platform-export.mjs"
   }
 }

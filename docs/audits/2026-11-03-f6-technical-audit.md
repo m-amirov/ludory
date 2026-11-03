@@ -125,3 +125,10 @@ this report.
   The root/subpath public-contract regression and the preserved Store/F1c
   tests cover this separation. Filesystem writers are **not** made
   cryptographically trusted by the export change.
+- F6d exposes the five F5b1/F5b2 functions through the explicit private
+  workspace subpath `@ludory/studio/narrative-platform-export` and uses that
+  route in the documented operator example and integration tests. The CLI
+  banner now reflects the Studio package manifest. A version gate verifies
+  aligned root/workspace/lockfile versions and exact internal dependencies.
+  The [version policy](../API_VERSION_POLICY.md) keeps `0.1.0` unchanged;
+  `1.0.0` tagging, contract freeze and release remain owner-gated.

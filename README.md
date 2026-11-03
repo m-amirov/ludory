@@ -15,7 +15,7 @@ LUDORY is a modular toolkit for building and shipping browser games to Yandex Ga
 | Ludory Connect | Isolated Yandex Games and VK Games SDK adapters and candidate builders | Yandex C1–C5 and VK V1–V5 implemented, mock-SDK evidence only |
 | Ludory Release | Local ZIP validation, Yandex R1–R3, VK checks and P3a–P3d QA | Local checks/receipts and bounded QA; no official moderation or publication |
 
-The authoritative phase status, deferred work and evidence boundaries are in [the consolidation roadmap](docs/ROADMAP.md). The [documentation audit](docs/audits/2026-11-02-documentation-audit.md) explains the 2026-11-02 reconciliation. The [F6 technical audit](docs/audits/2026-11-03-f6-technical-audit.md) records the remaining **1.0 freeze blockers**; start a new game with the [operator quickstart](docs/OPERATOR_QUICKSTART.md). Design decisions are preserved as historical snapshots in [the architecture spec](docs/superpowers/specs/2026-10-24-ludory-foundation-design.md).
+The authoritative phase status, deferred work and evidence boundaries are in [the consolidation roadmap](docs/ROADMAP.md). The [documentation audit](docs/audits/2026-11-02-documentation-audit.md) explains the 2026-11-02 reconciliation. The [F6 technical audit](docs/audits/2026-11-03-f6-technical-audit.md) records the remaining **1.0 freeze blockers**; the [API/version policy](docs/API_VERSION_POLICY.md) defines the supported workspace interfaces and version gate. Start a new game with the [operator quickstart](docs/OPERATOR_QUICKSTART.md). Design decisions are preserved as historical snapshots in [the architecture spec](docs/superpowers/specs/2026-10-24-ludory-foundation-design.md).
 
 ## What is supported now
 

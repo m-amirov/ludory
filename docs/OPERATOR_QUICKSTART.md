@@ -75,7 +75,7 @@ import {
   planNarrativePlatformExport,
   buildNarrativePlatformCandidates,
   verifyNarrativePlatformCandidates,
-} from './packages/studio/src/narrative-platform-export.mjs';
+} from '@ludory/studio/narrative-platform-export';
 
 const plan = planNarrativePlatformExport(process.env.LUDORY_GAME_DIR);
 if (plan.status !== 'READY_TO_DERIVE') throw new Error(plan.reasonCode ?? plan.status);

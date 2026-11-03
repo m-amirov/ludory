@@ -25,7 +25,8 @@ import { planWorkflow, executeWorkflow, planTaskRoute, discoverDevHost, readNati
   qualityStatus, planQualityEvidence, snapshotQualitySource,
   installVendoredDevHelper } from '@ludory/ai';
 
-const usage = `Ludory Studio 0.1.0 — native game-development workflows
+const studioVersion = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+const usage = `Ludory Studio ${studioVersion} — native game-development workflows
 
   ludory inspect --project <directory> [--json]
   ludory init --project <empty-directory> --id <slug> --title <name> --lang <locale> --engine <id> --targets <comma-separated> [--version <semver>] [--apply] [--json]
