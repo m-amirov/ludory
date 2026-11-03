@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { planPreviewBuild } from '../src/preview-build.mjs';
 import { planNarrativePlatformExport, materializeNarrativePlatformSource,
-  buildNarrativePlatformCandidates, verifyNarrativePlatformCandidates } from '../src/narrative-platform-export.mjs';
+  buildNarrativePlatformCandidates, verifyNarrativePlatformCandidates } from '@ludory/studio/narrative-platform-export';
 import { inspectYandexArchive, inspectVkArchive } from '@ludory/release';
 import { F5B3_BROWSER_CASES, F5B3_ADVERSE_CASES, F5B3_STORY_PATH,
   validateF5b3Evidence, buildF5b3Evidence } from '../../runtime-narrative/test/browser/f5b3-evidence.mjs';

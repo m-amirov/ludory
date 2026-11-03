@@ -37,7 +37,7 @@ For a **new, trusted** `narrative-interactive` game with both platform targets, 
 import {
   planNarrativePlatformExport, buildNarrativePlatformCandidates,
   verifyNarrativePlatformCandidates,
-} from './packages/studio/src/narrative-platform-export.mjs';
+} from '@ludory/studio/narrative-platform-export';
 
 const plan = planNarrativePlatformExport('/path/to/new-narrative-game');
 if (plan.status !== 'READY_TO_DERIVE') throw new Error(plan.reasonCode);
