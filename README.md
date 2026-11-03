@@ -10,7 +10,7 @@ LUDORY is a modular toolkit for building and shipping browser games to Yandex Ga
 | --- | --- | --- |
 | Ludory Studio | New-game creation, trusted component updates, profiles, preview, narrative export and native CLI | Studio foundation + F1a + P1 + F5b1/F5b2 implemented |
 | Ludory Core | Framework-independent game definition, state and lifecycle | Foundation complete |
-| Ludory Economy | Opt-in pure wallet, premium Narrative choices, free-route checks and a durable storage injection port | E1/E2 implemented; E3–E5 platform adapters and Studio integration pending, disabled by default ([Core API](packages/economy/README.md), [Runtime API](packages/runtime-economy/README.md)) |
+| Ludory Economy | Opt-in pure wallet, premium Narrative choices, free-route checks, durable rewards and verified rewarded-ad port | E1–E3 locally implemented; E4–E5 cloud/purchases and Studio integration pending, disabled by default ([Core API](packages/economy/README.md), [Runtime API](packages/runtime-economy/README.md)) |
 | Ludory AI | Source-bound native workflows, Codex execution, Web/ImageGen handoffs and quality gates | Bounded local contracts; actual external host capabilities separately gated |
 | Ludory Runtime | Core host, Narrative/Phaser, browser lifecycle/input, saves/audio and portrait-first UI | R1–R7 + N1–N3 + P2 implemented |
 | Ludory Connect | Isolated Yandex Games and VK Games SDK adapters and candidate builders | Yandex C1–C5 and VK V1–V5 implemented, mock-SDK evidence only |
