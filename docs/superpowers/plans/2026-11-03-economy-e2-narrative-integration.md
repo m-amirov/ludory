@@ -1,7 +1,7 @@
 # Economy & Monetization — E2 implementation plan
 
 Date: 2026-11-03
-State: **AWAITING OWNER APPROVAL — planning only**
+State: **OWNER APPROVED 2026-11-03 — implementation in separate feature branch**
 Depends on: approved [Economy technical design](../specs/2026-11-03-economy-monetization-design.md), E1 `@ludory/economy` merged and green.
 Proposed PR: **one isolated, reviewable E2 feature PR**, based on current `main`; do not touch frozen game repositories.
 
@@ -15,8 +15,8 @@ E2 is **not** SDK integration or production monetary settlement. There are no Ya
 
 1. `@ludory/runtime-economy` (new package, `exports`, Node 22+ ESM, browser-compatible):
    - `definePremiumManifest({schemaVersion:1, choices:[{beatId,choiceId,contentId}]}, {graph, economyConfig})` validates exact references against authored Narrative choices, globally unique `(beatId,choiceId)` keys (and unambiguous beat IDs), known E1 premium content IDs and correct config. Cost is **read from E1 config**, not trusted sidecar/UI input. No mutation of source objects.
-   - `verifyFreeNarrativePaths({graph,catalog,manifest,traces})` performs structural free-edge validation and replays supplied free-action traces with `createNarrativeState`/`advanceNarrative`, rejecting premium steps. A trace declares an intended `{routeId?,endingId,actions}`; the validator checks actual final ending and route lock when declared, including predicates/effects, and rejects missing/duplicate intended terminal coverage. Precise graph reachability constraints are below.
-   - `createEconomyRuntime({config,manifest,storage})`: explicit async `initialize()`, read-only `getChoiceAccess(beatId,choiceId)`, async `unlockChoice(beatId,choiceId)`, `getView()` and optional `dispose()`. `storage` is an injected game-scoped async `{load(),save(state)}` adapter. A successful durable save is required **before** publishing a new entitlement as usable. No arbitrary amounts or raw UI-originated economy operations. Single-instance operations serialize; idempotency is delegated to E1. The coordinator will not declare its own storage proof for a production connector.
+   - `verifyFreeNarrativePaths({graph,catalog,manifest,terminals,traces})` performs structural free-edge validation and replays supplied free-action traces with `createNarrativeState`/`advanceNarrative`, rejecting premium steps. A trace declares an intended `{routeId?,endingId,actions}`; the validator checks actual final ending and route lock when declared, including predicates/effects, and rejects missing/duplicate intended terminal coverage. Precise graph reachability constraints are below.
+   - `createEconomyRuntime({config,manifest,graph,storage})`: explicit async `initialize()`, read-only `getChoiceAccess(beatId,choiceId)`, async `unlockChoice(beatId,choiceId)`, `getView()` and optional `dispose()`. `storage` is an injected game-scoped async `{load(),save(state)}` adapter. A successful durable save is required **before** publishing a new entitlement as usable. No arbitrary amounts or raw UI-originated economy operations. Single-instance operations serialize; idempotency is delegated to E1. The coordinator will not declare its own storage proof for a production connector.
    - Optional synchronous `authorizeChoice({beatId,optionId})` closure uses only a ready, validated, persisted entitlement state. Missing initialization/storage, pending save, errors and locked content fail closed. A non-premium choice is freely available.
 2. `@ludory/runtime-narrative`:
    - Add an optional `authorizeChoice` injection to `createNarrativeRuntimeUpdate`, applied **at the update event boundary** for every `narrative:choose` before `advanceNarrative`; not only in renderer. Existing callers that do not supply the hook retain identical behavior. A monetized composition must always pass the hook; the published premium UI is not an authority boundary by itself.
@@ -87,3 +87,11 @@ Files: `packages/runtime-narrative/src/{renderer,styles}.mjs`, renderer tests, a
 ## Approval gate
 
 This file authorizes **no production code changes yet**. Owner approval of the E2 interface and free-route proof contract is required before Task 1. On approval, implement in an isolated branch/worktree starting from verified `main`, review, and merge only after concrete test evidence.
+
+## Post-review implementation decisions (2026-11-03)
+
+- Enabled runtime binds its premium manifest to the active canonical Narrative graph and rejects mismatched versions at constructor and guarded updater/renderer boundaries.
+- Free witnesses resolve the canonical current beat before checking premium choice IDs, including actions omitting `beatId`.
+- A failed or ambiguous save needs a visible restore-wallet UI action that re-reads durable state before any new unlock; no automatic debit or story choice.
+- Disposal after a deferred empty `load()` cannot start a new zero-balance save.
+- E2 is local infrastructure only; mock tests cannot authorize platform payments or real release.
