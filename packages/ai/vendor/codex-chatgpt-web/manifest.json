@@ -50,6 +50,13 @@
   "licenses": {
     "upstream": "LICENSE",
     "thirdPartyNotices": "THIRD_PARTY_NOTICES.txt",
-    "sourceLicenseFiles": "LICENSES/"
+    "sourceLicenseFiles": "LICENSES/",
+    "files": [
+      { "path": "LICENSE", "bytes": 1087, "sha256": "d8b06e8d802722749b8f09e4ed1f2439fde0995a09b7e47c65dca3cc54d43d6e" },
+      { "path": "LICENSES/Bun-1.4.0.md", "bytes": 5377, "sha256": "2cb858b2db8fc793bca2093489c5bc8eee615d002cc4924254904044c27a0afa" },
+      { "path": "LICENSES/libnotify-0.8.7-LGPL-2.1.md", "bytes": 26607, "sha256": "fb293dcf753752a80c7bec86cd406b53c55b086c1f1bbf71425ce437ea3f1e4c" },
+      { "path": "LICENSES/tiktoken-MIT.txt", "bytes": 1078, "sha256": "418cb499b436128d653d79941333a5437b7be2ea9213dcc2f04d15d5d2c51d86" },
+      { "path": "THIRD_PARTY_NOTICES.txt", "bytes": 204243, "sha256": "1fb42fdf5abce39bca72724702068d2277c8d7de15543e92794f2716c2c66fb7" }
+    ]
   }
 }

@@ -1,6 +1,12 @@
 packages/ai/vendor/codex-chatgpt-web/browser-helper.cjs binary
 packages/ai/vendor/codex-chatgpt-web/node_modules/** binary
 
+# F6a.2: notice SHA-256 and byte lengths are pinned in the helper manifest.
+# Preserve LF in Windows checkouts even with core.autocrlf=true.
+packages/ai/vendor/codex-chatgpt-web/LICENSE text eol=lf
+packages/ai/vendor/codex-chatgpt-web/THIRD_PARTY_NOTICES.txt text eol=lf
+packages/ai/vendor/codex-chatgpt-web/LICENSES/* text eol=lf
+
 # N3 author proofs hash the exact text bytes; Windows checkout must not rewrite LF.
 packages/studio/catalog/templates/narrative-interactive/*.json text eol=lf
 packages/studio/catalog/templates/narrative-interactive/*.html text eol=lf

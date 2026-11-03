@@ -20,6 +20,7 @@ export const HELPER_INTEGRITY_CODES = new Set([
   'DEV_HELPER_ARTIFACT_UNTRUSTED',
   'DEV_HELPER_RUNTIME_UNAVAILABLE',
   'DEV_HELPER_RUNTIME_INTEGRITY',
+  'DEV_HELPER_NOTICES_INTEGRITY',
   'DEV_HELPER_PROTOCOL_UNSUPPORTED',
 ]);
 
@@ -67,6 +68,36 @@ function comparePathBytes(left, right) {
   return Buffer.from(left, 'utf8').compare(Buffer.from(right, 'utf8'));
 }
 
+function validateNoticeManifest(manifest) {
+  if (manifest.distribution !== 'ludory-vendored-prebuilt') return;
+  const licenses = manifest.licenses;
+  if (!licenses || typeof licenses !== 'object' || Array.isArray(licenses) ||
+      licenses.upstream !== 'LICENSE' || licenses.thirdPartyNotices !== 'THIRD_PARTY_NOTICES.txt' ||
+      licenses.sourceLicenseFiles !== 'LICENSES/' || !Array.isArray(licenses.files) ||
+      licenses.files.length < 3) throw errorWithCode('DEV_HELPER_MANIFEST_INVALID');
+  let previous = '';
+  const paths = new Set();
+  for (const file of licenses.files) {
+    const relative = file?.path;
+    if (!file || typeof file !== 'object' || Array.isArray(file) ||
+        typeof relative !== 'string' ||
+        !(relative === 'LICENSE' || relative === 'THIRD_PARTY_NOTICES.txt' ||
+          (relative.startsWith('LICENSES/') && relative.slice('LICENSES/'.length).split('/')
+            .every(segment => /^[A-Za-z0-9._-]+$/.test(segment) && segment !== '.' && segment !== '..'))) ||
+        !Number.isSafeInteger(file.bytes) || file.bytes < 1 ||
+        typeof file.sha256 !== 'string' || !SHA256.test(file.sha256) ||
+        paths.has(relative) || (previous && comparePathBytes(previous, relative) >= 0)) {
+      throw errorWithCode('DEV_HELPER_MANIFEST_INVALID');
+    }
+    paths.add(relative);
+    previous = relative;
+  }
+  if (!paths.has('LICENSE') || !paths.has('THIRD_PARTY_NOTICES.txt') ||
+      ![...paths].some(relative => relative.startsWith('LICENSES/'))) {
+    throw errorWithCode('DEV_HELPER_MANIFEST_INVALID');
+  }
+}
+
 function validateManifest(manifest, artifactFile) {
   const artifact = manifest.artifact;
   const protocol = manifest.protocol;
@@ -95,7 +126,65 @@ function validateManifest(manifest, artifactFile) {
   if ((protocol.kind === 'browser-observation-v2') !== hasV2) {
     throw errorWithCode('DEV_HELPER_MANIFEST_INVALID');
   }
+  validateNoticeManifest(manifest);
   return { artifact, protocol };
+}
+
+/** Verify the complete notice inventory; allow absent files only while preparing an install. */
+function verifyNotices(root, manifest, { allowMissing = false } = {}) {
+  if (manifest.distribution !== 'ludory-vendored-prebuilt') return [];
+  const expected = manifest.licenses.files;
+  const licenseDir = path.join(root, 'LICENSES');
+  const existing = [];
+  const visit = (directory, relative) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const relativeFile = `${relative}${entry.name}`;
+      const destination = path.join(directory, entry.name);
+      const stat = fs.lstatSync(destination);
+      if (stat.isSymbolicLink()) throw errorWithCode('DEV_HELPER_NOTICES_INTEGRITY');
+      if (stat.isDirectory()) visit(destination, `${relativeFile}/`);
+      else if (stat.isFile()) existing.push(relativeFile);
+      else throw errorWithCode('DEV_HELPER_NOTICES_INTEGRITY');
+    }
+  };
+  try {
+    if (pathExists(licenseDir)) {
+      const stat = fs.lstatSync(licenseDir);
+      if (!stat.isDirectory() || stat.isSymbolicLink()) throw errorWithCode('DEV_HELPER_NOTICES_INTEGRITY');
+      visit(licenseDir, 'LICENSES/');
+    } else if (!allowMissing) throw errorWithCode('DEV_HELPER_NOTICES_INTEGRITY');
+    const expectedPaths = new Set(expected.map(file => file.path));
+    if (existing.some(relative => !expectedPaths.has(relative))) {
+      throw errorWithCode('DEV_HELPER_NOTICES_INTEGRITY');
+    }
+    const missing = [];
+    for (const entry of expected) {
+      const destination = path.join(root, ...entry.path.split('/'));
+      if (!pathExists(destination)) {
+        if (!allowMissing) throw errorWithCode('DEV_HELPER_NOTICES_INTEGRITY');
+        missing.push(entry);
+        continue;
+      }
+      const stat = fs.lstatSync(destination);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== entry.bytes ||
+          createHash('sha256').update(fs.readFileSync(destination)).digest('hex') !== entry.sha256) {
+        throw errorWithCode('DEV_HELPER_NOTICES_INTEGRITY');
+      }
+    }
+    return missing;
+  } catch { throw errorWithCode('DEV_HELPER_NOTICES_INTEGRITY'); }
+}
+
+function materializeNotices(source, destination, manifest) {
+  const missing = verifyNotices(destination, manifest, { allowMissing: true });
+  for (const entry of missing) {
+    const target = path.join(destination, ...entry.path.split('/'));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    // Exclusive creation: never replace a file another process/user put here.
+    try { fs.copyFileSync(path.join(source, ...entry.path.split('/')), target, fs.constants.COPYFILE_EXCL); }
+    catch { throw errorWithCode('DEV_HELPER_NOTICES_INTEGRITY'); }
+  }
+  verifyNotices(destination, manifest);
 }
 
 function runtimeTreeSummary(nodeModules) {
@@ -182,7 +271,10 @@ export function verifyHelperArtifact({ scriptFile, manifestFile, checkRuntime = 
   if (bytes.length !== artifact.bytes) throw errorWithCode('DEV_HELPER_HASH_MISMATCH');
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   if (sha256 !== artifact.sha256) throw errorWithCode('DEV_HELPER_HASH_MISMATCH');
-  if (checkRuntime) verifyRuntimeDependencies(path.dirname(script), manifest);
+  if (checkRuntime) {
+    verifyRuntimeDependencies(path.dirname(script), manifest);
+    verifyNotices(path.dirname(script), manifest);
+  }
   return { scriptFile: script, manifestFile: manifestPath, bytes: bytes.length, sha256, manifest, protocol };
 }
 
@@ -356,8 +448,10 @@ export function installVendoredDevHelper({ devHome, stableHome, apply = false } 
       throw errorWithCode('DEV_HELPER_RUNTIME_INTEGRITY');
     }
   }
+  verifyNotices(runtime, artifact.manifest, { allowMissing: true });
   const nextConfig = { ...config, browserHelperScriptPath: helperFile };
-  const writes = [helperFile, manifestFile, runtimeNodeModules, configResult.safe];
+  const noticeFiles = artifact.manifest.licenses.files.map(entry => path.join(runtime, ...entry.path.split('/')));
+  const writes = [helperFile, manifestFile, runtimeNodeModules, ...noticeFiles, configResult.safe];
   const result = { status: 'READY', mode: apply ? 'apply' : 'preview', profileHome: home,
     artifact: { file: path.basename(helperFile), bytes: artifact.bytes, sha256: artifact.sha256,
       distribution: artifact.manifest.distribution, protocol: artifact.protocol },
@@ -365,6 +459,7 @@ export function installVendoredDevHelper({ devHome, stableHome, apply = false } 
     warning: 'The vendored helper is a pinned prebuilt; source rebuilds are not byte-reproducible.' };
   if (!apply) return result;
   materializeRuntime(VENDORED_RUNTIME_NODE_MODULES, runtimeNodeModules, artifact.manifest.runtime.tree);
+  materializeNotices(VENDORED_ROOT, runtime, artifact.manifest);
   copyAtomic(VENDORED_HELPER, helperFile);
   copyAtomic(VENDORED_MANIFEST, manifestFile);
   const installed = verifyHelperArtifact({ scriptFile: helperFile, manifestFile, checkRuntime: true,

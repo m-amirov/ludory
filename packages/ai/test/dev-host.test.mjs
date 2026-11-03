@@ -22,6 +22,11 @@ function fixture(helperSource, mutate = () => {}, { trustedV2 = false } = {}) {
     fs.cpSync(path.resolve('packages/ai/vendor/codex-chatgpt-web/node_modules'),
       path.join(runtime, 'node_modules'), { recursive: true });
     manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+    for (const license of manifest.licenses.files) {
+      const destination = path.join(runtime, ...license.path.split('/'));
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.copyFileSync(path.resolve('packages/ai/vendor/codex-chatgpt-web', license.path), destination);
+    }
   } else {
     fs.writeFileSync(script, helperSource);
     const helperBytes = fs.readFileSync(script);
