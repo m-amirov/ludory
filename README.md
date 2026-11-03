@@ -169,6 +169,8 @@ The optional `narrative-game` profile can use a [StoryScope-inspired Codex narra
 
 Studio invokes its own `@ludory/ai` workflow engine **without installing or invoking CEOS**. Native runs are stored under `.ludory/ai/`. A valid `ludory.project.json` is required; Git is optional during development. **Manual workflow commands** leave game code, assets and saves untouched; the explicit `--executor codex --apply` mode may edit game files. Native history remains readable after ordinary source edits, commits or relocating the game; API-level append-only checkpoint receipts record hashes from the time of each action (not cryptographic authentication against a privileged writer).
 
+**AI trust boundary:** game-project workflow/task mutations exposed through Studio or the high-level `@ludory/ai` APIs verify the independent Studio host registration before applying. Low-level `store.mjs` primitives (`planNewRun`, `commitNewRun`, `planNativeEvent`, `commitNativeEvent`) are privileged **internal** journal operations and are not exported by the package root. They validate source and journal consistency but do **not** themselves authenticate Studio origin; code with direct filesystem or source-module access is outside this package-level API boundary. `readNativeRun` and `listNativeRuns` remain public read-only diagnostics. Historical hash receipts establish integrity within their local journal, not an independently trusted author.
+
 ```sh
 # Read-only inspection of native Ludory state.
 node packages/studio/bin/ludory.mjs workflow doctor --project /path/to/game --json
