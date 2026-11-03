@@ -118,3 +118,10 @@ this report.
   the output. Equality, one-byte-over, multibyte text and existing
   reproducible candidate tests cover this local contract. This does not
   change live platform or release-readiness status.
+- F6c narrows the supported `@ludory/ai` root surface: low-level Store
+  planners and committers are no longer exported. Internal relative Store
+  imports intentionally continue to handle unregistered test fixtures;
+  the high-level Studio-origin mutation guard remains the public boundary.
+  The root/subpath public-contract regression and the preserved Store/F1c
+  tests cover this separation. Filesystem writers are **not** made
+  cryptographically trusted by the export change.

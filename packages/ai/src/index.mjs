@@ -1,6 +1,8 @@
 export { getPipeline, nextStage, checkTransition } from './pipelines.mjs';
 export { inspectNativeProject, verifyNativeSource, snapshotArtifact } from './source.mjs';
-export { planNewRun, commitNewRun, readNativeRun, listNativeRuns, planNativeEvent, commitNativeEvent } from './store.mjs';
+// Raw Store planning and commit primitives are privileged internal operations:
+// exposing them here would bypass the Studio-origin guard on workflow mutations.
+export { readNativeRun, listNativeRuns } from './store.mjs';
 export { discoverDevHost } from './dev-host.mjs';
 export { verifyHelperArtifact, readVendoredHelperManifest, installVendoredDevHelper } from './helper-supply.mjs';
 export { discoverImageHost, validateImageCapability } from './image-host.mjs';
