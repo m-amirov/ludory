@@ -7,6 +7,18 @@ C4 adds explicit fullscreen and rewarded ads. A Yandex build and live platform
 acceptance remain separate C5 stages. C5 now provides a generated-game browser
 contract candidate; it does not provide live Yandex or production Release proof.
 
+E4 introduces optional `createYandexEconomyStorage({config,getPlayer})` and
+`createYandexPurchases({sdk,getPlayer,gameId})` for **future opted-in monetized games**.
+They are not used by existing templates/games. The wallet gets an independent
+`ludory:<gameId>:economy:v1` key, a strict E1 state validator and a conservative
+200,000-byte shared-quota limit. Cloud writes use `setData(record,true)` and readback;
+missing/corrupt/unacknowledged records never fall back to localStorage. Player
+authorization is mandatory. Payments use unsigned `sdk.getPayments()` client mode,
+current SDK product catalog/portal currency, and a `navigator.locks` same-origin
+lock; if unavailable, IAP fails closed. See `@ludory/runtime-economy` for the
+explicit restore → credit/digest save → consume sequence. Mock tests are **not**
+real SDK, currency, moderation or cross-device evidence.
+
 ## C1 usage
 
 ```js
