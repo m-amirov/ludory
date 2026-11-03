@@ -19,11 +19,17 @@ Studio creates `ludory.project.json` in a game root using exactly the Core v1 de
 
 `init`: existing **empty** target directory only. `migrate`: existing Starter Kit
 `game-spec.yaml` schema 2 and `package.json` version. `inspect`: read-only view.
-All commands default to preview; `--apply` exclusively creates a manifest.
+These **manifest-specific** commands default to preview; `init --apply` and
+`migrate --apply` exclusively create `ludory.project.json`. This statement does
+**not** describe other Studio operations: profile, component, QA and AI
+`--apply` modes have separate documented side effects. Do not apply migration
+to frozen games.
 
 Exit codes: `0` for successful read/preview/application; `1` for invalid arguments or operational errors; `2` for an explicit `BLOCKED`/`CONFLICT` plan.
 
 ## Narrative dual-target local candidates (F5b2, programmatic)
+
+**Implemented in `main` via PR #67–#69.** This interface is programmatic, not a `ludory adopt` or `ludory export` CLI command. It accepts only an independently trusted **new Studio-created** narrative source, not a legacy/frozen game. For a mature visual novel, first inventory source/graph/assets/saves read-only, then separately authorize an adaptation into a new Studio project. The original files and CEOS history are never imported or rewritten automatically.
 
 For a **new, trusted** `narrative-interactive` game with both platform targets, the Studio module can derive two independent SDK projects and ZIP candidates from one freshly verified source snapshot:
 
@@ -54,7 +60,7 @@ The **author's story module and media under `assets/`** are compiled/copied. The
 
 F5b2 keeps authored inline DOM/CSS but deliberately **fails closed on HTML dependencies it cannot package**: `<link>` files, `srcset`, unsupported `src/` or external resource URLs, HTML event handlers, and CSS resource-loading functions (`@import`, `url()`, `image-set()`, including escaped CSS). Plain inline CSS and supported local media URLs under `assets/` remain allowed. To use an image in HTML, put a supported media file in `assets/` and reference it with e.g. `<img src="assets/photo.svg">`; standalone authored CSS files and CSS `url(assets/...)` are not yet supported in these platform candidates. The editable `src/story.js` is still executable author-controlled JavaScript, so this HTML check does **not** guarantee network isolation of arbitrary authored games. F5b3's zero-external-request result applies only to its tested fixture.
 
-The paired JSON receipt links hashes and file lists, but is **not signed**. `verifyNarrativePlatformCandidates` therefore requires the original live F5b1 plan and re-derives the source; a later process cannot authenticate source provenance from the editable receipt alone. Results remain local candidates only: `releaseReady:false`, `publicationAllowed:false`. Browser fake-SDK gameplay tests (F5b3), device tests, rights, live platform approval and moderation remain separate requirements.
+The paired JSON receipt links hashes and file lists, but is **not signed**. `verifyNarrativePlatformCandidates` therefore requires the original live F5b1 plan and re-derives the source; a later process cannot authenticate source provenance from the editable receipt alone. Results remain local candidates only: `releaseReady:false`, `publicationAllowed:false`. The F5b3 fixture exercised 22 paired-browser scenarios (same story, desktop/portrait, Back/save/reload, adverse SDK/storage/lifecycle cases) using **substituted test SDK endpoints**, as recorded in [PR #69](https://github.com/m-amirov/ludory/pull/69). This is not proof of arbitrary authored game behavior, physical-device compatibility, real platform approval or moderation.
 
 ## Pre-moderation QA simulation (P3a)
 
@@ -467,10 +473,12 @@ The CLI validates references, paths, uniqueness and symlinks, and external
 catalog entries cannot replace built-ins. Nothing is downloaded or executed
 while browsing templates. The receipt is **not** an updater authority.
 
-## Applying profiles to existing games
+## Applying profiles to authorized, non-frozen games
 
-Existing games with a valid `ludory.project.json` can opt into a compatible
-profile without modifying the game itself. The profile must explicitly match
+Owner-authorized **non-frozen** games with a valid `ludory.project.json` can opt
+into a compatible profile. **Do not apply this workflow to legacy/frozen games.**
+`--apply` writes profile-management metadata under `.ludory/profiles/`, even
+though it does not change gameplay source, assets or saves. The profile must explicitly match
 the game's engine and support all its target platforms. The built-in profiles
 are for `web` games; existing `phaser` projects need an explicitly selected,
 compatible external profile until Phaser profiles are delivered.
@@ -478,21 +486,21 @@ compatible external profile until Phaser profiles are delivered.
 ```sh
 # These first commands are read-only previews.
 node packages/studio/bin/ludory.mjs profiles apply \
-  --project /path/to/existing-web-game --name narrative-game --json
+  --project /path/to/authorized-studio-game --name narrative-game --json
 
 # After reviewing READY, make exactly the profile-management changes.
 node packages/studio/bin/ludory.mjs profiles apply \
-  --project /path/to/existing-web-game --name narrative-game --apply --json
+  --project /path/to/authorized-studio-game --name narrative-game --apply --json
 
 # Inspect managed state, check whether a newer catalog version is available.
 node packages/studio/bin/ludory.mjs profiles status \
-  --project /path/to/existing-web-game --json
+  --project /path/to/authorized-studio-game --json
 node packages/studio/bin/ludory.mjs profiles update \
-  --project /path/to/existing-web-game --json
+  --project /path/to/authorized-studio-game --json
 
 # Only for a higher compatible profile version and after reviewing READY:
 node packages/studio/bin/ludory.mjs profiles update \
-  --project /path/to/existing-web-game --apply --json
+  --project /path/to/authorized-studio-game --apply --json
 ```
 
 For an external profile, append `--catalog /path/to/catalog` consistently to
