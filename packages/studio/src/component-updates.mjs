@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { defineGame } from '@ludory/core';
-import { loadCatalog, isStudioComponentPath } from './catalog.mjs';
+import { loadCatalog, isStudioComponentPath, isStudioAuthorPath } from './catalog.mjs';
 import { projectRoot, directoryIdentity, isOriginalDirectory } from './projects.mjs';
 import { assertComponentTrust, advanceComponentTrust, registerComponentTrust,
   hostTrustDigest, isMissingHostTrust } from './component-trust.mjs';
@@ -57,10 +57,10 @@ function secureFile(filename, label, maxSize = 2 * 1024 * 1024) {
   } finally { fs.closeSync(fd); }
 }
 
-function checkedFile(project, name) {
+function checkedFile(project, name, maxSize) {
   const parts = safeRelative(name).split('/');
   checkedParent(project, name);
-  return secureFile(path.join(project, ...parts), `managed file ${name}`);
+  return secureFile(path.join(project, ...parts), `managed file ${name}`, maxSize);
 }
 
 function checkedParent(project, name) {
@@ -84,13 +84,51 @@ function checkedNewFile(project, name) {
   catch (error) { if (error.code !== 'ENOENT') throw error; }
 }
 
+/** Author-owned files are mutable, but they must never gain filesystem escape privileges. */
+function assertAuthoredFilesSafe(project, authorFiles) {
+  if (!authorFiles?.length) return;
+  for (const name of authorFiles) {
+    if (name.startsWith('assets/')) {
+      try { checkedFile(project, name, 25 * 1024 * 1024); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    } else checkedFile(project, name);
+  }
+  if (!authorFiles.includes('src/story.js') || !authorFiles.includes('narrative-assets.json')) return;
+  const source = checkedFile(project, 'src/story.js');
+  let proof;
+  try { proof = JSON.parse(checkedFile(project, 'narrative-assets.json').toString('utf8')); }
+  catch { throw new Error('Author narrative asset proof is unreadable or invalid'); }
+  if (proof.schemaVersion !== 1 || proof.storySha256 !== hash(source) ||
+      !proof.assets || typeof proof.assets !== 'object' || Array.isArray(proof.assets)) {
+    throw new Error('Author narrative asset proof does not match story bytes');
+  }
+  for (const item of Object.values(proof.assets)) {
+    if (!item || typeof item.path !== 'string' || !/^assets\/[A-Za-z0-9._-]+\.(?:svg|png|webp|jpg|jpeg)$/i.test(item.path) ||
+        !hashPattern.test(item.sha256) ||
+        hash(secureFile(checkedParent(project, item.path), `authored media ${item.path}`, 25 * 1024 * 1024)) !== item.sha256) {
+      throw new Error('Author narrative asset proof has missing, unsafe or mismatched media');
+    }
+  }
+}
+
+function authorIdentityDigest(project, authorFiles) {
+  if (!authorFiles?.length) return null;
+  return hash(encode(authorFiles.map(name => {
+    try { return [name, hash(checkedFile(project, name, name.startsWith('assets/') ? 25 * 1024 * 1024 : undefined))]; }
+    catch (error) {
+      if (error.code === 'ENOENT' && name.startsWith('assets/')) return [name, null];
+      throw error;
+    }
+  })));
+}
+
 function parseState(bytes) {
   let state;
   try { state = JSON.parse(bytes.toString('utf8')); }
   catch { throw new Error('Invalid component state JSON'); }
-  exact(state, ['schemaVersion', 'template', 'files'], 'component state');
+  exact(state, ['schemaVersion', 'template', 'files', ...(state.schemaVersion === 2 ? ['authorFiles'] : [])], 'component state');
   exact(state.template, ['id', 'version', 'profile', 'origin', 'sourceSha256'], 'component template');
-  if (state.schemaVersion !== 1 || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(state.template.id) ||
+  if (![1, 2].includes(state.schemaVersion) || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(state.template.id) ||
       !versionPattern.test(state.template.version) ||
       state.template.version.match(/^\d+\.\d+\.\d+-([^+]+)/)?.[1].split('.').some(part => /^0\d+$/.test(part)) ||
       !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(state.template.profile) ||
@@ -104,6 +142,19 @@ function parseState(bytes) {
   for (const [name, expected] of entries) {
     safeRelative(name);
     if (!hashPattern.test(expected)) throw new Error(`Invalid managed hash: ${name}`);
+  }
+  if (state.schemaVersion === 2) {
+    if (!Array.isArray(state.authorFiles) || !state.authorFiles.length ||
+        state.authorFiles.length + entries.length > maxManagedFiles ||
+        new Set(state.authorFiles).size !== state.authorFiles.length) {
+      throw new Error('Invalid author-owned component file count');
+    }
+    for (const name of state.authorFiles) {
+      safeRelative(name);
+      if (!isStudioAuthorPath(name) || Object.hasOwn(state.files, name)) {
+        throw new Error(`Invalid author-owned component path: ${name}`);
+      }
+    }
   }
   if (!encode(state).equals(bytes)) throw new Error('Component state is not canonical');
   return { state, bytes, sha256: hash(bytes) };
@@ -119,8 +170,15 @@ function originalOwnershipMatches(installed, receipt) {
       receipt.catalog?.templateSha256 !== t.sourceSha256 ||
       !receipt.files || typeof receipt.files !== 'object' || Array.isArray(receipt.files)) return false;
   const owned = Object.entries(receipt.files).filter(([name]) => isStudioComponentPath(name));
-  return owned.length === Object.keys(installed.state.files).length &&
-    owned.every(([name, sha256]) => installed.state.files[name] === sha256);
+  const authors = new Set(installed.state.authorFiles ?? []);
+  if (installed.state.schemaVersion === 2) {
+    // An original v1 receipt does not authorize v2 classification by itself:
+    // only a modern create receipt or a retained v1→v2 transaction can.
+    if (receipt.componentOwnership?.schemaVersion !== 2 ||
+        JSON.stringify(receipt.componentOwnership.authorFiles) !== JSON.stringify(installed.state.authorFiles)) return false;
+  } else if (receipt.componentOwnership !== undefined) return false;
+  return owned.length === Object.keys(installed.state.files).length + authors.size &&
+    owned.every(([name, sha256]) => authors.has(name) || installed.state.files[name] === sha256);
 }
 
 // The standalone components manifest is not an ownership grant. It must be
@@ -167,10 +225,20 @@ function verifyOwnershipHistory(project, installed, receipt) {
     const previous = valid[0];
     if (valid.some(item => item.sha256 !== previous.sha256)) throw new Error('Ambiguous component transition provenance');
     const a = previous.state, b = current.state;
-    if (versionCompare(b.template.version, a.template.version) <= 0 ||
+    const released = Object.keys(a.files).filter(name => !Object.hasOwn(b.files, name));
+    const adoption = a.schemaVersion === 1 && b.schemaVersion === 2 &&
+      released.length === b.authorFiles.length &&
+      released.every(name => b.authorFiles.includes(name)) &&
+      b.authorFiles.every(name => Object.hasOwn(a.files, name));
+    const order = versionCompare(b.template.version, a.template.version);
+    const authorRegression = a.schemaVersion === 2 &&
+      (b.schemaVersion !== 2 || JSON.stringify(a.authorFiles) !== JSON.stringify(b.authorFiles));
+    if (authorRegression || (order <= 0 && !(order === 0 && adoption &&
+          b.template.sourceSha256 === a.template.sourceSha256 &&
+          Object.keys(b.files).every(name => b.files[name] === a.files[name]))) ||
         a.template.id !== b.template.id || a.template.profile !== b.template.profile ||
         a.template.origin !== b.template.origin ||
-        Object.keys(a.files).some(name => !Object.hasOwn(b.files, name))) {
+        released.some(name => !adoption || !isStudioAuthorPath(name))) {
       throw new Error('Component transition attempts ownership regression');
     }
     current = previous;
@@ -204,10 +272,11 @@ function versionCompare(a, b) {
 }
 
 /** Pure preview. Only files recorded by a new Studio create are updateable. */
-export function planComponentUpdate(projectDir, { catalog } = {}) {
+export function planComponentUpdate(projectDir, { catalog, adoptAuthorFiles = false,
+  acceptStateSha256, acceptProposalSha256 } = {}) {
   const project = projectRoot(projectDir);
   const catalogPath = catalog === undefined ? undefined : path.resolve(catalog);
-  const options = { catalog: catalogPath };
+  const options = { catalog: catalogPath, adoptAuthorFiles, acceptStateSha256, acceptProposalSha256 };
   const projectEntries = fs.readdirSync(project);
   if (projectEntries.includes(lockName) || projectEntries.some(entry => entry.startsWith(stagingPrefix))) {
     return result(project, 'CONFLICT', ['Unfinished component update transaction: inspect lock and retained backups before retry']);
@@ -250,14 +319,6 @@ export function planComponentUpdate(projectDir, { catalog } = {}) {
     manifest = defineGame(JSON.parse(bytes.toString('utf8')));
     manifestSha256 = hash(bytes);
   } catch (error) { return result(project, 'BLOCKED', [`Game manifest invalid: ${error.message}`]); }
-  const conflicts = [];
-  for (const [name, sha256] of Object.entries(installed.state.files)) {
-    try {
-      if (hash(checkedFile(project, name)) !== sha256) conflicts.push(`Managed file modified: ${name}`);
-    } catch (error) { conflicts.push(`Managed file unavailable/unsafe: ${name}: ${error.message}`); }
-  }
-  if (conflicts.length) return result(project, 'CONFLICT', conflicts);
-
   let template, profile;
   try {
     const loaded = loadCatalog(catalogPath);
@@ -270,6 +331,30 @@ export function planComponentUpdate(projectDir, { catalog } = {}) {
   if (template.profile !== installed.state.template.profile) {
     return result(project, 'CONFLICT', ['Template profile identity changed; automatic profile switching is forbidden']);
   }
+  if (installed.state.schemaVersion === 2 &&
+      JSON.stringify(template.authorFiles) !== JSON.stringify(installed.state.authorFiles)) {
+    return result(project, 'CONFLICT', ['Author-owned template paths changed; explicit ownership migration required']);
+  }
+  const needsAdoption = installed.state.schemaVersion === 1 && template.authorFiles.length > 0;
+  if (needsAdoption && template.authorFiles.some(name => !Object.hasOwn(installed.state.files, name))) {
+    return result(project, 'CONFLICT', ['Legacy component state cannot adopt unowned template paths']);
+  }
+  const releaseNames = needsAdoption ? template.authorFiles : [];
+  const released = new Set(releaseNames);
+  const conflicts = [];
+  for (const [name, sha256] of Object.entries(installed.state.files)) {
+    if (released.has(name)) continue;
+    try {
+      if (hash(checkedFile(project, name)) !== sha256) conflicts.push(`Managed file modified: ${name}`);
+    } catch (error) { conflicts.push(`Managed file unavailable/unsafe: ${name}: ${error.message}`); }
+  }
+  if (conflicts.length) return result(project, 'CONFLICT', conflicts);
+  try { assertAuthoredFilesSafe(project, needsAdoption ? releaseNames : installed.state.authorFiles); }
+  catch (error) { return result(project, 'CONFLICT', [error.message]); }
+  const authoredPaths = needsAdoption ? releaseNames : (installed.state.authorFiles ?? []);
+  let authorDigest;
+  try { authorDigest = authorIdentityDigest(project, authoredPaths); }
+  catch (error) { return result(project, 'CONFLICT', [error.message]); }
   // The creation receipt is *not* ownership authority: it can only narrow
   // compatibility, never add a managed file or authorize an overwrite.
   try {
@@ -289,9 +374,13 @@ export function planComponentUpdate(projectDir, { catalog } = {}) {
   const order = versionCompare(template.version, old.version);
   if (order < 0) return result(project, 'CONFLICT', ['Template downgrade is not allowed']);
   const previousNames = Object.keys(installed.state.files);
-  const newNames = template.files.filter(isStudioComponentPath);
-  if (newNames.length > maxManagedFiles) return result(project, 'BLOCKED', ['Updated template exceeds managed file limit']);
-  if (previousNames.some(name => !newNames.includes(name))) {
+  const newNames = template.files.filter(name => isStudioComponentPath(name) &&
+    !template.authorFiles.includes(name));
+  const authorNames = needsAdoption ? releaseNames : (installed.state.authorFiles ?? []);
+  if (newNames.length + authorNames.length > maxManagedFiles) {
+    return result(project, 'BLOCKED', ['Updated template exceeds combined managed/author file limit']);
+  }
+  if (previousNames.some(name => !newNames.includes(name) && !released.has(name))) {
     return result(project, 'CONFLICT', ['Template removes managed file paths; manual upgrade required']);
   }
   const nextFiles = Object.create(null);
@@ -305,11 +394,37 @@ export function planComponentUpdate(projectDir, { catalog } = {}) {
   if (conflicts.length) return result(project, 'CONFLICT', conflicts);
   if (order === 0) {
     if (old.version !== template.version || old.sourceSha256 !== template.sourceSha256 ||
-        newNames.length !== previousNames.length ||
-        previousNames.some(name => nextFiles[name] !== installed.state.files[name])) {
+        newNames.length !== previousNames.length - releaseNames.length ||
+        previousNames.some(name => !released.has(name) && nextFiles[name] !== installed.state.files[name])) {
       return result(project, 'CONFLICT', ['Template source/assets changed without an increased SemVer version']);
     }
-    return result(project, 'IN_SYNC', [], { template: { id: old.id, version: old.version } });
+    if (!needsAdoption) return result(project, 'IN_SYNC', [], { template: { id: old.id, version: old.version } });
+  }
+  const changed = newNames.filter(name => installed.state.files[name] !== nextFiles[name]);
+  const writes = [...changed, stateName];
+  const proposalSha256 = needsAdoption ? hash(encode({
+    oldStateSha256: installed.sha256,
+    authorDigest,
+    template: { id: template.id, version: template.version, profileSha256: profile.sourceSha256,
+      sourceSha256: template.sourceSha256 },
+    authorFiles: releaseNames,
+    managedOutputs: newNames.map(name => [name, nextFiles[name]]),
+    writes,
+  })) : undefined;
+  if (needsAdoption) {
+    if (adoptAuthorFiles &&
+        ((acceptStateSha256 === undefined) !== (acceptProposalSha256 === undefined))) {
+      return result(project, 'BLOCKED', ['Author adoption requires both state and proposal SHA confirmations']);
+    }
+    if (!adoptAuthorFiles || acceptStateSha256 === undefined) {
+      return result(project, 'NEEDS_USER_ACTION', [], { stateSha256: installed.sha256,
+        proposalSha256, authorFiles: [...releaseNames], writes,
+        template: { id: template.id, fromVersion: old.version, version: template.version },
+        warning: 'Review author paths, managed writes, target version and both SHA values; only authored bytes remain unchanged.' });
+    }
+    if (acceptStateSha256 !== installed.sha256 || acceptProposalSha256 !== proposalSha256) {
+      return result(project, 'BLOCKED', ['Author adoption state or proposal SHA confirmation mismatch']);
+    }
   }
   if (projectEntries.filter(name => name.startsWith(backupPrefix)).length >= 128) {
     return result(project, 'BLOCKED', ['Component backup archive limit reached; safe history compaction requires operator review']);
@@ -319,19 +434,30 @@ export function planComponentUpdate(projectDir, { catalog } = {}) {
     template: { id: template.id, version: template.version, profile: template.profile,
       origin: template.origin, sourceSha256: template.sourceSha256 },
     files: nextFiles };
-  const changed = newNames.filter(name => installed.state.files[name] !== nextFiles[name]);
-  const writes = [...changed, stateName];
+  if (installed.state.schemaVersion === 2 || needsAdoption) {
+    next.schemaVersion = 2;
+    next.authorFiles = needsAdoption ? releaseNames : installed.state.authorFiles;
+  }
+  let nextStateBytes;
+  try { nextStateBytes = encode(next); parseState(nextStateBytes); }
+  catch (error) { return result(project, 'BLOCKED', [`Invalid updated ownership state: ${error.message}`]); }
   const fingerprint = hash(encode({ project, rootIdentity, manifestSha256, oldStateSha256: installed.sha256,
-    nextStateSha256: hash(encode(next)), changes: changed.map(name => [name, nextFiles[name]]), catalogPath }));
+    nextStateSha256: hash(nextStateBytes), changes: changed.map(name => [name, nextFiles[name]]), catalogPath, authorDigest }));
   const plan = result(project, 'READY', [], {
     writes, template: { id: template.id, fromVersion: old.version, version: template.version },
-    options, rootIdentity, manifestSha256, receiptSha256, oldStateSha256: installed.sha256, fingerprint,
+    options, rootIdentity, manifestSha256, receiptSha256, oldStateSha256: installed.sha256, fingerprint, authorDigest, proposalSha256,
   });
-  Object.defineProperty(plan, '_snapshot', { value: { changed, nextStateBytes: encode(next),
+  Object.defineProperty(plan, '_snapshot', { value: { changed, nextStateBytes,
+    adopted: releaseNames,
     newFiles: new Set(newNames.filter(name => !Object.hasOwn(installed.state.files, name))),
     assets: new Map(changed.map(name => [name, template.assets.get(name).bytes])),
   }, enumerable: false });
   return plan;
+}
+
+/** Consent-gated, state-only or template-update adoption; uses the normal anchored component apply. */
+export function planAuthorAdoption(projectDir, { catalog, acceptStateSha256, acceptProposalSha256 } = {}) {
+  return planComponentUpdate(projectDir, { catalog, adoptAuthorFiles: true, acceptStateSha256, acceptProposalSha256 });
 }
 
 export function componentStatus(projectDir, options = {}) {
@@ -339,25 +465,47 @@ export function componentStatus(projectDir, options = {}) {
 }
 
 /** Explicit, human-reviewed trust transfer. Never an automatic fallback. */
-export function previewComponentTrust(projectDir) {
+export function previewComponentTrust(projectDir, { catalog } = {}) {
   const project = projectRoot(projectDir);
+  const catalogPath = catalog === undefined ? undefined : path.resolve(catalog);
   const output = (status, conflicts = [], more = {}) => ({
     mode: 'component-trust', project, status, writes: [], conflicts, ...more,
   });
   if (fs.readdirSync(project).some(entry => entry === lockName || entry.startsWith(stagingPrefix))) {
     return output('CONFLICT', ['Unfinished component transaction; inspect and recover before transferring trust']);
   }
-  let installed, receiptSha256, manifestSha256;
+  let installed, receiptSha256, manifestSha256, authorCandidates, authorDigest, managedPaths;
   try {
     installed = readState(project);
     const receiptBytes = secureFile(path.join(project, 'ludory.studio.json'), 'creation receipt');
     const receipt = JSON.parse(receiptBytes.toString('utf8'));
     receiptSha256 = hash(receiptBytes);
     verifyOwnershipHistory(project, installed, receipt);
+    // An old v1 state still hashes the original narrative. A versioned,
+    // explicitly reviewed catalog may narrow only these declared author paths
+    // for a new-host consent preview; it never transfers launcher ownership.
+    authorCandidates = installed.state.authorFiles ?? [];
+    if (installed.state.schemaVersion === 1) {
+      const template = loadCatalog(catalogPath).templates.get(installed.state.template.id);
+      if (template?.authorFiles.length && template.origin === installed.state.template.origin &&
+          template.profile === installed.state.template.profile &&
+          versionCompare(template.version, installed.state.template.version) >= 0 &&
+          (template.version !== installed.state.template.version ||
+            template.sourceSha256 === installed.state.template.sourceSha256) &&
+          Object.keys(installed.state.files).every(name => template.files.includes(name)) &&
+          template.authorFiles.every(name => Object.hasOwn(installed.state.files, name))) {
+        authorCandidates = template.authorFiles;
+      }
+    }
+    assertAuthoredFilesSafe(project, authorCandidates);
+    authorDigest = authorIdentityDigest(project, authorCandidates);
+    const released = new Set(authorCandidates);
+    managedPaths = Object.keys(installed.state.files).filter(name => !released.has(name)).sort();
     const manifestBytes = secureFile(path.join(project, 'ludory.project.json'), 'game manifest');
     defineGame(JSON.parse(manifestBytes.toString('utf8')));
     manifestSha256 = hash(manifestBytes);
     for (const [name, expected] of Object.entries(installed.state.files)) {
+      if (released.has(name)) continue;
       if (hash(checkedFile(project, name)) !== expected) throw new Error(`Managed file modified: ${name}`);
     }
   } catch (error) { return output('CONFLICT', [`Trust inspection failed: ${error.message}`]); }
@@ -365,13 +513,13 @@ export function previewComponentTrust(projectDir) {
   const expected = { rootIdentity, receiptSha256, manifestSha256, stateSha256: installed.sha256 };
   try {
     assertComponentTrust(project, expected);
-    return output('IN_SYNC', [], { ...expected, managedPaths: Object.keys(installed.state.files).sort() });
+    return output('IN_SYNC', [], { ...expected, managedPaths, authorCandidates, authorDigest, catalogPath });
   } catch (error) {
     if (!isMissingHostTrust(error)) return output('CONFLICT', [error.message]);
   }
   return output('NEEDS_USER_ACTION', [], {
-    ...expected, managedPaths: Object.keys(installed.state.files).sort(),
-    warning: 'Review every managed path and the full state SHA-256 before accepting ownership on this host. Project files alone are not trusted evidence.',
+    ...expected, managedPaths, authorCandidates, authorDigest, catalogPath,
+    warning: 'Review every managed path, proposed author paths and state SHA-256 before accepting ownership on this host. Project files alone are not trusted evidence.',
   });
 }
 
@@ -380,12 +528,13 @@ export function acceptComponentTrust(preview, confirmedSha256) {
     throw new Error('Only an explicitly previewed, untrusted component state may be accepted');
   }
   if (confirmedSha256 !== preview.stateSha256) throw new Error('Trust confirmation SHA-256 does not match preview');
-  const fresh = previewComponentTrust(preview.project);
-  for (const key of ['status', 'rootIdentity', 'receiptSha256', 'manifestSha256', 'stateSha256']) {
+  const fresh = previewComponentTrust(preview.project, { catalog: preview.catalogPath });
+  for (const key of ['status', 'rootIdentity', 'receiptSha256', 'manifestSha256', 'stateSha256', 'authorDigest', 'catalogPath']) {
     if (fresh[key] !== preview[key]) throw new Error(`Stale component trust preview: ${key} changed`);
   }
-  if (JSON.stringify(fresh.managedPaths) !== JSON.stringify(preview.managedPaths)) {
-    throw new Error('Stale component trust preview: managed paths changed');
+  if (JSON.stringify(fresh.managedPaths) !== JSON.stringify(preview.managedPaths) ||
+      JSON.stringify(fresh.authorCandidates) !== JSON.stringify(preview.authorCandidates)) {
+    throw new Error('Stale component trust preview: managed or author paths changed');
   }
   registerComponentTrust(preview.project, { rootIdentity: fresh.rootIdentity,
     receiptSha256: fresh.receiptSha256, manifestSha256: fresh.manifestSha256,
@@ -590,6 +739,12 @@ export function applyComponentPlan(plan) {
       receiptSha256: plan.receiptSha256, manifestSha256: plan.manifestSha256,
       stateSha256: plan.oldStateSha256 });
     const changes = fresh._snapshot.changed;
+    const adopted = new Set(fresh._snapshot.adopted);
+    const authorPaths = installed.state.schemaVersion === 2 ? installed.state.authorFiles : fresh._snapshot.adopted;
+    assertAuthoredFilesSafe(project, authorPaths);
+    if (authorIdentityDigest(project, authorPaths) !== plan.authorDigest) {
+      throw new Error('Author content changed during component transaction');
+    }
     for (const name of changes) {
       if (fresh._snapshot.newFiles.has(name)) checkedNewFile(project, name);
       else {
@@ -600,6 +755,7 @@ export function applyComponentPlan(plan) {
     // All other managed files must also stay untouched, even if this revision
     // did not change their catalog bytes.
     for (const [name, expected] of Object.entries(installed.state.files)) {
+      if (adopted.has(name)) continue;
       if (hash(checkedFile(project, name)) !== expected) throw new Error(`Managed file changed after preview: ${name}`);
     }
     // Root pinning alone does not establish the identity of intermediate
@@ -607,7 +763,7 @@ export function applyComponentPlan(plan) {
     // no-FILE_SHARE_DELETE native handle to each existing parent until exit.
     if (process.platform === 'win32') {
       const managedParents = new Set();
-      for (const name of [...Object.keys(installed.state.files), ...changes]) {
+      for (const name of [...Object.keys(installed.state.files).filter(name => !adopted.has(name)), ...changes]) {
         const parts = name.split('/').slice(0, -1);
         for (let i = 1; i <= parts.length; i++) managedParents.add(path.join(project, ...parts.slice(0, i)));
       }

@@ -18,6 +18,10 @@ export const isStudioComponentPath = filename => {
   return !reserved.has(rootName) && !projectOwned.has(rootName) &&
     !pieces.some(part => part.startsWith('.')) && !userOwnedRoots.has(rootName);
 };
+/** Author content may be replaced by a game author, but bootstrap/runtime files must stay managed. */
+export const isStudioAuthorPath = filename => filename === 'src/story.js' ||
+  filename === 'narrative-assets.json' ||
+  /^assets\/[A-Za-z0-9._-]+\.(?:svg|png|webp|jpg|jpeg|ogg|mp3|wav|woff2)$/i.test(filename);
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 
 function exactKeys(obj, fields, label) {
@@ -142,7 +146,8 @@ export function validateNarrativeAuthorProof(assets, { templateId } = {}) {
 
 function readTemplate(source, origin) {
   const { data, sha256 } = jsonSource(source);
-  exactKeys(data, ['schemaVersion', 'id', 'version', 'description', 'profile', 'engine', 'targets', 'files'], source);
+  exactKeys(data, ['schemaVersion', 'id', 'version', 'description', 'profile', 'engine', 'targets', 'files',
+    ...(Object.hasOwn(data, 'authorFiles') ? ['authorFiles'] : [])], source);
   if (data.schemaVersion !== 1) throw new Error(`Unsupported template schema: ${source}`);
   token(data.id, 'template'); token(data.profile, 'profile'); token(data.engine, 'engine');
   validVersion(data.version, 'template');
@@ -155,6 +160,11 @@ function readTemplate(source, origin) {
   }
   if (files.some(filename => files.some(other => other !== filename && other.toLowerCase().startsWith(`${filename.toLowerCase()}/`)))) {
     throw new Error('Template output path conflicts with a nested output directory');
+  }
+  const authorFiles = data.authorFiles ?? [];
+  if (!Array.isArray(authorFiles) || new Set(authorFiles).size !== authorFiles.length ||
+      authorFiles.some(name => !files.includes(name) || !isStudioAuthorPath(name))) {
+    throw new Error('Invalid or protected author-owned template file path');
   }
   const assets = new Map();
   for (const filename of files) {
@@ -169,7 +179,7 @@ function readTemplate(source, origin) {
     assets.set(filename, { bytes, sha256: digest(bytes) });
   }
   validateNarrativeAuthorProof(assets, { templateId: data.id });
-  return { ...data, origin, sourceSha256: sha256, assets };
+  return { ...data, authorFiles, origin, sourceSha256: sha256, assets };
 }
 
 function readRoot(root, profiles, templates, origin) {

@@ -9,7 +9,8 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { planComponentUpdate, componentStatus, applyComponentPlan,
-  previewComponentTrust, acceptComponentTrust } from '../src/component-updates.mjs';
+  planAuthorAdoption, previewComponentTrust, acceptComponentTrust } from '../src/component-updates.mjs';
+import { registerComponentTrust } from '../src/component-trust.mjs';
 import { loadCatalog } from '../src/catalog.mjs';
 import { openProtectedDirectory, assertWindowsDirectoryPinContract } from '../src/windows-directory-pin.mjs';
 
@@ -21,7 +22,7 @@ const physicalPath = value => {
 const transactionPath = value => /\.ludory-components-(?:update|backup)-/.test(physicalPath(value));
 const anchoredBasename = (value, name) => String(value) === name || /[\\/]([^\\/]+)$/.exec(String(value))?.[1] === name;
 
-function fixture(t, { initialVersion = '1.0.0', availableTargets = ['vk-games'] } = {}) {
+function fixture(t, { initialVersion = '1.0.0', availableTargets = ['vk-games'], withAuthorStory = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-components-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const previousTrustRoot = process.env.LUDORY_STUDIO_TRUST_DIR;
@@ -45,10 +46,12 @@ function fixture(t, { initialVersion = '1.0.0', availableTargets = ['vk-games'] 
   const html = path.join(catalog, 'templates', 'owned-web', 'index.html');
   fs.writeFileSync(descriptor, JSON.stringify({
     schemaVersion: 1, id: 'owned-web', version: initialVersion, description: 'test template',
-    profile: 'owned-game', engine: 'web', targets: availableTargets, files: ['index.html', 'src/main.js'],
+    profile: 'owned-game', engine: 'web', targets: availableTargets,
+    files: ['index.html', 'src/main.js', ...(withAuthorStory ? ['src/story.js'] : [])],
   }));
   fs.writeFileSync(app, 'export const version = 1;\n');
   fs.writeFileSync(html, '<main>v1</main>\n');
+  if (withAuthorStory) fs.writeFileSync(path.join(catalog, 'templates/owned-web/src/story.js'), 'export const author = true;\n');
   applyCreatePlan(planCreate(project, {
     id: 'owned-game', title: 'Owned', lang: 'en', profile: 'owned-game',
     template: 'owned-web', targets: ['vk-games'], catalog,
@@ -59,6 +62,327 @@ function fixture(t, { initialVersion = '1.0.0', availableTargets = ['vk-games'] 
     state: path.join(project, 'ludory.components.json'),
   };
 }
+
+test('legacy ownership adoption upgrades only managed bootstrap while preserving edited story', t => {
+  const f = fixture(t, { initialVersion: '1.2.1', withAuthorStory: true });
+  const authoredPath = path.join(f.project, 'src/story.js');
+  fs.appendFileSync(authoredPath, '// edited by game author\n');
+  const before = fs.readFileSync(authoredPath);
+  const descriptor = JSON.parse(fs.readFileSync(f.descriptor));
+  descriptor.version = '1.2.2';
+  descriptor.authorFiles = ['src/story.js'];
+  fs.writeFileSync(f.descriptor, JSON.stringify(descriptor));
+  fs.writeFileSync(f.app, 'export const version = 2;\n');
+  const preview = planAuthorAdoption(f.project, { catalog: f.catalog });
+  assert.equal(preview.status, 'NEEDS_USER_ACTION', JSON.stringify(preview));
+  const plan = planAuthorAdoption(f.project, { catalog: f.catalog, acceptStateSha256: preview.stateSha256,
+    acceptProposalSha256: preview.proposalSha256 });
+  assert.equal(plan.status, 'READY', JSON.stringify(plan));
+  assert.deepEqual(plan.writes, ['src/main.js', 'ludory.components.json']);
+  assert.equal(applyComponentPlan(plan).status, 'APPLIED');
+  assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 2;\n');
+  assert.deepEqual(fs.readFileSync(authoredPath), before);
+  assert.equal(componentStatus(f.project, { catalog: f.catalog }).status, 'IN_SYNC');
+});
+
+function narrativeFixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-narrative-author-owned-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const before = process.env.LUDORY_STUDIO_TRUST_DIR;
+  process.env.LUDORY_STUDIO_TRUST_DIR = path.join(root, 'host-trust');
+  t.after(() => {
+    if (before === undefined) delete process.env.LUDORY_STUDIO_TRUST_DIR;
+    else process.env.LUDORY_STUDIO_TRUST_DIR = before;
+  });
+  const project = path.join(root, 'game');
+  fs.mkdirSync(project);
+  const plan = planCreate(project, { id: 'narrative-owned', title: 'Story', lang: 'ru',
+    profile: 'narrative-game', template: 'narrative-interactive', targets: ['vk-games', 'yandex-games'] });
+  assert.equal(plan.status, 'READY');
+  assert.equal(applyCreatePlan(plan).status, 'APPLIED');
+  return { root, project, trustRoot: process.env.LUDORY_STUDIO_TRUST_DIR,
+    story: path.join(project, 'src/story.js'), proof: path.join(project, 'narrative-assets.json'),
+    components: path.join(project, 'ludory.components.json') };
+}
+
+function legacyNarrativeFixture(t) {
+  const f = narrativeFixture(t);
+  const receiptPath = path.join(f.project, 'ludory.studio.json');
+  const receipt = JSON.parse(fs.readFileSync(receiptPath));
+  // Simulate the historical v1 creation receipt, not a forged v2 create:
+  // v1 had no component ownership classification marker.
+  delete receipt.componentOwnership;
+  const receiptBytes = Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`);
+  fs.writeFileSync(receiptPath, receiptBytes);
+  const manifestBytes = fs.readFileSync(path.join(f.project, 'ludory.project.json'));
+  const freshBytes = fs.readFileSync(f.components);
+  const fresh = JSON.parse(freshBytes);
+  const historical = { schemaVersion: 1, template: fresh.template,
+    files: Object.fromEntries(Object.entries(receipt.files).filter(([name]) =>
+      name !== 'ludory.project.json')) };
+  const oldBytes = Buffer.from(`${JSON.stringify(historical, null, 2)}\n`);
+  const stat = fs.lstatSync(f.project, { bigint: true });
+  const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+  fs.writeFileSync(f.components, oldBytes);
+  process.env.LUDORY_STUDIO_TRUST_DIR = path.join(f.root, 'legacy-host-trust');
+  registerComponentTrust(f.project, {
+    rootIdentity: `${stat.dev}:${stat.ino}`, receiptSha256: hash(receiptBytes),
+    manifestSha256: hash(manifestBytes), stateSha256: hash(oldBytes),
+  });
+  return f;
+}
+
+test('legacy narrative adoption needs exact state consent and preserves authored bytes', t => {
+  const f = legacyNarrativeFixture(t);
+  fs.appendFileSync(f.story, '\n// original owner text: do not overwrite\n');
+  const proof = JSON.parse(fs.readFileSync(f.proof, 'utf8'));
+  proof.storySha256 = crypto.createHash('sha256').update(fs.readFileSync(f.story)).digest('hex');
+  fs.writeFileSync(f.proof, `${JSON.stringify(proof, null, 2)}\n`);
+  const beforeStory = fs.readFileSync(f.story);
+  const beforeProof = fs.readFileSync(f.proof);
+  const preview = planAuthorAdoption(f.project);
+  assert.equal(preview.status, 'NEEDS_USER_ACTION');
+  assert.equal(componentStatus(f.project).status, 'NEEDS_USER_ACTION');
+  assert.match(preview.stateSha256, /^[a-f0-9]{64}$/);
+  assert.equal(planAuthorAdoption(f.project, { acceptStateSha256: '0'.repeat(64) }).status, 'BLOCKED');
+  assert.equal(planAuthorAdoption(f.project, { acceptStateSha256: preview.stateSha256 }).status, 'BLOCKED');
+  const plan = planAuthorAdoption(f.project, { acceptStateSha256: preview.stateSha256,
+    acceptProposalSha256: preview.proposalSha256 });
+  assert.equal(plan.status, 'READY', JSON.stringify(plan));
+  const outcome = applyComponentPlan(plan);
+  assert.equal(outcome.status, 'APPLIED');
+  assert.deepEqual(fs.readFileSync(f.story), beforeStory);
+  assert.deepEqual(fs.readFileSync(f.proof), beforeProof);
+  assert.equal(JSON.parse(fs.readFileSync(f.components)).schemaVersion, 2);
+  assert.equal(componentStatus(f.project).status, 'IN_SYNC');
+  assert.equal(previewComponentTrust(f.project).status, 'IN_SYNC');
+});
+
+test('legacy adoption blocks modified framework launcher even with a correct state consent', t => {
+  const f = legacyNarrativeFixture(t);
+  fs.appendFileSync(path.join(f.project, 'src/main.js'), '\n// malicious launcher edit\n');
+  assert.equal(planAuthorAdoption(f.project).status, 'CONFLICT');
+});
+
+test('manually relabeled schema 2 cannot bypass legacy transition provenance on another host', t => {
+  const f = legacyNarrativeFixture(t);
+  const state = JSON.parse(fs.readFileSync(f.components, 'utf8'));
+  state.schemaVersion = 2;
+  state.authorFiles = ['src/story.js', 'narrative-assets.json',
+    'assets/lighthouse.svg', 'assets/shoreline.svg'];
+  for (const name of state.authorFiles) delete state.files[name];
+  fs.writeFileSync(f.components, `${JSON.stringify(state, null, 2)}\n`);
+  process.env.LUDORY_STUDIO_TRUST_DIR = path.join(f.root, 'another-host');
+  const preview = previewComponentTrust(f.project);
+  assert.equal(preview.status, 'CONFLICT', JSON.stringify(preview));
+  assert.match(preview.conflicts.join(' '), /provenance|transition|creation|ownership/i);
+});
+
+test('adoption consent binds the exact template, managed upgrades and author path proposal', t => {
+  const f = fixture(t, { initialVersion: '1.2.1', withAuthorStory: true });
+  fs.appendFileSync(path.join(f.project, 'src/story.js'), '\n// author edited\n');
+  const template = JSON.parse(fs.readFileSync(f.descriptor));
+  template.version = '1.2.2';
+  template.authorFiles = ['src/story.js'];
+  fs.writeFileSync(f.descriptor, JSON.stringify(template));
+  fs.writeFileSync(f.app, 'export const version = 2;\n');
+  const bin = fileURLToPath(new URL('../bin/ludory.mjs', import.meta.url));
+  const call = (...args) => spawnSync(process.execPath, [bin, 'components', 'adopt',
+    '--project', f.project, '--catalog', f.catalog, '--json', ...args], { encoding: 'utf8', env: process.env });
+  const first = JSON.parse(call().stdout);
+  assert.equal(first.status, 'NEEDS_USER_ACTION');
+  assert.match(first.proposalSha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(first.writes, ['src/main.js', 'ludory.components.json']);
+  assert.equal(first.template.version, '1.2.2');
+  template.version = '1.2.3';
+  fs.writeFileSync(f.descriptor, JSON.stringify(template));
+  fs.writeFileSync(f.app, 'export const version = 3;\n');
+  const stale = call('--accept-state-sha256', first.stateSha256,
+    '--accept-proposal-sha256', first.proposalSha256, '--apply');
+  assert.equal(stale.status, 2, stale.stderr);
+  assert.equal(JSON.parse(stale.stdout).status, 'BLOCKED');
+  assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 1;\n');
+  const current = JSON.parse(call().stdout);
+  assert.notEqual(current.proposalSha256, first.proposalSha256);
+  assert.equal(JSON.parse(call('--accept-state-sha256', current.stateSha256,
+    '--accept-proposal-sha256', current.proposalSha256, '--apply').stdout).status, 'APPLIED');
+  assert.equal(fs.readFileSync(f.gameApp, 'utf8'), 'export const version = 3;\n');
+});
+
+test('adoption consent expires when author content changes between separate CLI previews', t => {
+  const f = legacyNarrativeFixture(t);
+  const consent = planAuthorAdoption(f.project);
+  fs.appendFileSync(f.story, '\n// new author edit after review\n');
+  const proof = JSON.parse(fs.readFileSync(f.proof, 'utf8'));
+  proof.storySha256 = crypto.createHash('sha256').update(fs.readFileSync(f.story)).digest('hex');
+  fs.writeFileSync(f.proof, `${JSON.stringify(proof, null, 2)}\n`);
+  const stale = planAuthorAdoption(f.project, {
+    acceptStateSha256: consent.stateSha256, acceptProposalSha256: consent.proposalSha256,
+  });
+  assert.equal(stale.status, 'BLOCKED');
+  assert.notEqual(planAuthorAdoption(f.project).proposalSha256, consent.proposalSha256);
+});
+
+test('combined managed and author count over 4096 is blocked before create or adoption', t => {
+  const f = fixture(t, { withAuthorStory: true });
+  const template = JSON.parse(fs.readFileSync(f.descriptor, 'utf8'));
+  template.version = '1.1.0';
+  template.authorFiles = ['src/story.js'];
+  for (let i = 0; i < 4094; i++) {
+    const name = `src/extra-${i}.js`;
+    template.files.push(name);
+    fs.writeFileSync(path.join(f.catalog, 'templates/owned-web', name), `// ${i}\n`);
+  }
+  fs.writeFileSync(f.descriptor, JSON.stringify(template));
+  assert.equal(planAuthorAdoption(f.project, { catalog: f.catalog }).status, 'BLOCKED');
+  const nextGame = path.join(f.root, 'next-game');
+  fs.mkdirSync(nextGame);
+  const created = planCreate(nextGame, { id: 'bounded', title: 'Bounded', lang: 'en',
+    profile: 'owned-game', template: 'owned-web', targets: ['vk-games'], catalog: f.catalog });
+  assert.equal(created.status, 'BLOCKED');
+});
+
+test('legacy adoption plan becomes stale when author story changes after consent preview', t => {
+  const f = legacyNarrativeFixture(t);
+  const consent = planAuthorAdoption(f.project);
+  const planned = planAuthorAdoption(f.project, { acceptStateSha256: consent.stateSha256,
+    acceptProposalSha256: consent.proposalSha256 });
+  assert.equal(planned.status, 'READY');
+  const originalState = fs.readFileSync(f.components);
+  fs.appendFileSync(f.story, '\n// changed after owner preview\n');
+  const proof = JSON.parse(fs.readFileSync(f.proof, 'utf8'));
+  proof.storySha256 = crypto.createHash('sha256').update(fs.readFileSync(f.story)).digest('hex');
+  fs.writeFileSync(f.proof, `${JSON.stringify(proof, null, 2)}\n`);
+  assert.throws(() => applyComponentPlan(planned), /stale|changed|conflict/i);
+  assert.deepEqual(fs.readFileSync(f.components), originalState);
+});
+
+test('legacy adoption fails closed and preserves content if state publication cannot link', t => {
+  const f = legacyNarrativeFixture(t);
+  const beforeStory = fs.readFileSync(f.story);
+  const beforeProof = fs.readFileSync(f.proof);
+  const beforeState = fs.readFileSync(f.components);
+  const preview = planAuthorAdoption(f.project);
+  const plan = planAuthorAdoption(f.project, { acceptStateSha256: preview.stateSha256,
+    acceptProposalSha256: preview.proposalSha256 });
+  const originalLink = fs.linkSync;
+  fs.linkSync = function (source, destination, ...args) {
+    if (transactionPath(source)) throw new Error('injected publication failure');
+    return originalLink.call(this, source, destination, ...args);
+  };
+  try { assert.throws(() => applyComponentPlan(plan), /injected publication failure/); }
+  finally { fs.linkSync = originalLink; }
+  assert.deepEqual(fs.readFileSync(f.story), beforeStory);
+  assert.deepEqual(fs.readFileSync(f.proof), beforeProof);
+  assert.deepEqual(fs.readFileSync(f.components), beforeState);
+  assert.ok(fs.readdirSync(f.project).some(name => name.startsWith('.ludory-components-backup-')));
+});
+
+test('authored demo media can be removed after proof no longer references it', t => {
+  const f = narrativeFixture(t);
+  const proof = JSON.parse(fs.readFileSync(f.proof, 'utf8'));
+  proof.assets = {};
+  fs.writeFileSync(f.proof, `${JSON.stringify(proof, null, 2)}\n`);
+  fs.unlinkSync(path.join(f.project, 'assets/lighthouse.svg'));
+  fs.unlinkSync(path.join(f.project, 'assets/shoreline.svg'));
+  assert.equal(componentStatus(f.project).status, 'IN_SYNC');
+});
+
+test('components adopt CLI requires previewed state SHA and never silently applies', t => {
+  const f = legacyNarrativeFixture(t);
+  fs.appendFileSync(f.story, '\n// user branch content\n');
+  const proof = JSON.parse(fs.readFileSync(f.proof, 'utf8'));
+  proof.storySha256 = crypto.createHash('sha256').update(fs.readFileSync(f.story)).digest('hex');
+  fs.writeFileSync(f.proof, `${JSON.stringify(proof, null, 2)}\n`);
+  const bin = fileURLToPath(new URL('../bin/ludory.mjs', import.meta.url));
+  const call = (...args) => spawnSync(process.execPath, [bin, 'components', 'adopt',
+    '--project', f.project, '--json', ...args], { encoding: 'utf8', env: process.env });
+  const preview = call();
+  assert.equal(preview.status, 2, preview.stderr);
+  const data = JSON.parse(preview.stdout);
+  assert.equal(data.status, 'NEEDS_USER_ACTION');
+  assert.deepEqual(data.writes, ['ludory.components.json']);
+  assert.match(data.stateSha256, /^[a-f0-9]{64}$/);
+  assert.match(data.proposalSha256, /^[a-f0-9]{64}$/);
+  assert.equal(call('--apply').status, 1);
+  assert.equal(call('--accept-state-sha256', '0'.repeat(64), '--apply').status, 1);
+  assert.equal(call('--accept-state-sha256', '0'.repeat(64),
+    '--accept-proposal-sha256', data.proposalSha256, '--apply').status, 2);
+  assert.equal(JSON.parse(call('--accept-state-sha256', data.stateSha256,
+    '--accept-proposal-sha256', data.proposalSha256, '--apply').stdout).status, 'APPLIED');
+  assert.equal(componentStatus(f.project).status, 'IN_SYNC');
+});
+
+test('new narrative author edits remain IN_SYNC while launcher stays managed', t => {
+  const f = narrativeFixture(t);
+  const receipt = JSON.parse(fs.readFileSync(path.join(f.project, 'ludory.studio.json'), 'utf8'));
+  assert.deepEqual(receipt.componentOwnership, { schemaVersion: 2, authorFiles: [
+    'src/story.js', 'narrative-assets.json', 'assets/lighthouse.svg', 'assets/shoreline.svg',
+  ] });
+  fs.appendFileSync(f.story, '\n// authored game content\n');
+  const proof = JSON.parse(fs.readFileSync(f.proof, 'utf8'));
+  proof.storySha256 = crypto.createHash('sha256').update(fs.readFileSync(f.story)).digest('hex');
+  fs.writeFileSync(f.proof, `${JSON.stringify(proof, null, 2)}\n`);
+  assert.equal(componentStatus(f.project).status, 'IN_SYNC');
+  fs.appendFileSync(path.join(f.project, 'src/main.js'), '\n// edited framework launcher\n');
+  assert.equal(componentStatus(f.project).status, 'CONFLICT');
+});
+
+test('new narrative author source symlinks cannot acquire component IN_SYNC or host trust', t => {
+  const f = narrativeFixture(t);
+  const outside = path.join(f.root, 'outside-story.js');
+  fs.copyFileSync(f.story, outside);
+  fs.unlinkSync(f.story);
+  fs.symlinkSync(outside, f.story);
+  assert.equal(componentStatus(f.project).status, 'CONFLICT');
+  assert.equal(previewComponentTrust(f.project).status, 'CONFLICT');
+});
+
+test('author-owned story survives an explicit new-host trust transfer without trusting launcher edits', t => {
+  const f = narrativeFixture(t);
+  fs.appendFileSync(f.story, '\n// valid author-only change\n');
+  const proof = JSON.parse(fs.readFileSync(f.proof, 'utf8'));
+  proof.storySha256 = crypto.createHash('sha256').update(fs.readFileSync(f.story)).digest('hex');
+  fs.writeFileSync(f.proof, `${JSON.stringify(proof, null, 2)}\n`);
+  process.env.LUDORY_STUDIO_TRUST_DIR = path.join(f.root, 'second-host');
+  const preview = previewComponentTrust(f.project);
+  assert.equal(preview.status, 'NEEDS_USER_ACTION');
+  assert.deepEqual(preview.managedPaths,
+    ['assets/ludory-narrative.js', 'index.html', 'src/entry.js', 'src/main.js']);
+  assert.equal(acceptComponentTrust(preview, preview.stateSha256).status, 'TRUSTED');
+  assert.equal(componentStatus(f.project).status, 'IN_SYNC');
+  fs.appendFileSync(path.join(f.project, 'src/main.js'), '\n// unauthorized core change\n');
+  assert.equal(previewComponentTrust(f.project).status, 'CONFLICT');
+});
+
+test('legacy author edits can be explicitly trusted on another host before adoption', t => {
+  const f = legacyNarrativeFixture(t);
+  fs.appendFileSync(f.story, '\n// migrated authored narrative\n');
+  const proof = JSON.parse(fs.readFileSync(f.proof, 'utf8'));
+  proof.storySha256 = crypto.createHash('sha256').update(fs.readFileSync(f.story)).digest('hex');
+  fs.writeFileSync(f.proof, `${JSON.stringify(proof, null, 2)}\n`);
+  process.env.LUDORY_STUDIO_TRUST_DIR = path.join(f.root, 'second-host');
+  const preview = previewComponentTrust(f.project);
+  assert.equal(preview.status, 'NEEDS_USER_ACTION', JSON.stringify(preview));
+  assert.deepEqual(preview.authorCandidates, ['src/story.js', 'narrative-assets.json',
+    'assets/lighthouse.svg', 'assets/shoreline.svg']);
+  assert.deepEqual(preview.managedPaths,
+    ['assets/ludory-narrative.js', 'index.html', 'src/entry.js', 'src/main.js']);
+  assert.equal(acceptComponentTrust(preview, preview.stateSha256).status, 'TRUSTED');
+  assert.equal(planAuthorAdoption(f.project).status, 'NEEDS_USER_ACTION');
+});
+
+test('new-host consent rejects author edits between trust preview and acceptance', t => {
+  const f = narrativeFixture(t);
+  process.env.LUDORY_STUDIO_TRUST_DIR = path.join(f.root, 'second-host');
+  const preview = previewComponentTrust(f.project);
+  assert.equal(preview.status, 'NEEDS_USER_ACTION');
+  fs.appendFileSync(f.story, '\n// later author edit\n');
+  const proof = JSON.parse(fs.readFileSync(f.proof, 'utf8'));
+  proof.storySha256 = crypto.createHash('sha256').update(fs.readFileSync(f.story)).digest('hex');
+  fs.writeFileSync(f.proof, `${JSON.stringify(proof, null, 2)}\n`);
+  assert.throws(() => acceptComponentTrust(preview, preview.stateSha256), /stale/i);
+});
 
 test('the host registry is created with Studio ownership, outside the game', t => {
   const f = fixture(t);

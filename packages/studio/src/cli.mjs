@@ -6,7 +6,7 @@ import { inspectProject, planInit, planMigration, applyPlan } from './projects.m
 import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
 import { runPreviewCli } from './preview-cli.mjs';
-import { planComponentUpdate, componentStatus, applyComponentPlan,
+import { planComponentUpdate, planAuthorAdoption, componentStatus, applyComponentPlan,
   previewComponentTrust, acceptComponentTrust } from './component-updates.mjs';
 import { inspectWindowsDirectoryPin } from './windows-directory-pin.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
@@ -42,7 +42,8 @@ const usage = `Ludory Studio ${studioVersion} — native game-development workfl
   ludory preview --project <new-studio-game> [--target <web|yandex|vk>] [--lan] [--port <4173>] [--json]
   ludory components status --project <new-studio-game> [--catalog <directory>] [--json]
   ludory components update --project <new-studio-game> [--catalog <directory>] [--apply] [--json]
-  ludory components trust --project <transferred-studio-game> [--accept-state-sha256 <64-hex> --apply] [--json]
+  ludory components adopt --project <legacy-narrative> [--catalog <directory>] [--accept-state-sha256 <sha256> --accept-proposal-sha256 <sha256> --apply] [--json]
+  ludory components trust --project <transferred-studio-game> [--catalog <directory>] [--accept-state-sha256 <64-hex> --apply] [--json]
   ludory components native [--json]
   ludory quality enable --project <new-studio-game> [--apply] [--json]
   ludory quality check --project <new-studio-game> [--tier <quick|deep>] [--apply] [--json]
@@ -186,7 +187,8 @@ function argumentsFor(command, argv) {
     : command === 'create'
       ? new Set([...common, '--id', '--title', '--lang', '--profile', '--template', '--targets', '--version', '--catalog', '--apply'])
       : command === 'components-update' ? new Set([...common, '--catalog', '--apply'])
-        : command === 'components-trust' ? new Set([...common, '--apply', '--accept-state-sha256'])
+        : command === 'components-adopt' ? new Set([...common, '--catalog', '--apply', '--accept-state-sha256', '--accept-proposal-sha256'])
+        : command === 'components-trust' ? new Set([...common, '--catalog', '--apply', '--accept-state-sha256'])
         : command === 'components-status' ? new Set([...common, '--catalog'])
       : command === 'migrate' ? new Set([...common, '--apply'])
         : command === 'profiles-list' || command === 'templates-list' ? new Set(['--json', '--catalog'])
@@ -607,6 +609,14 @@ function display(result, json, out) {
   if (result.mode === 'component-trust') {
     if (result.stateSha256) out(`  component state SHA-256: ${result.stateSha256}\n`);
     for (const filename of result.managedPaths ?? []) out(`  managed path to review: ${filename}\n`);
+    for (const filename of result.authorCandidates ?? []) out(`  author path to review: ${filename}\n`);
+    if (result.warning) out(`  review required: ${result.warning}\n`);
+  }
+  if (result.mode !== 'component-trust' && result.status === 'NEEDS_USER_ACTION' && result.stateSha256) {
+    out(`  component state SHA-256: ${result.stateSha256}\n`);
+    if (result.proposalSha256) out(`  proposed adoption SHA-256: ${result.proposalSha256}\n`);
+    for (const name of result.authorFiles ?? []) out(`  author path to review: ${name}\n`);
+    if (result.template?.version) out(`  template version: ${result.template.fromVersion} → ${result.template.version}\n`);
     if (result.warning) out(`  review required: ${result.warning}\n`);
   }
   for (const item of result.writes) {
@@ -896,7 +906,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'components') {
       const [operation, ...args] = rest;
-      if (!['status', 'update', 'trust', 'native'].includes(operation)) {
+      if (!['status', 'update', 'adopt', 'trust', 'native'].includes(operation)) {
         throw new Error(`Unknown components operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`components-${operation}`, args);
@@ -914,18 +924,27 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
         if (flags.has('--apply') !== flags.has('--accept-state-sha256')) {
           throw new Error('Trust acceptance requires --accept-state-sha256 <64-hex> and --apply together');
         }
-        const preview = previewComponentTrust(flags.get('--project'));
+        const preview = previewComponentTrust(flags.get('--project'), { catalog: flags.get('--catalog') });
         const accepted = flags.has('--apply') && preview.status === 'NEEDS_USER_ACTION'
           ? acceptComponentTrust(preview, flags.get('--accept-state-sha256')) : preview;
         display(accepted, flags.has('--json'), out);
         return ['CONFLICT', 'BLOCKED', 'NEEDS_USER_ACTION'].includes(accepted.status) ? 2 : 0;
       }
+      if (operation === 'adopt' && new Set([
+        flags.has('--apply'), flags.has('--accept-state-sha256'), flags.has('--accept-proposal-sha256'),
+      ]).size > 1) {
+        throw new Error('Author adoption requires both --accept-state-sha256 and --accept-proposal-sha256 with --apply');
+      }
       const options = { catalog: flags.get('--catalog') };
       const preview = operation === 'status'
         ? componentStatus(flags.get('--project'), options)
-        : planComponentUpdate(flags.get('--project'), options);
+        : operation === 'adopt'
+          ? planAuthorAdoption(flags.get('--project'), { ...options,
+            acceptStateSha256: flags.get('--accept-state-sha256'),
+            acceptProposalSha256: flags.get('--accept-proposal-sha256') })
+          : planComponentUpdate(flags.get('--project'), options);
       let result = preview;
-      if (operation === 'update' && flags.has('--apply') && preview.status === 'READY') {
+      if ((operation === 'update' || operation === 'adopt') && flags.has('--apply') && preview.status === 'READY') {
         try { result = applyComponentPlan(preview); }
         catch (error) {
           result = { ...preview, status: 'BLOCKED', writes: [],
@@ -933,7 +952,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
         }
       }
       display(result, flags.has('--json'), out);
-      return ['BLOCKED', 'CONFLICT'].includes(result.status) ? 2 : 0;
+      return ['BLOCKED', 'CONFLICT', 'NEEDS_USER_ACTION'].includes(result.status) ? 2 : 0;
     }
     if (command === 'profiles' || command === 'templates') {
       const [operation, ...args] = rest;
