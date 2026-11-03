@@ -101,3 +101,14 @@ diverged and not currently mergeable. No PR was closed, rebased or merged.
 Result: **the F6 *audit* is complete; technical `1.0.0` freeze is not yet
 accepted.** An unchanged frozen game does not become a migration candidate by
 this report.
+
+## Post-audit follow-up (2026-11-03)
+
+- F6a.1 bounded Yandex ad callback timeout was merged as [PR #73](https://github.com/m-amirov/ludory/pull/73).
+- F6a.2 installed pinned Web Helper notices were merged as [PR #74](https://github.com/m-amirov/ludory/pull/74).
+- [F6a.3 provenance investigation](2026-11-03-f6a3-web-helper-provenance.md)
+  verified the immutable upstream tag and replayed both vendored patches
+  against exact upstream source blobs. **Binary reproducibility remains
+  NOT_RUN and source-to-binary provenance BLOCKED** pending a Bun 1.4.0
+  rebuild/byte comparison or explicit owner exception. This addendum does
+  not revise the original audit's point-in-time findings or clear release.
