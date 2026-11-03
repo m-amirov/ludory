@@ -107,6 +107,11 @@ test('full valid journal permits duplicate receipt but refuses a new transaction
     })),
   };
   assert.equal(validateEconomyState(zeroRewards, full).journal.length, 2000);
+  const readStarted = performance.now();
+  assert.equal(getEconomyView(zeroRewards, full).balance, 0);
+  const readDurationMs = performance.now() - readStarted;
+  assert.ok(readDurationMs < 100,
+    `Wallet view replay took ${readDurationMs.toFixed(1)}ms for 2,000 entries (expected <100ms)`);
   assert.equal(applyEconomyOperation(zeroRewards, full, { type: 'GRANT_REWARDED', attemptId: 'ad-1999' }).receipt.applied, false);
   assert.throws(() => applyEconomyOperation(zeroRewards, full, { type: 'GRANT_REWARDED', attemptId: 'new' }), { code: 'CAPACITY_EXCEEDED' });
 });

@@ -1,6 +1,6 @@
 import { EconomyError } from './errors.mjs';
 import { defineEconomy, exact, id, amount } from './validate.mjs';
-import { applyUnchecked, MAX_JOURNAL_ENTRIES } from './operations.mjs';
+import { normalizeOperation, MAX_JOURNAL_ENTRIES } from './operations.mjs';
 
 /** Start with an empty wallet; earning the configured starter bonus is an explicit transaction. */
 export function createEconomyState(rawConfig) {
@@ -113,14 +113,35 @@ export function validateEconomyState(config, raw) {
         (typeof state.lastDailyClaim !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(state.lastDailyClaim))) {
       corrupt('Invalid daily claim');
     }
-    let rebuilt = createEconomyState(config);
+    // Replay in one pass. Calling applyUnchecked here repeatedly would clone
+    // the growing journal for every entry and make wallet reads O(n²).
+    const rebuilt = {
+      ...createEconomyState(config),
+      entitlements: [], completedGrants: [], purchaseTokens: [], journal: [],
+    };
+    const seenOperationIds = new Set();
     for (const entry of journal) {
       const operation = operationFromJournal(entry);
-      const result = applyUnchecked(config, rebuilt, operation);
-      if (!result.receipt.applied || !sameJournalEntry(result.state.journal.at(-1), entry)) {
+      const expected = normalizeOperation(config, operation);
+      if (seenOperationIds.has(expected.operationId) || !sameJournalEntry(expected, entry)) {
         corrupt('Journal is not a valid deterministic operation sequence');
       }
-      rebuilt = result.state;
+      if (entry.type === 'GRANT_DAILY' && rebuilt.lastDailyClaim &&
+          entry.operationId.slice(6) < rebuilt.lastDailyClaim) {
+        corrupt('Daily claim sequence moves backward');
+      }
+      const nextBalance = rebuilt.balance + expected.delta;
+      if (!Number.isSafeInteger(nextBalance) || nextBalance < 0 || nextBalance > config.maxBalance) {
+        corrupt('Journal balance is outside configured limits');
+      }
+      seenOperationIds.add(expected.operationId);
+      rebuilt.balance = nextBalance;
+      rebuilt.revision++;
+      rebuilt.journal.push(expected);
+      if (entry.type === 'GRANT_PURCHASE') rebuilt.purchaseTokens.push(expected.operationId.slice(9));
+      else if (entry.type === 'UNLOCK_PREMIUM') rebuilt.entitlements.push(expected.contentId);
+      else rebuilt.completedGrants.push(expected.operationId);
+      if (entry.type === 'GRANT_DAILY') rebuilt.lastDailyClaim = expected.operationId.slice(6);
     }
     for (const key of ['balance', 'revision', 'lastDailyClaim']) {
       if (state[key] !== rebuilt[key]) corrupt(`${key} differs from journal replay`);
