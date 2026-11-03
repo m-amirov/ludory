@@ -7,7 +7,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { unzipSync } from 'fflate';
 import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
-import { buildYandexCandidate, validateYandexCandidatePath } from '../../../scripts/build-yandex-candidate.mjs';
+import { buildYandexCandidate, validateYandexCandidatePath,
+  validateYandexCandidateOutputSizes } from '../../../scripts/build-yandex-candidate.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const options = { id: 'zip-game', title: 'Yandex candidate', lang: 'en', version: '1.0.0',
@@ -37,6 +38,7 @@ test('Yandex candidate bytes and entry hashes reproduce and contain no developer
   const secondPath = path.join(base, 'repeat.zip');
   const second = await buildYandexCandidate({ projectDir: root, outputZip: secondPath });
   const archive = fs.readFileSync(zip);
+  assert.doesNotThrow(() => validateYandexCandidateOutputSizes(archive, first));
   assert.deepEqual(archive, fs.readFileSync(secondPath));
   assert.equal(first.sha256, sha256(archive));
   assert.equal(second.sha256, first.sha256);
@@ -50,6 +52,31 @@ test('Yandex candidate bytes and entry hashes reproduce and contain no developer
     assert.equal(extracted[filename].byteLength, size);
     assert.doesNotMatch(filename, /(^|\/)(?:\.codex-os|tests|sdk\.js)(?:\/|$)|\.\./i);
   }
+});
+
+test('Yandex candidate output guard matches the Release stored ZIP boundary', () => {
+  const maxZip = 100 * 1024 * 1024;
+  const receipt = { archivePath: '/candidate.zip', sha256: 'a'.repeat(64), files: [] };
+  assert.doesNotThrow(() => validateYandexCandidateOutputSizes({ length: maxZip }, receipt));
+  assert.throws(() => validateYandexCandidateOutputSizes({ length: maxZip + 1 }, receipt),
+    /archive exceeds 100 MiB limit/i);
+});
+
+test('Yandex candidate output guard matches the Release pretty JSON receipt byte boundary', () => {
+  const maxReceipt = 1024 * 1024;
+  const base = { archivePath: 'x', sha256: 'a'.repeat(64), files: [] };
+  const serializedSize = value => Buffer.byteLength(`${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  const atLimit = { ...base, archivePath: 'x'.repeat(1 + maxReceipt - serializedSize(base)) };
+  assert.equal(serializedSize(atLimit), maxReceipt);
+  assert.doesNotThrow(() => validateYandexCandidateOutputSizes({ length: 1 }, atLimit));
+  assert.throws(() => validateYandexCandidateOutputSizes({ length: 1 },
+    { ...atLimit, archivePath: `${atLimit.archivePath}x` }), /receipt exceeds.*1 MiB/i);
+
+  const multibyte = { ...base, archivePath: 'я'.repeat(Math.ceil((maxReceipt - serializedSize(base) + 1) / 2)) };
+  assert.ok(JSON.stringify(multibyte).length < maxReceipt, 'character count alone must stay below bound');
+  assert.ok(serializedSize(multibyte) > maxReceipt, 'UTF-8 byte count must exceed bound');
+  assert.throws(() => validateYandexCandidateOutputSizes({ length: 1 }, multibyte),
+    /receipt exceeds.*1 MiB/i);
 });
 
 test('Yandex candidate uses canonical physical paths when ordinary realpath differs from native', async t => {
