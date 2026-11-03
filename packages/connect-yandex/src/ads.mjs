@@ -8,7 +8,7 @@ function adError(code, message, cause) {
 }
 
 /** Explicit callback-verified Yandex ad operations for a running game. */
-export function createYandexAds({ sdk, host, lifecycle } = {}) {
+export function createYandexAds({ sdk, host, lifecycle, timeoutMs = 120_000 } = {}) {
   if (!sdk || typeof sdk !== 'object' || Array.isArray(sdk)) {
     throw new TypeError('sdk must be an initialized Yandex SDK object');
   }
@@ -19,6 +19,9 @@ export function createYandexAds({ sdk, host, lifecycle } = {}) {
   if (!lifecycle || typeof lifecycle.acquireAdPause !== 'function' ||
       typeof lifecycle.getStatus !== 'function' || typeof lifecycle.getAttachmentToken !== 'function') {
     throw new TypeError('lifecycle must support scoped ad pauses');
+  }
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000) {
+    throw new TypeError('Yandex ad timeoutMs must be an integer between 1 and 300000');
   }
 
   let destroyed = false;
@@ -44,7 +47,7 @@ export function createYandexAds({ sdk, host, lifecycle } = {}) {
     return new Promise((resolve, reject) => {
       const attempt = {
         settled: false, opened: false, rewardObserved: false, release: null,
-        attachmentToken, invoking: true, terminal: null,
+        attachmentToken, invoking: true, terminal: null, timer: null,
       };
       active = attempt;
 
@@ -53,6 +56,7 @@ export function createYandexAds({ sdk, host, lifecycle } = {}) {
         if (active !== attempt || attempt.settled || (destroyed && !force)) return;
         attempt.settled = true;
         active = null;
+        clearTimeout(attempt.timer);
         try { attempt.release?.(); }
         catch (cause) {
           failure ??= adError('ADS_FAILED', 'Failed to release Yandex advertisement pause', cause);
@@ -116,6 +120,7 @@ export function createYandexAds({ sdk, host, lifecycle } = {}) {
         };
       }
 
+      attempt.timer = setTimeout(() => fail('Yandex advertisement callback timed out'), timeoutMs);
       try {
         const result = method.call(api, { callbacks });
         // SDK contracts return void. If a nonstandard SDK returns a Promise,

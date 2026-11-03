@@ -4,7 +4,7 @@ import { createYandexAds } from '../src/ads.mjs';
 import { createYandexLifecycle } from '../src/lifecycle.mjs';
 import { createRuntimeHost } from '@ludory/runtime';
 
-function fixture({ fullscreen = true, rewarded = true } = {}) {
+function fixture({ fullscreen = true, rewarded = true, timeoutMs } = {}) {
   let status = 'RUNNING';
   const listeners = new Set();
   const events = new Map();
@@ -33,7 +33,7 @@ function fixture({ fullscreen = true, rewarded = true } = {}) {
   lifecycle.attach();
   return {
     sdk, host, lifecycle, calls, events,
-    ads: createYandexAds({ sdk, host, lifecycle }),
+    ads: createYandexAds({ sdk, host, lifecycle, ...(timeoutMs === undefined ? {} : { timeoutMs }) }),
     emitSdk(name) { sdkEvents.get(name)?.(); },
     transition,
   };
@@ -42,6 +42,102 @@ function fixture({ fullscreen = true, rewarded = true } = {}) {
 async function expectCode(promise, code) {
   await assert.rejects(promise, error => error?.name === 'YandexConnectError' && error.code === code);
 }
+
+async function expectBoundedFailure(promise) {
+  let watchdog;
+  try {
+    await Promise.race([
+      expectCode(promise, 'ADS_FAILED'),
+      new Promise((_, reject) => {
+        watchdog = setTimeout(() => reject(new Error('Yandex SDK deadline was not enforced')), 300);
+      }),
+    ]);
+  } finally {
+    clearTimeout(watchdog);
+  }
+}
+
+test('Yandex ad timeoutMs rejects zero, fractional, nonfinite and out-of-range inputs', () => {
+  const f = fixture();
+  for (const timeoutMs of [0, -1, 1.5, Infinity, NaN, 300_001, '20', null]) {
+    assert.throws(() => createYandexAds({ sdk: f.sdk, host: f.host, lifecycle: f.lifecycle, timeoutMs }), TypeError);
+  }
+});
+
+test('silent Yandex SDK request times out before opening and stale callbacks cannot affect next ad', async () => {
+  const f = fixture({ timeoutMs: 20 });
+  const first = f.ads.showFullscreen();
+  const stale = f.events.get('fullscreen');
+  try {
+    await expectBoundedFailure(first);
+    assert.equal(f.host.getStatus(), 'RUNNING');
+    const next = f.ads.showRewarded();
+    stale.onOpen();
+    stale.onClose(true);
+    assert.equal(f.host.getStatus(), 'RUNNING', 'previous timed-out open must not pause a new attempt');
+    const current = f.events.get('rewarded');
+    current.onOpen();
+    current.onRewarded();
+    current.onClose(true);
+    assert.deepEqual(await next, { shown: true, rewarded: true });
+    assert.deepEqual(f.calls, ['fullscreen', 'rewarded', 'pause', 'resume']);
+  } finally {
+    f.ads.destroy();
+  }
+});
+
+test('Yandex rewarded opening without terminal callback times out and cannot grant observed reward', async () => {
+  const f = fixture({ timeoutMs: 20 });
+  const pending = f.ads.showRewarded();
+  const callbacks = f.events.get('rewarded');
+  try {
+    callbacks.onOpen();
+    callbacks.onRewarded();
+    assert.equal(f.host.getStatus(), 'PAUSED');
+    await expectBoundedFailure(pending);
+    assert.equal(f.host.getStatus(), 'RUNNING');
+    callbacks.onRewarded();
+    callbacks.onClose(true);
+    assert.deepEqual(f.calls, ['rewarded', 'pause', 'resume']);
+  } finally {
+    f.ads.destroy();
+  }
+});
+
+test('Yandex deadline releases only its pause when a platform pause reason is still active', async () => {
+  const f = fixture({ timeoutMs: 20 });
+  const pending = f.ads.showFullscreen();
+  try {
+    f.events.get('fullscreen').onOpen();
+    f.emitSdk('game_api_pause');
+    await expectBoundedFailure(pending);
+    assert.equal(f.host.getStatus(), 'PAUSED');
+    f.emitSdk('game_api_resume');
+    assert.equal(f.host.getStatus(), 'RUNNING');
+    assert.deepEqual(f.calls, ['fullscreen', 'pause', 'resume']);
+  } finally {
+    f.ads.destroy();
+  }
+});
+
+test('Yandex terminal close and destroy prevent delayed timeout from touching later attempts', async () => {
+  const f = fixture({ timeoutMs: 20 });
+  const first = f.ads.showFullscreen();
+  const closed = f.events.get('fullscreen');
+  closed.onOpen();
+  closed.onClose(true);
+  assert.deepEqual(await first, { shown: true });
+  await new Promise(resolve => setTimeout(resolve, 40));
+  const second = f.ads.showRewarded();
+  const late = f.events.get('rewarded');
+  late.onOpen();
+  f.ads.destroy();
+  await expectCode(second, 'ADS_FAILED');
+  await new Promise(resolve => setTimeout(resolve, 40));
+  late.onClose(true);
+  assert.equal(f.host.getStatus(), 'RUNNING');
+  assert.deepEqual(f.calls, ['fullscreen', 'pause', 'resume', 'rewarded', 'pause', 'resume']);
+});
 
 test('constructor validates inputs and creation never calls SDK', () => {
   assert.throws(() => createYandexAds(), TypeError);

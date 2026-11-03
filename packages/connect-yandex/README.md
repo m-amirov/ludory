@@ -117,7 +117,7 @@ import { createYandexAds, createYandexLifecycle } from '@ludory/connect-yandex';
 // After `connector.initialize()` and with an existing Runtime host:
 const lifecycle = createYandexLifecycle({ sdk, host });
 lifecycle.attach();
-const ads = createYandexAds({ sdk, host, lifecycle });
+const ads = createYandexAds({ sdk, host, lifecycle }); // optional timeoutMs: 120_000 (default)
 
 // Call only from a game-authorized placement/interaction, never from a render loop.
 try {
@@ -140,7 +140,13 @@ try {
 
 SDK methods are called only by explicit `showFullscreen()` / `showRewarded()`.
 The adapter pauses Runtime on `onOpen`, and releases only its own pause reason
-on terminal SDK callbacks or `destroy()`. Manual menu pause must still call
+on terminal SDK callbacks, a bounded callback deadline or `destroy()`.
+The deadline starts at the SDK request, including requests without `onOpen`:
+`timeoutMs` defaults to **120,000 ms** and accepts safe integers from **1**
+through **300,000 ms**. An expired attempt rejects with `ADS_FAILED`, never
+confirms display or awards a reward, and ignores subsequent stale callbacks.
+After failure the game may explicitly retry; no retry occurs automatically.
+Manual menu pause must still call
 `lifecycle.setManualPaused(true)`; an ad's close never overrides the menu flag,
 SDK pause, hidden page or `canResume()` veto. Only one ad attempt can be active
 per adapter. Concurrent or destroyed calls reject with `ADS_FAILED`.
@@ -158,9 +164,8 @@ Each ad attempt is bound to one lifecycle attachment; events from a previous
 The owner must choose compliant ad placements, privacy/consent behavior and
 game-specific cooldowns. Yandex controls fullscreen frequency; a method
 returning (even a fulfilled Promise) does not prove the ad was displayed.
-The adapter deliberately does not invent a timeout or retry if the SDK leaves
-callbacks pending. The game must present a pending state and allow explicit
-teardown rather than silently treating a pending attempt as a no-show.
+The game must present a bounded pending state and handle a timeout visibly;
+an absent SDK callback is **not** treated as a confirmed no-show or success.
 Fake-SDK tests show only `SDK_CONTRACT_PASS`, **not** live ad inventory,
 consent compliance, Yandex approval or Release PASS.
 
