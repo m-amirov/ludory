@@ -316,6 +316,15 @@ node packages/studio/bin/ludory.mjs components update --project /path/to/new-gam
 node packages/studio/bin/ludory.mjs components trust --project /path/to/copied-game --json
 # Copy the exact stateSha256 from the preview; acceptance is not automatic:
 node packages/studio/bin/ludory.mjs components trust --project /path/to/copied-game --accept-state-sha256 <exact-64-hex-from-preview> --apply --json
+
+# For Studio-created narrative games with legacy v1 component ownership:
+# Preview the exact files proposed for release from Studio management.
+node packages/studio/bin/ludory.mjs components adopt --project /path/to/legacy-narrative --json
+# Only after reviewing authorFiles, managed writes, destination version and BOTH
+# stateSha256/proposalSha256 values from the same preview:
+node packages/studio/bin/ludory.mjs components adopt --project /path/to/legacy-narrative --accept-state-sha256 <stateSha256-from-preview> --accept-proposal-sha256 <proposalSha256-from-preview> --apply --json
+# Confirm the transition and inspect the retained backup directory.
+node packages/studio/bin/ludory.mjs components status --project /path/to/legacy-narrative --json
 ```
 
 `components trust` is an explicit owner grant on a new host, **not** proof that
@@ -325,8 +334,42 @@ command, including if the pin disagrees with the game. A crash between game
 publication and host registry publication may require operator recovery; never
 automatically re-anchor a mismatched host pin.
 
+For `narrative-interactive` template **1.2.2+**, Studio owns only the
+launcher/bootstrap (`index.html`, `src/main.js`, `src/entry.js`) and bundled
+runtime (`assets/ludory-narrative.js`). `src/story.js`,
+`narrative-assets.json` and the declared demo media are explicitly
+**author-owned** in `ludory.components.json` schema 2. Author edits do not
+cause component version conflicts, but they must remain local, regular files;
+the proof must match the story SHA-256 and every referenced image. Removing
+unreferenced demo media is supported. New images are author data, not
+Studio-managed components; do not treat an `IN_SYNC` result as narrative,
+copyright or release QA.
+
+An already-created legacy Studio narrative keeps schema 1 until an explicit
+`components adopt` operation. `components status`/`components update` return
+`NEEDS_USER_ACTION` when the trusted current template declares the eligible
+author paths. The required `proposalSha256` binds the previous state digest,
+the exact author path set, current author bytes, destination template/profile
+and every planned managed output hash; catalog or authored-content edits after
+preview require new confirmation.
+Adoption uses the existing backup-backed component transaction
+and may simultaneously upgrade managed files to template 1.2.2; it never
+modifies, deletes or re-hashes authored content into managed ownership. The
+original ownership state remains in `.ludory-components-backup-*` and the
+host pin advances only with successful apply. An incorrect digest, edited
+launcher, unsafe asset, missing provenance or untrusted host blocks adoption.
+New schema-2 Studio creation receipts explicitly record initial author ownership;
+a legacy receipt alone can never substitute for a verified v1→v2 transition.
+If the project was copied to another host **before** adoption, run
+`components trust` first: its preview shows the proposed author candidates
+separately from managed files, and requires a distinct exact SHA confirmation.
+Do not manually edit `ludory.components.json`, `ludory.studio.json` or the
+host trust registry to bypass either approval step.
+
 Use `--catalog /path/to/catalog` for an explicitly installed local catalog.
-Only a strictly newer compatible template can be applied; same-version drift,
+Only a strictly newer compatible template can be applied for normal updates
+(the explicit schema-v1-to-v2 ownership reclassification may be same-version);
+same-version drift,
 downgrades, removed paths, unsupported profile/engine/targets, edited or missing
 managed files, symlinks, hardlinks, new-path collisions and a stale preview
 block the operation. Existing owner files and author-owned assets are not

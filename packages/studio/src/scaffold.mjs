@@ -19,7 +19,7 @@ function filesFor(manifest, profile, template) {
     const bytes = template.assets.get(filename).bytes;
     entries.push([filename, bytes]);
     tracked[filename] = digest(bytes);
-    if (isStudioComponentPath(filename)) managed[filename] = digest(bytes);
+    if (isStudioComponentPath(filename) && !template.authorFiles.includes(filename)) managed[filename] = digest(bytes);
   }
   const receipt = {
     schemaVersion: 1,
@@ -31,12 +31,16 @@ function filesFor(manifest, profile, template) {
       templateSha256: template.sourceSha256,
     },
     files: tracked,
+    ...(template.authorFiles.length ? { componentOwnership: {
+      schemaVersion: 2, authorFiles: template.authorFiles,
+    } } : {}),
   };
   entries.push(['ludory.components.json', serialize({
-    schemaVersion: 1,
+    schemaVersion: template.authorFiles.length ? 2 : 1,
     template: { id: template.id, version: template.version, profile: template.profile,
       origin: template.origin, sourceSha256: template.sourceSha256 },
     files: managed,
+    ...(template.authorFiles.length ? { authorFiles: template.authorFiles } : {}),
   })]);
   entries.push(['ludory.studio.json', serialize(receipt)]);
   return { entries, receipt };
@@ -63,6 +67,11 @@ export function planCreate(projectDir, options) {
   }
   if (chosenTargets.some(x => !profile.targets.includes(x) || !template.targets.includes(x))) {
     return blocked(path.resolve(projectDir), 'Requested targets are not compatible with selected profile/template');
+  }
+  // The ownership reader caps managed + authored component paths together.
+  // Reject before creating a state that later component status cannot parse.
+  if (template.files.filter(isStudioComponentPath).length > 4096) {
+    return blocked(path.resolve(projectDir), 'Template exceeds combined managed/author component file limit');
   }
   // The platform persistence namespace is the game id; leave room for the template's fixed save key.
   if (template.id === 'yandex-runtime' && typeof id === 'string' && id.length > 64) {

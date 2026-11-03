@@ -40,7 +40,7 @@ test('new narrative games opt into portrait metadata without imposing it on othe
     const htmlPath = path.join(project, 'index.html');
     assert.equal(mobileOrientationMeta(fs.readFileSync(htmlPath, 'utf8')), 'portrait', template);
     const receipt = JSON.parse(fs.readFileSync(path.join(project, 'ludory.studio.json')));
-    assert.equal(receipt.template.version, template === 'narrative-interactive' ? '1.2.1' : '1.1.0');
+    assert.equal(receipt.template.version, template === 'narrative-interactive' ? '1.2.2' : '1.1.0');
     // An author can opt out in a newly created game; catalog and the creation receipt remain unchanged.
     const html = fs.readFileSync(htmlPath, 'utf8');
     fs.writeFileSync(htmlPath, html.replace('content="portrait"', 'content="auto"'));
@@ -177,6 +177,16 @@ test('Studio create receipts preserve exact N3 bundle hashes without template im
   applyCreatePlan(plan);
   const receipt = JSON.parse(fs.readFileSync(path.join(dir, 'ludory.studio.json')));
   assert.equal(receipt.template.id, 'narrative-interactive');
+  const state = JSON.parse(fs.readFileSync(path.join(dir, 'ludory.components.json')));
+  assert.equal(state.schemaVersion, 2);
+  assert.deepEqual(state.authorFiles, ['src/story.js', 'narrative-assets.json', 'assets/lighthouse.svg', 'assets/shoreline.svg']);
+  for (const name of state.authorFiles) {
+    assert.equal(Object.hasOwn(state.files, name), false, `authored content must not be a managed component: ${name}`);
+    assert.match(receipt.files[name], /^[a-f0-9]{64}$/);
+  }
+  for (const name of ['src/main.js', 'src/entry.js', 'index.html', 'assets/ludory-narrative.js']) {
+    assert.match(state.files[name], /^[a-f0-9]{64}$/);
+  }
   for (const [file, digest] of Object.entries(receipt.files)) assert.equal(hash(fs.readFileSync(path.join(dir, file))), digest, file);
   const entry = fs.readFileSync(path.join(dir, 'src/main.js'), 'utf8');
   assert.match(entry, /assets\/ludory-narrative\.js/);
