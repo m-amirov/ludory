@@ -132,3 +132,11 @@ this report.
   aligned root/workspace/lockfile versions and exact internal dependencies.
   The [version policy](../API_VERSION_POLICY.md) keeps `0.1.0` unchanged;
   `1.0.0` tagging, contract freeze and release remain owner-gated.
+- [F6e package, license and template-media evidence](2026-11-03-f6e-security-license-assets.md)
+  records 103 deterministic component entries (86 root lockfile, 11 workspaces,
+  six separately vendored packages), verifies pinned Web Helper legal notices
+  and tracks two SVGs with provenance `UNVERIFIED`/rights `BLOCKED`.
+  Online root npm audit observed one moderate `fflate@0.8.2` advisory before
+  patching to `0.8.3`, then zero reported advisories in the repeat scan.
+  The separately vendored runtime and actual distribution/asset rights are
+  not cleared, and the F6 freeze stays blocked.

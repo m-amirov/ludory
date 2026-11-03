@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+    {
+      "path": "packages/studio/catalog/templates/narrative-interactive/assets/lighthouse.svg",
+      "sha256": "850eca9c5f6829f7c4a5c3fe2267d174236bc83de568ed494c16e500a30cf772",
+      "provenanceStatus": "UNVERIFIED",
+      "evidence": null,
+      "rightsStatus": "BLOCKED"
+    },
+    {
+      "path": "packages/studio/catalog/templates/narrative-interactive/assets/shoreline.svg",
+      "sha256": "b95df7d7019e16a4885deff503260c602832b0561f38eb2b190c06f44c85abb5",
+      "provenanceStatus": "UNVERIFIED",
+      "evidence": null,
+      "rightsStatus": "BLOCKED"
+    }
+  ]
+}

@@ -10,8 +10,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "precheck": "npm run check:versions && npm run check:release && npm run check:preview",
+    "precheck": "npm run check:versions && npm run check:security-inventory && npm run check:release && npm run check:preview",
     "check:versions": "node scripts/check-workspace-versions.mjs",
+    "check:security-inventory": "node scripts/f6e-inventory.mjs --check",
     "check:preview": "node --check packages/studio/src/preview-build.mjs && node --check packages/studio/src/narrative-platform-export.mjs && node --check packages/studio/src/narrative-platform-compile.mjs && node --check packages/studio/src/preview-server.mjs && node --check packages/studio/src/preview-cli.mjs && node --check packages/runtime/src/portable-sha256.mjs && node --check packages/studio/src/qa-capture.mjs && node --check packages/studio/src/qa-flow.mjs && node --check packages/studio/src/qa-repair-scope.mjs && node --check packages/studio/src/qa-repair-journal.mjs",
     "check:release": "node --check packages/release/src/archive.mjs && node --check packages/release/src/check.mjs && node --check packages/release/src/vk-check.mjs && node --check packages/release/src/plan.mjs && node --check packages/release/src/moderation-rules.mjs && node --check packages/release/src/moderation-evidence.mjs && node --check packages/release/src/promo-image.mjs && node --check packages/release/src/moderation-simulation.mjs && node --check packages/release/src/index.mjs && node --check packages/studio/src/cli.mjs && node --check packages/release/src/qa-staging.mjs && node --check packages/release/src/qa-evidence.mjs && node --check packages/release/src/qa-review-handoff.mjs && node --check scripts/policy-watch.mjs && node --check scripts/policy-watch-issue.mjs",
     "build:windows-pin": "node-gyp rebuild --directory packages/studio/native",
@@ -32,7 +33,7 @@
   "devDependencies": {
     "@vkontakte/vk-bridge": "3.0.2",
     "esbuild": "0.25.12",
-    "fflate": "0.8.2",
+    "fflate": "0.8.3",
     "node-gyp": "12.4.0",
     "parse5": "8.0.1"
   }
