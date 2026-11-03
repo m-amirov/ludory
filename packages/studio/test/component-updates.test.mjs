@@ -11,6 +11,7 @@ import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { planComponentUpdate, componentStatus, applyComponentPlan,
   planAuthorAdoption, previewComponentTrust, acceptComponentTrust } from '../src/component-updates.mjs';
 import { registerComponentTrust } from '../src/component-trust.mjs';
+import { projectRoot } from '../src/projects.mjs';
 import { loadCatalog } from '../src/catalog.mjs';
 import { openProtectedDirectory, assertWindowsDirectoryPinContract } from '../src/windows-directory-pin.mjs';
 
@@ -125,10 +126,15 @@ function legacyNarrativeFixture(t) {
   const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
   fs.writeFileSync(f.components, oldBytes);
   process.env.LUDORY_STUDIO_TRUST_DIR = path.join(f.root, 'legacy-host-trust');
-  registerComponentTrust(f.project, {
+  // Trust keys use Studio's canonical physical project path. On Windows the
+  // raw temporary directory spelling can differ (case or an NTFS 8.3 alias).
+  const canonical = projectRoot(f.project);
+  registerComponentTrust(canonical, {
     rootIdentity: `${stat.dev}:${stat.ino}`, receiptSha256: hash(receiptBytes),
     manifestSha256: hash(manifestBytes), stateSha256: hash(oldBytes),
   });
+  const trusted = previewComponentTrust(canonical);
+  assert.equal(trusted.status, 'IN_SYNC', JSON.stringify(trusted));
   return f;
 }
 
