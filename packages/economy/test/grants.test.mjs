@@ -66,6 +66,8 @@ test('daily claim checks a real UTC date, disallows older days and repeats are n
   assert.equal(applyEconomyOperation(settings, first.state, { type: 'GRANT_DAILY', date: '2026-11-03' }).receipt.applied, false);
   assert.throws(() => applyEconomyOperation(settings, first.state, { type: 'GRANT_DAILY', date: '2026-11-02' }), { code: 'STALE_DAILY_CLAIM' });
   const second = applyEconomyOperation(settings, first.state, { type: 'GRANT_DAILY', date: '2026-11-04' });
+  assert.throws(() => applyEconomyOperation(settings, second.state, { type: 'GRANT_DAILY', date: '2026-11-03' }),
+    { code: 'STALE_DAILY_CLAIM' }, 'a previously claimed day is still a clock rollback after a newer day');
   assert.equal(second.state.balance, 4);
   assert.throws(() => applyEconomyOperation(settings, first.state, { type: 'GRANT_DAILY', date: '2026-02-30' }));
 });
