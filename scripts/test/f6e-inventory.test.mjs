@@ -74,10 +74,14 @@ function fixture(t) {
 
 test('F6e inventories actual lockfile packages and separately vendored Web Helper dependencies', () => {
   const bom = createF6eInventory(repo);
+  const lock = JSON.parse(fs.readFileSync(path.join(repo, 'package-lock.json'), 'utf8'));
+  const declaredWorkspaces = Object.keys(lock.packages).filter(relative => relative.startsWith('packages/'));
   assert.equal(bom.bomFormat, 'CycloneDX');
   assert.equal(bom.specVersion, '1.5');
   assert.equal(bom.components.filter(x => x.properties?.some(p => p.value === 'npm-lockfile')).length, 86);
-  assert.equal(bom.components.filter(x => x.properties?.some(p => p.value === 'workspace')).length, 11);
+  assert.equal(bom.components.filter(x => x.properties?.some(p => p.value === 'workspace')).length, declaredWorkspaces.length);
+  assert.ok(bom.components.some(x => x.name === '@ludory/economy' &&
+    x.properties?.some(p => p.value === 'workspace')));
   assert.equal(bom.components.filter(x => x.properties?.some(p => p.value === 'vendored-web-helper')).length, 6);
   const vendor = bom.components.find(x => x.name === 'playwright-core' &&
     x.properties?.some(p => p.value === 'vendored-web-helper'));
