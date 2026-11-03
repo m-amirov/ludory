@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { installVendoredDevHelper, readVendoredHelperManifest, verifyHelperArtifact } from '../src/helper-supply.mjs';
 import { discoverDevHost } from '../src/dev-host.mjs';
 
@@ -31,6 +32,14 @@ function profileFixture() {
   return { root, home, stableHome, runtime, descriptorPath, launcher };
 }
 
+const vendoredNotices = [
+  'LICENSE',
+  'THIRD_PARTY_NOTICES.txt',
+  'LICENSES/Bun-1.4.0.md',
+  'LICENSES/libnotify-0.8.7-LGPL-2.1.md',
+  'LICENSES/tiktoken-MIT.txt',
+];
+
 test('vendored manifest pins the patched v2 artifact and source provenance', () => {
   const manifest = readVendoredHelperManifest();
   assert.equal(manifest.artifact.sha256, 'c126dd6b268cb9a9e6923215a1082de70b6b607ad9f31ab75415278dd683b4a7');
@@ -43,10 +52,26 @@ test('vendored manifest pins the patched v2 artifact and source provenance', () 
   assert.ok(manifest.runtime.tree.files > 0);
   assert.ok(manifest.runtime.tree.bytes > 0);
   assert.equal(manifest.runtime.tree.sha256, '3da4d490af2996bb7a04625fe8fa3f76b1fbb0dd72e93fc4533b6e05ee157d20');
+  assert.deepEqual(manifest.licenses.files.map(file => file.path), vendoredNotices
+    .toSorted((a, b) => Buffer.from(a).compare(Buffer.from(b))));
   assert.equal(verifyHelperArtifact({
     scriptFile: path.resolve('packages/ai/vendor/codex-chatgpt-web/browser-helper.cjs'),
     manifestFile: path.resolve('packages/ai/vendor/codex-chatgpt-web/manifest.json'),
   }).sha256, manifest.artifact.sha256);
+});
+
+test('Git checkout filters retain pinned notice bytes with core.autocrlf=true', t => {
+  if (!fs.existsSync(path.resolve('.git'))) {
+    t.skip('Git checkout metadata is unavailable in this distribution');
+    return;
+  }
+  for (const notice of readVendoredHelperManifest().licenses.files) {
+    const repoPath = `packages/ai/vendor/codex-chatgpt-web/${notice.path}`;
+    const bytes = execFileSync('git', ['-c', 'core.autocrlf=true', 'cat-file', '--filters', `HEAD:${repoPath}`],
+      { maxBuffer: 1024 * 1024 });
+    assert.equal(bytes.length, notice.bytes, `${repoPath} checkout size`);
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), notice.sha256, repoPath);
+  }
 });
 
 test('runtime tree digest is independent of locale comparison order', t => {
@@ -111,6 +136,26 @@ test('v2 rejects a helper and local manifest changed together', t => {
     /DEV_HELPER_ARTIFACT_UNTRUSTED/);
 });
 
+test('vendor notice inventory rejects path traversal and duplicate entries', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-helper-notice-manifest-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const script = path.join(root, 'browser-helper.cjs');
+  const manifestFile = path.join(root, 'manifest.json');
+  fs.copyFileSync(path.resolve('packages/ai/vendor/codex-chatgpt-web/browser-helper.cjs'), script);
+  const manifest = structuredClone(readVendoredHelperManifest());
+  for (const badPath of ['LICENSES/../../outside', 'LICENSES/../escape', 'LICENSES//bad']) {
+    const mutated = structuredClone(manifest);
+    mutated.licenses.files[1].path = badPath;
+    fs.writeFileSync(manifestFile, JSON.stringify(mutated));
+    assert.throws(() => verifyHelperArtifact({ scriptFile: script, manifestFile }),
+      /DEV_HELPER_MANIFEST_INVALID/, badPath);
+  }
+  manifest.licenses.files[1].path = 'LICENSE';
+  fs.writeFileSync(manifestFile, JSON.stringify(manifest));
+  assert.throws(() => verifyHelperArtifact({ scriptFile: script, manifestFile }),
+    /DEV_HELPER_MANIFEST_INVALID/);
+});
+
 test('installer writes only the isolated DEV profile and fails closed after replacement', async t => {
   const fixture = profileFixture();
   const previousLauncher = process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
@@ -127,11 +172,18 @@ test('installer writes only the isolated DEV profile and fails closed after repl
     const relative = path.relative(canonicalHome, file);
     return relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
   }));
+  for (const notice of vendoredNotices) {
+    assert.ok(preview.writes.includes(path.join(fixture.runtime, notice)), `preview omits ${notice}`);
+  }
   assert.equal(fs.existsSync(path.join(fixture.stableHome, 'browser-helper.cjs')), false);
 
   const applied = installVendoredDevHelper({ devHome: fixture.home, stableHome: fixture.stableHome, apply: true });
   assert.equal(applied.status, 'APPLIED');
   assert.equal(applied.installed.sha256, preview.artifact.sha256);
+  for (const notice of vendoredNotices) {
+    assert.deepEqual(fs.readFileSync(path.join(fixture.runtime, notice)),
+      fs.readFileSync(path.resolve('packages/ai/vendor/codex-chatgpt-web', notice)));
+  }
   const installedExecutable = JSON.parse(fs.readFileSync(fixture.descriptorPath, 'utf8')).helper.executable;
   assert.equal(fs.realpathSync.native(installedExecutable), fs.realpathSync.native(fixture.launcher));
   const installedConfig = JSON.parse(fs.readFileSync(path.join(fixture.home, 'config.json'), 'utf8'));
@@ -146,6 +198,105 @@ test('installer writes only the isolated DEV profile and fails closed after repl
   fs.appendFileSync(path.join(fixture.runtime, 'browser-helper.cjs'), 'replacement');
   const blocked = discoverDevHost({ devHome: fixture.home, stableHome: fixture.stableHome });
   assert.equal(blocked.reasonCode, 'DEV_HELPER_HASH_MISMATCH');
+});
+
+test('installed helper refuses a missing or modified third-party notice', t => {
+  const fixture = profileFixture();
+  const previousLauncher = process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+  process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = fixture.launcher;
+  t.after(() => {
+    if (previousLauncher === undefined) delete process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+    else process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = previousLauncher;
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  });
+  installVendoredDevHelper({ devHome: fixture.home, stableHome: fixture.stableHome, apply: true });
+  const noticeFile = path.join(fixture.runtime, 'THIRD_PARTY_NOTICES.txt');
+  fs.appendFileSync(noticeFile, '\nunauthorized notice change\n');
+  assert.equal(discoverDevHost({ devHome: fixture.home, stableHome: fixture.stableHome }).reasonCode,
+    'DEV_HELPER_NOTICES_INTEGRITY');
+  fs.rmSync(noticeFile);
+  assert.equal(discoverDevHost({ devHome: fixture.home, stableHome: fixture.stableHome }).reasonCode,
+    'DEV_HELPER_NOTICES_INTEGRITY');
+});
+
+test('installer does not overwrite a pre-existing conflicting notice', t => {
+  const fixture = profileFixture();
+  const previousLauncher = process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+  process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = fixture.launcher;
+  t.after(() => {
+    if (previousLauncher === undefined) delete process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+    else process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = previousLauncher;
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  });
+  const existing = path.join(fixture.runtime, 'LICENSE');
+  fs.writeFileSync(existing, 'owner-owned license');
+  assert.throws(() => installVendoredDevHelper({ devHome: fixture.home, stableHome: fixture.stableHome }),
+    /DEV_HELPER_NOTICES_INTEGRITY/);
+  assert.throws(() => installVendoredDevHelper({ devHome: fixture.home, stableHome: fixture.stableHome, apply: true }),
+    /DEV_HELPER_NOTICES_INTEGRITY/);
+  assert.equal(fs.readFileSync(existing, 'utf8'), 'owner-owned license');
+  assert.equal(fs.existsSync(path.join(fixture.runtime, 'browser-helper.cjs')), false);
+});
+
+test('installer refuses a symlinked notice directory before writing', t => {
+  const fixture = profileFixture();
+  const external = path.join(fixture.root, 'external-licenses');
+  fs.mkdirSync(external);
+  try { fs.symlinkSync(external, path.join(fixture.runtime, 'LICENSES'), 'dir'); }
+  catch (error) {
+    if (error.code === 'EPERM' && process.platform === 'win32') {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+      t.skip('This Windows runner does not allow directory symlinks');
+      return;
+    }
+    throw error;
+  }
+  const previousLauncher = process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+  process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = fixture.launcher;
+  t.after(() => {
+    if (previousLauncher === undefined) delete process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+    else process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = previousLauncher;
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  });
+  assert.throws(() => installVendoredDevHelper({ devHome: fixture.home, stableHome: fixture.stableHome }),
+    /DEV_HELPER_NOTICES_INTEGRITY/);
+  assert.deepEqual(fs.readdirSync(external), []);
+});
+
+test('installer resumes a complete-notice subset without replacing existing correct bytes', t => {
+  const fixture = profileFixture();
+  const previousLauncher = process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+  process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = fixture.launcher;
+  t.after(() => {
+    if (previousLauncher === undefined) delete process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+    else process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = previousLauncher;
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  });
+  const license = path.join(fixture.runtime, 'LICENSE');
+  fs.copyFileSync(path.resolve('packages/ai/vendor/codex-chatgpt-web/LICENSE'), license);
+  const before = fs.statSync(license).mtimeMs;
+  assert.equal(installVendoredDevHelper({ devHome: fixture.home, stableHome: fixture.stableHome,
+    apply: true }).status, 'APPLIED');
+  assert.equal(fs.statSync(license).mtimeMs, before, 'matching file must not be replaced');
+  for (const notice of vendoredNotices) assert.ok(fs.existsSync(path.join(fixture.runtime, notice)));
+  assert.equal(installVendoredDevHelper({ devHome: fixture.home, stableHome: fixture.stableHome,
+    apply: true }).status, 'APPLIED');
+  assert.equal(fs.statSync(license).mtimeMs, before);
+});
+
+test('installer rejects unlisted files in the pinned notice directory', t => {
+  const fixture = profileFixture();
+  const previousLauncher = process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+  process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = fixture.launcher;
+  t.after(() => {
+    if (previousLauncher === undefined) delete process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE;
+    else process.env.CODEX_WEB_GPT_LAUNCHER_EXECUTABLE = previousLauncher;
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  });
+  fs.mkdirSync(path.join(fixture.runtime, 'LICENSES'));
+  fs.writeFileSync(path.join(fixture.runtime, 'LICENSES', 'unexpected.txt'), 'other notice');
+  assert.throws(() => installVendoredDevHelper({ devHome: fixture.home, stableHome: fixture.stableHome }),
+    /DEV_HELPER_NOTICES_INTEGRITY/);
 });
 
 test('installed helper blocks when an executable runtime file changes', t => {
