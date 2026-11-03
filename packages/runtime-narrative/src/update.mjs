@@ -25,8 +25,17 @@ function parseAction(value) {
  * Runtime update adapter. Core state.narrative is the only persisted game state.
  * Back snapshots are intentionally session-local and disappear on reload.
  */
-export function createNarrativeRuntimeUpdate({ graph, catalog, historyLimit = 64 } = {}) {
+export function createNarrativeRuntimeUpdate({ graph, catalog, historyLimit = 64, authorizeChoice } = {}) {
   if (!graph || !catalog) throw new TypeError('graph and catalog required');
+  if (authorizeChoice !== undefined && typeof authorizeChoice !== 'function') {
+    throw new TypeError('authorizeChoice must be a function');
+  }
+  if (authorizeChoice?.assertGraphCompatibility !== undefined) {
+    if (typeof authorizeChoice.assertGraphCompatibility !== 'function') {
+      throw new TypeError('authorizeChoice graph compatibility guard must be a function');
+    }
+    authorizeChoice.assertGraphCompatibility(graph);
+  }
   if (!Number.isSafeInteger(historyLimit) || historyLimit < 0 || historyLimit > 256) {
     throw new TypeError('historyLimit must be between 0 and 256');
   }
@@ -54,7 +63,15 @@ export function createNarrativeRuntimeUpdate({ graph, catalog, historyLimit = 64
         current = history.pop();
       } else {
         let next;
-        try { next = advanceNarrative(graph, catalog, current, action); }
+        if (action.type === 'choose' && authorizeChoice) {
+          let allowed = false;
+          try { allowed = authorizeChoice({ beatId: action.beatId, optionId: action.optionId }) === true; }
+          catch { /* A failed entitlement lookup is a denied choice, never a Runtime crash. */ }
+          if (!allowed) continue;
+        }
+        try {
+          next = advanceNarrative(graph, catalog, current, action);
+        }
         catch (error) {
           if (error instanceof TypeError) continue; // stale, unavailable or forged UI command
           throw error;

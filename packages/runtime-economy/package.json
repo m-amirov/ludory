@@ -1,0 +1,11 @@
+{
+  "name": "@ludory/runtime-economy",
+  "version": "0.1.0",
+  "description": "Optional premium narrative choice coordination and validation",
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "exports": { ".": "./src/index.mjs" },
+  "files": ["src", "README.md"],
+  "sideEffects": false,
+  "license": "UNLICENSED"
+}

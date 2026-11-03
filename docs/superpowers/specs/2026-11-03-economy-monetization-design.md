@@ -1,7 +1,7 @@
 # Economy & Monetization — technical design
 
 Date: 2026-11-03  
-Status: **PROPOSED — requires owner's design approval before implementation**  
+Status: **APPROVED by owner 2026-11-03 — implementation staged E1–E5 (E1/E2 locally verified; E3–E5 pending)**
 Repository: `m-amirov/ludory`  
 Selected approach: **A — no owner-operated backend**, approved by owner on 2026-11-03.
 

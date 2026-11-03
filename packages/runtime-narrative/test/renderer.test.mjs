@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { advanceNarrative } from '@ludory/narrative';
+import { applyEconomyOperation, createEconomyState } from '@ludory/economy';
+import { createEconomyRuntime, definePremiumManifest } from '@ludory/runtime-economy';
 import { createNarrativeRenderer } from '../src/index.mjs';
 import { fixture } from './fixture.mjs';
+import { fixture as premiumFixture } from '../../runtime-economy/test/fixture.mjs';
 
 class FakeElement {
   constructor(tagName, document) {
@@ -185,4 +188,192 @@ test('message Cancel is local-only and authored labels make intent, tone and jou
   find(root, node => node.dataset.ui === 'journal').click();
   assert.ok(find(root, node => node.textContent === 'Вечер в порту'));
   assert.ok(find(root, node => node.textContent === 'Мы стали ближе'));
+});
+
+async function premiumEnvironment({ denySave = false, pendingSave = false, startingCrystals = 20 } = {}) {
+  const f = premiumFixture();
+  const manifest = definePremiumManifest(f.rawManifest, { graph: f.graph, economyConfig: f.config });
+  let wallet = createEconomyState(f.config);
+  if (startingCrystals > 0) wallet = applyEconomyOperation(f.config, wallet, { type: 'GRANT_STARTER' }).state;
+  let finishSave;
+  let saveCount = 0;
+  let allowSave = !denySave;
+  const runtime = createEconomyRuntime({ config: f.config, manifest, graph: f.graph, storage: {
+    async load() { return structuredClone(wallet); },
+    async save(next) {
+      saveCount++;
+      if (!allowSave) throw new Error('network');
+      if (pendingSave) await new Promise(resolve => { finishSave = resolve; });
+      wallet = structuredClone(next);
+      return true;
+    },
+  } });
+  await runtime.initialize();
+  let n = f.initialNarrative;
+  n = advanceNarrative(f.graph, f.catalog, n, { type: 'next', beatId: 'intro' }).state;
+  n = advanceNarrative(f.graph, f.catalog, n, { type: 'interact', beatId: 'photo', optionId: 'snap' }).state;
+  return { ...f, runtime, narrative: n, finishSave: () => finishSave?.(), recover: () => { allowSave = true; }, saves: () => saveCount,
+    wallet: () => wallet };
+}
+
+test('premium renderer labels price, requires explicit confirmation, and never auto-chooses after save', async () => {
+  const f = await premiumEnvironment();
+  const { root } = screen();
+  const events = [];
+  const renderer = createNarrativeRenderer({ graph: f.graph, catalog: f.catalog, premiumChoices: f.runtime });
+  await renderer.mount({ root, viewport: { width: 340, height: 700, orientation: 'portrait' },
+    snapshot: snapshot({ narrative: f.narrative }), dispatchInput: event => events.push(event.action) });
+  assert.ok(find(root, node => node.textContent.includes('Особый вечер') && node.textContent.includes('12') && node.tagName === 'BUTTON'));
+  assert.equal(find(root, node => node.dataset.action === 'narrative:choose:fork:intimate'), null);
+  find(root, node => node.dataset.ui === 'premium-unlock').click();
+  assert.equal(f.saves(), 0);
+  assert.ok(find(root, node => node.dataset.ui === 'premium-confirm'));
+  assert.deepEqual(events, []);
+  find(root, node => node.dataset.ui === 'premium-confirm').click();
+  await new Promise(resolve => setImmediate(resolve));
+  renderer.render(snapshot({ narrative: f.narrative }));
+  assert.equal(f.wallet().balance, 8);
+  assert.deepEqual(events, [], 'purchase of entitlement does not advance story');
+  const unlocked = find(root, node => node.dataset.action === 'narrative:choose:fork:intimate');
+  assert.ok(unlocked);
+  unlocked.click();
+  assert.deepEqual(events, ['narrative:choose:fork:intimate']);
+  await renderer.unmount();
+});
+
+test('failed premium save shows error, keeps choice locked and emits no forged narrative action', async () => {
+  const f = await premiumEnvironment({ denySave: true });
+  const { root } = screen();
+  const events = [];
+  const renderer = createNarrativeRenderer({ graph: f.graph, catalog: f.catalog, premiumChoices: f.runtime });
+  await renderer.mount({ root, viewport: { width: 340, height: 700, orientation: 'portrait' },
+    snapshot: snapshot({ narrative: f.narrative }), dispatchInput: event => events.push(event.action) });
+  find(root, node => node.dataset.ui === 'premium-unlock').click();
+  find(root, node => node.dataset.ui === 'premium-confirm').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(find(root, node => node.dataset.ui === 'premium-error'));
+  assert.equal(find(root, node => node.dataset.action === 'narrative:choose:fork:intimate'), null);
+  assert.equal(f.wallet().balance, 20);
+  assert.deepEqual(events, []);
+  await renderer.unmount();
+});
+
+test('premium screen recovers rejected save through an explicit user retry, then permits a new confirmed spend', async () => {
+  const f = await premiumEnvironment({ denySave: true });
+  const { root } = screen();
+  const events = [];
+  const renderer = createNarrativeRenderer({ graph: f.graph, catalog: f.catalog, premiumChoices: f.runtime });
+  await renderer.mount({ root, viewport: { width: 340, height: 700 },
+    snapshot: snapshot({ narrative: f.narrative }), dispatchInput: event => events.push(event.action) });
+  find(root, node => node.dataset.ui === 'premium-unlock').click();
+  find(root, node => node.dataset.ui === 'premium-confirm').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.runtime.getChoiceAccess('fork', 'intimate').status, 'unavailable');
+  assert.equal(find(root, node => node.dataset.ui === 'premium-unlock'), null);
+  const retry = find(root, node => node.dataset.ui === 'premium-retry');
+  assert.ok(retry, 'unavailable premium access needs a visible recovery action');
+  f.recover();
+  retry.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.runtime.getChoiceAccess('fork', 'intimate').status, 'locked');
+  find(root, node => node.dataset.ui === 'premium-unlock').click();
+  find(root, node => node.dataset.ui === 'premium-confirm').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.wallet().balance, 8);
+  assert.ok(find(root, node => node.dataset.action === 'narrative:choose:fork:intimate'));
+  assert.deepEqual(events, []);
+  await renderer.unmount();
+});
+
+test('recovering an ambiguous committed premium save does not debit twice', async () => {
+  const f = premiumFixture();
+  const manifest = definePremiumManifest(f.rawManifest, { graph: f.graph, economyConfig: f.config });
+  let wallet = applyEconomyOperation(f.config, createEconomyState(f.config), { type: 'GRANT_STARTER' }).state;
+  let saves = 0;
+  const runtime = createEconomyRuntime({ config: f.config, graph: f.graph, manifest, storage: {
+    async load() { return structuredClone(wallet); },
+    async save(next) { saves++; wallet = structuredClone(next); if (saves === 1) throw new Error('lost acknowledgement'); return true; },
+  } });
+  await runtime.initialize();
+  let narrative = advanceNarrative(f.graph, f.catalog, f.initialNarrative, { type: 'next' }).state;
+  narrative = advanceNarrative(f.graph, f.catalog, narrative, { type: 'interact', optionId: 'snap' }).state;
+  const { root } = screen();
+  const renderer = createNarrativeRenderer({ graph: f.graph, catalog: f.catalog, premiumChoices: runtime });
+  await renderer.mount({ root, viewport: { width: 340, height: 700 },
+    snapshot: snapshot({ narrative }), dispatchInput() {} });
+  find(root, node => node.dataset.ui === 'premium-unlock').click();
+  find(root, node => node.dataset.ui === 'premium-confirm').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(find(root, node => node.dataset.ui === 'premium-retry'));
+  find(root, node => node.dataset.ui === 'premium-retry').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(runtime.getChoiceAccess('fork', 'intimate').status, 'unlocked');
+  assert.equal(wallet.balance, 8);
+  assert.equal(saves, 1, 'reconciliation must not charge or save again');
+  assert.ok(find(root, node => node.dataset.action === 'narrative:choose:fork:intimate'));
+  await renderer.unmount();
+});
+
+test('pending save never dispatches choice and stale premium buttons do not act after unmount', async () => {
+  const f = await premiumEnvironment({ pendingSave: true });
+  const { root } = screen();
+  const events = [];
+  const renderer = createNarrativeRenderer({ graph: f.graph, catalog: f.catalog, premiumChoices: f.runtime });
+  await renderer.mount({ root, viewport: { width: 340, height: 700, orientation: 'portrait' },
+    snapshot: snapshot({ narrative: f.narrative }), dispatchInput: event => events.push(event.action) });
+  const stale = find(root, node => node.dataset.ui === 'premium-unlock');
+  stale.click();
+  find(root, node => node.dataset.ui === 'premium-confirm').click();
+  assert.ok(find(root, node => node.dataset.ui === 'premium-pending'));
+  assert.deepEqual(events, []);
+  await renderer.unmount();
+  stale.click();
+  await new Promise(resolve => setImmediate(resolve));
+  f.finishSave();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(events, []);
+});
+
+test('insufficient currency is reported accurately without unlocking or dispatching a choice', async () => {
+  const f = await premiumEnvironment({ startingCrystals: 0 });
+  const { root } = screen();
+  const events = [];
+  const renderer = createNarrativeRenderer({ graph: f.graph, catalog: f.catalog, premiumChoices: f.runtime });
+  await renderer.mount({ root, viewport: { width: 340, height: 700 },
+    snapshot: snapshot({ narrative: f.narrative }), dispatchInput: event => events.push(event.action) });
+  find(root, node => node.dataset.ui === 'premium-unlock').click();
+  find(root, node => node.dataset.ui === 'premium-confirm').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.ok(find(root, node => node.dataset.ui === 'premium-insufficient'));
+  assert.equal(find(root, node => node.dataset.action === 'narrative:choose:fork:intimate'), null);
+  assert.equal(f.saves(), 0);
+  assert.deepEqual(events, []);
+  await renderer.unmount();
+});
+
+test('detached confirmation from another narrative beat cannot later spend currency', async () => {
+  const f = await premiumEnvironment();
+  const { root } = screen();
+  const renderer = createNarrativeRenderer({ graph: f.graph, catalog: f.catalog, premiumChoices: f.runtime });
+  await renderer.mount({ root, viewport: { width: 340, height: 700 },
+    snapshot: snapshot({ narrative: f.narrative }), dispatchInput() {} });
+  find(root, node => node.dataset.ui === 'premium-unlock').click();
+  const staleConfirm = find(root, node => node.dataset.ui === 'premium-confirm');
+  const moved = advanceNarrative(f.graph, f.catalog, f.narrative,
+    { type: 'choose', beatId: 'fork', optionId: 'connect' }).state;
+  renderer.render(snapshot({ narrative: moved }));
+  staleConfirm.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.saves(), 0);
+  assert.equal(f.wallet().balance, 20);
+  await renderer.unmount();
+});
+
+test('premium renderer rejects a saved wallet attached to a different narrative graph', async () => {
+  const f = await premiumEnvironment();
+  const replaced = structuredClone(f.graph);
+  replaced.scenes[0].beats.find(beat => beat.id === 'fork')
+    .choices.find(choice => choice.id === 'intimate').id = 'private_now';
+  assert.throws(() => createNarrativeRenderer({ graph: replaced, catalog: f.catalog,
+    premiumChoices: f.runtime }), /graph|manifest/i);
 });

@@ -9,14 +9,24 @@ const UI = {
     intent: 'Смысл сообщения', tone: 'Тон', attachment: 'Вложение', none: 'Без вложения',
     recipient: 'Кому', preview: 'Предпросмотр', send: 'Отправить', cancel: 'Отмена', compose: 'Составить сообщение',
     facts: 'Отношения', reply: 'Ответ', ending: 'Конец истории',
-    unavailable: 'Изображение недоступно', choice: 'Выбор', photo: 'Фото', keepsake: 'Предмет' },
+    unavailable: 'Изображение недоступно', choice: 'Выбор', photo: 'Фото', keepsake: 'Предмет',
+    premiumUnlocked: 'Открыто', premiumConfirm: 'Подтвердить открытие', premiumCancel: 'Отмена',
+    premiumPending: 'Сохраняем открытие…', premiumError: 'Не удалось сохранить открытие. Восстановите сохранение и попробуйте снова.',
+    premiumInsufficient: 'Недостаточно игровой валюты для этого выбора.',
+    premiumUnavailable: 'Недоступно до восстановления сохранения', premiumRetry: 'Восстановить сохранение',
+    premiumRecovering: 'Проверяем сохранение…' },
   en: { next: 'Continue', back: 'Back', journal: 'Journal', hide: 'Hide journal', empty: 'Nothing collected yet',
     story: 'Narrative',
     memories: 'Memories', photos: 'Photo album', keepsakes: 'Keepsakes', messages: 'Messages',
     intent: 'Message intent', tone: 'Tone', attachment: 'Attachment', none: 'No attachment',
     recipient: 'To', preview: 'Preview', send: 'Send', cancel: 'Cancel', compose: 'Compose message',
     facts: 'Relationships', reply: 'Reply', ending: 'The end',
-    unavailable: 'Image unavailable', choice: 'Choice', photo: 'Photo', keepsake: 'Keepsake' },
+    unavailable: 'Image unavailable', choice: 'Choice', photo: 'Photo', keepsake: 'Keepsake',
+    premiumUnlocked: 'Unlocked', premiumConfirm: 'Confirm unlock', premiumCancel: 'Cancel',
+    premiumPending: 'Saving unlock…', premiumError: 'Could not save unlock. Please retry.',
+    premiumInsufficient: 'Not enough currency for this choice.',
+    premiumUnavailable: 'Unavailable until save recovery', premiumRetry: 'Restore saved wallet',
+    premiumRecovering: 'Checking saved wallet…' },
 };
 
 function localAsset(src) {
@@ -32,12 +42,17 @@ function localAsset(src) {
 /** Browser-only, DOM-based opt-in RuntimeRenderer. No SDK, server or camera. */
 export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets = {},
   labels = {}, relationFacts = [], preferredMobileOrientation = 'auto',
-  now = () => globalThis.performance.now(), canBack = () => false } = {}) {
+  now = () => globalThis.performance.now(), canBack = () => false, premiumChoices } = {}) {
   if (!graph || !catalog) throw new TypeError('graph and catalog required');
   if (!UI[locale]) throw new TypeError('unsupported locale');
   if (!['auto', 'portrait'].includes(preferredMobileOrientation)) throw new TypeError('unsupported mobile orientation preference');
   if (typeof now !== 'function') throw new TypeError('now must be a clock function');
   if (typeof canBack !== 'function') throw new TypeError('canBack must be a function');
+  if (premiumChoices !== undefined && (!premiumChoices ||
+      ['getChoiceAccess','getRevision','getView','unlockChoice','initialize'].some(key => typeof premiumChoices[key] !== 'function'))) {
+    throw new TypeError('premiumChoices must provide a read-only access and unlock port');
+  }
+  if (premiumChoices?.assertGraphCompatibility) premiumChoices.assertGraphCompatibility(graph);
   let root = null;
   let style = null;
   let surface = null;
@@ -50,6 +65,10 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
   let composerOpen = true;
   let mountGeneration = 0;
   let focusHint = null;
+  let confirmUnlock = null;
+  let pendingUnlock = null;
+  let pendingRecovery = false;
+  let unlockError = null;
 
   function humanLabel(group, value) {
     const authored = labels?.[group]?.[value];
@@ -85,6 +104,7 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
       if (ownGeneration === mountGeneration && surface) extras.onClick(event);
     });
     if (extras.ui) b.dataset.ui = extras.ui;
+    if (extras.disabled) b.setAttribute('disabled', '');
     if (extras.intent) b.dataset.intent = extras.intent;
     if (extras.tone) b.dataset.tone = extras.tone;
     if (Object.hasOwn(extras, 'attachment')) b.dataset.attachment = extras.attachment ?? '';
@@ -96,12 +116,105 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
 
   function actions(panel, items, type, beatId) {
     const wrap = element('div', undefined, 'ludory-narrative__actions');
+    let needsRecovery = false;
     for (const item of items) {
       const action = narrativeAction(type, beatId, item.id);
-      const b = button(item.label, action, wrap);
+      const access = premiumChoices && type === 'choose' ? premiumChoices.getChoiceAccess(beatId, item.id) : null;
+      let b;
+      if (access?.premium) {
+        const icon = premiumChoices.getView().currency.icon;
+        const key = `${beatId}:${item.id}`;
+        if (access.status === 'unavailable') needsRecovery = true;
+        if (access.status === 'unlocked') {
+          b = button(`${item.label} · ${icon} ${UI[locale].premiumUnlocked}`, action, wrap);
+        } else {
+          const available = access.status === 'locked' && pendingUnlock === null && !pendingRecovery;
+          b = button(`${item.label} · ${icon} ${access.cost}`, null, wrap, {
+            ui: available ? 'premium-unlock' : 'premium-locked', disabled: !available,
+            onClick: available ? () => {
+              if (selectedBeatId !== beatId) return;
+              confirmUnlock = key; unlockError = null;
+              focusHint = { field: 'ui', value: 'premium-confirm' };
+              draw(true);
+            } : undefined,
+          });
+        }
+      } else b = button(item.label, action, wrap);
       if (item.assetId) addAsset(wrap, item.assetId, b);
     }
     panel.appendChild(wrap);
+    if (type !== 'choose' || !premiumChoices) return;
+    if (needsRecovery && !pendingUnlock) {
+      const recovery = element('div', undefined, 'ludory-narrative__premium-recovery');
+      recovery.appendChild(element('p', pendingRecovery ? UI[locale].premiumRecovering : UI[locale].premiumUnavailable));
+      button(UI[locale].premiumRetry, null, recovery, {
+        ui: 'premium-retry', disabled: pendingRecovery,
+        onClick: async () => {
+          if (pendingRecovery || pendingUnlock || !surface || selectedBeatId !== beatId) return;
+          const generation = mountGeneration;
+          pendingRecovery = true;
+          unlockError = null;
+          draw(true);
+          try { await premiumChoices.initialize(); }
+          catch {
+            if (mountGeneration === generation && surface) unlockError = 'save';
+          }
+          finally {
+            if (mountGeneration === generation && surface) {
+              pendingRecovery = false;
+              draw(true);
+            }
+          }
+        },
+      });
+      panel.appendChild(recovery);
+    }
+    if (pendingUnlock) {
+      const p = element('p', UI[locale].premiumPending, 'ludory-narrative__premium-status');
+      p.dataset.ui = 'premium-pending';
+      p.setAttribute('aria-live', 'polite');
+      panel.appendChild(p);
+    }
+    if (unlockError) {
+      const insufficient = unlockError === 'insufficient';
+      const p = element('p', insufficient ? UI[locale].premiumInsufficient : UI[locale].premiumError,
+        'ludory-narrative__premium-error');
+      p.dataset.ui = insufficient ? 'premium-insufficient' : 'premium-error';
+      p.setAttribute('role', 'alert');
+      panel.appendChild(p);
+    }
+    if (!confirmUnlock || pendingUnlock || pendingRecovery) return;
+    const [selectedBeat, selectedChoice] = confirmUnlock.split(':');
+    if (selectedBeat !== beatId || !items.some(item => item.id === selectedChoice)) return;
+    const access = premiumChoices.getChoiceAccess(selectedBeat, selectedChoice);
+    if (access.status !== 'locked') return;
+    const confirm = element('div', undefined, 'ludory-narrative__premium-confirm');
+    const currency = premiumChoices.getView().currency.icon;
+    confirm.appendChild(element('p', `${UI[locale].premiumConfirm}: ${access.cost} ${currency}?`));
+    const buttons = element('div', undefined, 'ludory-narrative__actions');
+    button(UI[locale].premiumConfirm, null, buttons, { ui: 'premium-confirm', onClick: async () => {
+      if (pendingUnlock || !surface || !premiumChoices || selectedBeatId !== selectedBeat ||
+          confirmUnlock !== `${selectedBeat}:${selectedChoice}`) return;
+      const generation = mountGeneration;
+      pendingUnlock = confirmUnlock;
+      confirmUnlock = null;
+      unlockError = null;
+      draw(true);
+      try { await premiumChoices.unlockChoice(selectedBeat, selectedChoice); }
+      catch (error) {
+        if (mountGeneration === generation && surface) {
+          unlockError = error?.code === 'INSUFFICIENT_FUNDS' ? 'insufficient' : 'save';
+        }
+      }
+      finally {
+        if (mountGeneration === generation && surface) { pendingUnlock = null; draw(true); }
+      }
+    } });
+    button(UI[locale].premiumCancel, null, buttons, { ui: 'premium-cancel', onClick: () => {
+      confirmUnlock = null; draw(true);
+    } });
+    confirm.appendChild(buttons);
+    panel.appendChild(confirm);
   }
 
   function addAsset(container, assetId, buttonNode) {
@@ -219,7 +332,8 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
   function draw(force = false) {
     if (!surface || !currentSnapshot) return;
     const state = currentSnapshot.state.narrative;
-    const key = `${locale}:${JSON.stringify(state)}:${journalOpen}:${selectedVariantId}:${composerOpen}`;
+    const key = `${locale}:${JSON.stringify(state)}:${journalOpen}:${selectedVariantId}:${composerOpen}:` +
+      `${premiumChoices?.getRevision() ?? ''}:${confirmUnlock}:${pendingUnlock}:${pendingRecovery}:${unlockError}`;
     if (!force && lastRenderKey === key) return; // preserve focus and click targets across high-FPS frames
     const view = resolveNarrativeView(graph, catalog, state, locale);
     const beatChanged = selectedBeatId !== view.beatId;
@@ -227,6 +341,8 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
       selectedBeatId = view.beatId;
       selectedVariantId = null;
       composerOpen = true;
+      confirmUnlock = null;
+      unlockError = null;
     }
     const panel = element('article', undefined, 'ludory-narrative__panel');
     panel.setAttribute('aria-label', `${view.sceneId}: ${view.beatId}`);
@@ -277,7 +393,8 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
       (candidate ?? panel).focus?.({ preventScroll: true });
     }
     focusHint = null;
-    lastRenderKey = `${locale}:${JSON.stringify(state)}:${journalOpen}:${selectedVariantId}:${composerOpen}`;
+    lastRenderKey = `${locale}:${JSON.stringify(state)}:${journalOpen}:${selectedVariantId}:${composerOpen}:` +
+      `${premiumChoices?.getRevision() ?? ''}:${confirmUnlock}:${pendingUnlock}:${pendingRecovery}:${unlockError}`;
   }
 
   return Object.freeze({
@@ -325,6 +442,10 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
       selectedBeatId = null;
       selectedVariantId = null;
       journalOpen = false;
+      confirmUnlock = null;
+      pendingUnlock = null;
+      pendingRecovery = false;
+      unlockError = null;
     },
   });
 }

@@ -22,6 +22,10 @@ export const NARRATIVE_CSS = `
 .ludory-narrative__journal li{margin-bottom:9px}
 .ludory-narrative__journal img{display:block;max-width:min(100%,290px);max-height:170px;object-fit:contain;margin:7px 0;border-radius:8px}
 .ludory-narrative__reply{padding:10px 0;color:#d9e8f8;font-style:italic}
+.ludory-narrative__premium-confirm{margin-top:12px;padding:12px;border:1px solid #eecb83;border-radius:9px;background:#302b33}
+.ludory-narrative__premium-status,.ludory-narrative__premium-error{margin-top:12px;padding:10px;border-radius:8px;background:#433342}
+.ludory-narrative__premium-error{border:1px solid #ffb1b1;color:#ffdfdf}
+.ludory-narrative button:disabled{opacity:.65;cursor:not-allowed}
 .ludory-narrative[data-orientation=portrait]{padding:12px}
 .ludory-narrative[data-orientation=portrait] .ludory-narrative__panel{padding:14px}
 .ludory-narrative[data-orientation=portrait] .ludory-narrative__actions{flex-direction:column}

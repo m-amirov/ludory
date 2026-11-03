@@ -2401,6 +2401,26 @@
     },
     {
       "type": "library",
+      "bom-ref": "workspace:packages/runtime-economy",
+      "name": "@ludory/runtime-economy",
+      "version": "0.1.0",
+      "purl": "pkg:npm/%40ludory/runtime-economy@0.1.0",
+      "properties": [
+        {
+          "name": "ludory:source",
+          "value": "workspace"
+        }
+      ],
+      "licenses": [
+        {
+          "license": {
+            "name": "UNLICENSED"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "workspace:packages/runtime-narrative",
       "name": "@ludory/runtime-narrative",
       "version": "0.1.0",
