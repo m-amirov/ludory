@@ -6,6 +6,7 @@
   "engines": { "node": ">=22" },
   "exports": { ".": "./src/index.mjs" },
   "files": ["src", "README.md"],
+  "dependencies": { "@ludory/economy": "0.1.0", "@ludory/narrative": "0.1.0" },
   "sideEffects": false,
   "license": "UNLICENSED"
 }

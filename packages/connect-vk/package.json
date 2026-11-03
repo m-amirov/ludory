@@ -16,6 +16,7 @@
   "sideEffects": false,
   "license": "UNLICENSED",
   "dependencies": {
-    "@ludory/runtime": "0.1.0"
+    "@ludory/runtime": "0.1.0",
+    "@ludory/economy": "0.1.0"
   }
 }

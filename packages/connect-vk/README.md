@@ -2,6 +2,15 @@
 
 V1 is an isolated, injected VK Bridge contract adapter for VK Games. It never imports browser globals at module import time and does not auto-load a script. `bridgeLoader` must provide the official VK Bridge instance with `send`, `subscribe`, `unsubscribe`.
 
+E4 adds an *optional* `createVkEconomyStorage({config,bridge})` port for one
+versioned, strictly validated economy record, independent of Runtime's save
+slots. Each UTF-8 JSON value must fit 3,800 bytes and receive a confirmed
+`VKWebAppStorageSet` response **and readback**; malformed, too-large or failed
+records block spending/rewards. There is no local fallback, multi-key ledger
+sharding or VK purchase API in this version. Paid products must not be shown on
+VK; the port advertises `purchaseCloud:false`. Mock Bridge tests do not certify
+live VK behavior.
+
 ```js
 import { createVkConnector } from '@ludory/connect-vk';
 import bridge from '@vkontakte/vk-bridge'; // game-owned VK entrypoint (V4)
