@@ -1,6 +1,6 @@
-# @ludory/runtime-economy (E3)
+# @ludory/runtime-economy (E4)
 
-Optional, browser-portable premium Narrative v1 composition and rewards coordinator. **Disabled by default in all Ludory games.** This is an infrastructure layer, **not** a verified payment gateway or a cloud persistence adapter.
+Optional, browser-portable premium Narrative v1, rewards and purchase coordinator. **Disabled by default in all Ludory games.** This is an infrastructure layer, **not** a verified payment gateway; the actual SDK/cloud ports are supplied by Connect.
 
 ## Authoring
 
@@ -45,11 +45,35 @@ const renderer = createNarrativeRenderer({ graph, catalog,
 
 `definePremiumManifest` binds the sidecar to a canonical snapshot of the full graph. With economy enabled, `createEconomyRuntime` requires the active graph and fails closed on an outdated sidecar. Its `authorizeChoice` function carries a compatibility check invoked by `createNarrativeRuntimeUpdate`, and the renderer checks the same binding. If any authored graph content changes, recreate the sidecar and re-run free-path evidence for that graph; otherwise old premium IDs could become unknown/free choices.
 
-The storage port must implement `load()` returning an E1 `EconomyStateV1` or `null` for a first-time wallet and `save(state)` returning the literal `true` **only after a durable write**. A missing state is initialized at zero and saved before access is enabled. Absent, malformed, unacknowledged, or unavailable storage disables premium unlocks. This injected port is only a seam; E4 adds the scoped platform economy storage adapters and recovery.
+The storage port must implement `load()` returning an E1 `EconomyStateV1` or `null` for a first-time wallet and `save(state)` returning the literal `true` **only after a durable write**. A missing state is initialized at zero and saved before access is enabled. Absent, malformed, unacknowledged, or unavailable storage disables premium unlocks. E4 provides separate cloud adapters in Connect; the Core snapshot adapter is not interchangeable.
 
 An unlocked choice is a normal Narrative v1 `choose` action, so its authored `relation_delta`, `flag_set`, `memory_add`, routing, echo and other effects apply normally. **Buying the entitlement applies no story effects.** Back and Replay undo narrative effects with the narrative snapshot, but not the independently persisted entitlement; replay never buys again. Direct forged `narrative:choose` inputs are denied at `createNarrativeRuntimeUpdate`, even if a malicious UI enables a locked button.
 
-The browser-only premium renderer shows prices, a separate confirmation step, pending/errors, an explicit **restore saved wallet** button after unavailable or ambiguous saves, and successful unlocked state. Restore calls `initialize()` to reload the current durable record; it does not automatically repeat a debit or dispatch a story choice. The player confirms any still-locked purchase again. This renderer does **not** buy crystals, play ads or call any platform SDK. E3 provides the rewards coordinator; E5 adds reward/claim UI, catalog purchases/cloud arrive in E4. Tests use an in-memory fake durability port that proves only component behavior, not actual remote persistence. No money-changing game behavior is enabled by merely importing these modules.
+The browser-only premium renderer shows prices, a separate confirmation step, pending/errors, an explicit **restore saved wallet** button after unavailable or ambiguous saves, and successful unlocked state. Restore calls `initialize()` to reload the current durable record; it does not automatically repeat a debit or dispatch a story choice. The player confirms any still-locked purchase again. This renderer does **not** buy crystals, play ads or call any platform SDK. E3 provides the rewards coordinator; E4 adds purchase/cloud ports; E5 adds actual store/reward UI. Tests use mocked SDK/storage and do not prove real platform behavior. No money-changing game behavior is enabled by merely importing these modules.
+
+## Yandex consumables and cloud (E4 — opt-in)
+
+```js
+import { createYandexEconomyStorage, createYandexPurchases } from '@ludory/connect-yandex';
+const storage = createYandexEconomyStorage({ config: economyConfig,
+  getPlayer: () => sdk.getPlayer() });
+const purchases = createYandexPurchases({ sdk,
+  getPlayer: () => sdk.getPlayer(), gameId: economyConfig.gameId });
+const wallet = createEconomyRuntime({ config: economyConfig, storage, purchases,
+  activeSkus: ['pack_small'] }); // Must be configured/registered in Yandex Console
+await wallet.initialize();
+// REQUIRED on startup and foreground resume; show recoverable pending state if this fails.
+await wallet.restorePurchases();
+const offers = await wallet.getStoreCatalog(); // only enabled current SKUs, price/icon from Yandex SDK
+// After explicit player confirmation (not automatic):
+await wallet.purchaseProduct('pack_small');
+```
+
+`config.products` is the immutable historical *fulfillment* registry; `activeSkus` is the current *storefront* allowlist. Keep old SKUs in the registry for outstanding deliveries, but remove retired SKUs from the allowlist. Modifying a published SKU amount without migration is unsafe; create a new SKU. On purchase, the coordinator locks same-origin tabs through `navigator.locks` (without this, IAP fails closed), reconciles old unconsumed purchases, validates the SDK result, hashes the purchase token, reloads the cloud ledger, commits credit and digest together, and only then calls `consumePurchase`. If save fails or its acknowledgment is uncertain, never consume; next `restorePurchases()` deduplicates against durable evidence. A failed consume is safe to retry. Unknown SKUs remain unconsumed and require support/migration intervention. The raw token is never persisted in the economy journal.
+
+`restorePurchases()` must run on startup and foreground return **before enabling premium spending**. The coordinator blocks `unlockChoice()` until initial successful reconciliation if a purchase port is installed. `purchaseProduct()` also reconciles automatically before any new purchase. UI must handle errors and show a pending/retry state; SDK cancellation is not a credit. `getStoreCatalog()` does not invent fallback currency, price or icon.
+
+**Serverless limitations:** client-mode Yandex payments are not signed or fraud-proof, Player data has no cross-device compare-and-swap, Web Locks coordinate only tabs within one origin, and client wall clocks/rewarded callback evidence are manipulable. A browser crash before a rewarded grant is durably saved may lose its pending acknowledgment. `getData()` returning no key on a fresh runtime cannot conclusively distinguish a never-created wallet from a lost cloud record. Never claim strong exactly-once cross-device accounting or payment readiness. Real purchase tests, portal review, policy/rights checks and production publication remain blocked until separately authorized and observed.
 
 ## Optional rewards (E3)
 
