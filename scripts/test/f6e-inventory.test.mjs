@@ -4,12 +4,26 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createF6eInventory, verifyTemplateAssetLedger,
   checkF6eInventory, writeF6eInventory } from '../f6e-inventory.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sha = data => createHash('sha256').update(data).digest('hex');
+
+test('F6e BOM stays byte-exact in Windows autocrlf checkouts', t => {
+  if (!fs.existsSync(path.join(repo, '.git'))) {
+    t.skip('Git checkout metadata is unavailable in this distribution');
+    return;
+  }
+  const relative = 'docs/evidence/f6e-components.cdx.json';
+  const filtered = execFileSync('git', [
+    '-c', 'core.autocrlf=true', 'cat-file', '--filters', `HEAD:${relative}`,
+  ], { cwd: repo, maxBuffer: 1024 * 1024 });
+  assert.equal(sha(filtered), sha(fs.readFileSync(path.join(repo, relative))),
+    'Git checkout filters must preserve the canonical F6e inventory bytes');
+});
 const write = (root, relative, data) => {
   const file = path.join(root, relative);
   fs.mkdirSync(path.dirname(file), { recursive: true });
