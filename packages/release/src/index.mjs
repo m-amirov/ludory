@@ -2,6 +2,7 @@ export { inspectYandexArchive, inspectVkArchive } from './archive.mjs';
 export { checkYandexRelease } from './check.mjs';
 export { checkVkCandidate } from './vk-check.mjs';
 export { simulateModeration } from './moderation-simulation.mjs';
+export { assessEconomyReadiness } from './economy-readiness.mjs';
 export { stageQaCandidate } from './qa-staging.mjs';
 export { verifyQaCaptureIntegrity } from './qa-evidence.mjs';
 export { prepareQaReviewPacket } from './qa-review-handoff.mjs';
