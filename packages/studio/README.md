@@ -438,14 +438,19 @@ planned paths, conflict details and the backup directory on success.
 
 Profile declarations specify a web engine, allowed targets and compatible templates.
 Built-in profiles are `web-game` and optional `narrative-game`; built-in templates
-are `web-basic`, `narrative-basic`, opt-in `narrative-interactive` and `runtime-basic`.
+are `web-basic`, `narrative-basic`, opt-in `narrative-interactive`, opt-in `narrative-economy`, and `runtime-basic`.
 The basic story is a standalone click-through; `narrative-interactive` bundles
 the complete N1/N2 graph engine and DOM Runtime with local art, photo/keepsake
 interactions, finite guided messages, authored reactions, delayed echoes,
 relationships, route locks, endings, RU/EN, journal, save/restore and replay.
 It uses no backend, runtime AI or external CDN. `runtime-basic` uses the locally
 bundled `@ludory/runtime` Core host, with browser-smoke coverage. None contains VK/Yandex SDK integrations
-or proves platform compatibility.
+or proves platform compatibility. The separate `narrative-economy` example bundles economy
+interfaces and connector factories but does **not** initialize a platform SDK automatically.
+Its `config/economy.json` is author-owned and `enabled:false`; to enable it, a new-game
+author must supply explicit cloud-backed story/wallet ports and the active platform target.
+The Yandex store also needs an explicitly registered SKU allowlist; VK IAP is unsupported.
+See the generated `ECONOMY.md` and [E5 QA gates](../../docs/economy-e5-qa.md).
 
 To create an interactive story, use `--profile narrative-game` and
 `--template narrative-interactive` for preview, then add `--apply` after checking the file
