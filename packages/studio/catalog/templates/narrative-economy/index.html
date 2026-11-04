@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="ludory-mobile-orientation" content="portrait">
+  <title>Новая история · Ludory</title>
+  <style>
+    :root { color-scheme:dark; font:16px/1.5 system-ui,sans-serif; background:#162837; color:#fff8ed; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100dvh; display:flex; flex-direction:column; }
+    header { padding:12px 16px; display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; background:#20394c; }
+    button { font:inherit; padding:10px 14px; border:0; border-radius:9px; background:#e0cbb1; color:#182b39; min-height:44px; cursor:pointer; }
+    button:disabled { opacity:.55; cursor:default; }
+    [hidden] { display:none!important; }
+    button:focus-visible { outline:3px solid #fff; outline-offset:2px; }
+    #status { padding:5px 16px; min-height:1.7em; }
+    #economy-panel { padding:0 16px; }
+    #economy-panel:empty { display:none; }
+    #economy-panel section { border:1px solid #8595a5; border-radius:12px; padding:12px; display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    #economy-panel h2 { font:600 1.05rem Georgia,serif; margin:0 8px 0 0; }
+    #economy-panel p { margin:0 8px 0 0; }
+    #game { flex:1; min-height:300px; width:100%; }
+    @media(max-width:600px) and (orientation:portrait) {
+      body { height:100dvh; min-height:0; overflow:hidden; }
+      header { flex-shrink:0; padding-top:max(12px,env(safe-area-inset-top)); }
+      #economy-panel { flex-shrink:0; max-height:30dvh; overflow-y:auto; }
+      #game { min-height:0; overflow-y:auto; }
+    }
+  </style>
+</head>
+<body>
+  <header><strong id="story-title">Интерактивная история · Ludory</strong>
+    <nav aria-label="Управление историей"><button id="save" type="button">Сохранить историю</button>
+      <button id="restart" type="button" hidden>Начать заново</button></nav>
+  </header>
+  <p id="status" role="status" aria-live="polite"></p>
+  <aside id="economy-panel" aria-label="Игровая валюта"></aside>
+  <main id="game" aria-label="История"></main>
+  <script type="module" src="src/entry.js"></script>
+</body>
+</html>
