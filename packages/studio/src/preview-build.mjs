@@ -56,6 +56,15 @@ function safeFile(root, relative) {
 function listedFiles(project) {
   const names = ['index.html', 'ludory.project.json'];
   if (fs.existsSync(path.join(project, 'narrative-assets.json'))) names.push('narrative-assets.json');
+  // The opt-in economy template intentionally stores its author-editable
+  // runtime configuration under config/. Only these two non-secret documents
+  // are browser assets; never expose the entire private config directory.
+  if (fs.existsSync(path.join(project, 'ludory.components.json'))) {
+    const components = JSON.parse(safeFile(project, 'ludory.components.json').toString('utf8'));
+    if (components?.template?.id === 'narrative-economy') {
+      names.push('config/economy.json', 'config/premium.json');
+    }
+  }
   let total = 0;
   function descend(directory, prefix, depth) {
     if (depth > 24) throw new Error('PREVIEW_SOURCE_UNSAFE');

@@ -52,7 +52,7 @@ test('creation preview never writes and explicit apply creates runnable files an
   assert.equal(manifest.title.ru, params.title);
   assert.equal(manifest.engine, 'web');
   const receipt = JSON.parse(fs.readFileSync(path.join(root, 'ludory.studio.json')));
-  assert.deepEqual(receipt.profile, { id: 'narrative-game', version: '1.1.0' });
+  assert.deepEqual(receipt.profile, { id: 'narrative-game', version: '1.2.0' });
   assert.deepEqual(receipt.template, { id: 'narrative-basic', version: '1.1.0' });
   assert.deepEqual(Object.keys(receipt.files), ['ludory.project.json', 'index.html', 'src/main.js']);
   const components = JSON.parse(fs.readFileSync(path.join(root, 'ludory.components.json'), 'utf8'));

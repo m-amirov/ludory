@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "enabled": false,
+  "configVersion": 1,
+  "currency": { "id": "crystals", "displayName": "Кристаллы", "icon": "💎" },
+  "maxBalance": 500,
+  "rewards": { "starter": 20, "episode": 3, "daily": 2, "rewarded": 5 },
+  "premium": { "private_time": { "cost": 12, "type": "scene" } },
+  "products": {}
+}

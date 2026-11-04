@@ -1,7 +1,7 @@
 # Economy & Monetization — technical design
 
 Date: 2026-11-03  
-Status: **APPROVED by owner 2026-11-03 — implementation staged E1–E5 (E1–E4 locally verified; E5 pending; E4 real portal tests not run)**
+Status: **APPROVED by owner 2026-11-03 — E1–E5 Node contracts implemented and locally verified; E5 browser smoke awaits Linux CI; real portal monetization and moderation tests NOT_RUN.**
 Repository: `m-amirov/ludory`  
 Selected approach: **A — no owner-operated backend**, approved by owner on 2026-11-03.
 

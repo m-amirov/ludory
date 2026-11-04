@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "choices": [
+    { "beatId": "fork", "choiceId": "intimate", "contentId": "private_time" }
+  ]
+}

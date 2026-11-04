@@ -161,6 +161,31 @@ test('a missing image declared by the native narrative asset manifest blocks sta
   assert.equal(result.reasonCode, 'PREVIEW_ASSET_MISSING');
 });
 
+test('opt-in economy preview publishes only its two public runtime JSON configs', t => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-preview-economy-'));
+  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+  const options = { id: 'preview-economy', title: 'Economy', lang: 'ru',
+    profile: 'narrative-game', template: 'narrative-economy', targets: ['yandex-games'] };
+  assert.equal(applyCreatePlan(planCreate(project, options)).status, 'APPLIED');
+  fs.writeFileSync(path.join(project, 'config', 'private.json'), '{"secret":"do-not-distribute"}');
+  const plan = planPreviewBuild(project);
+  assert.equal(plan.status, 'READY', plan.reasonCode);
+  assert.ok(plan.files.some(file => file.path === 'config/economy.json'));
+  assert.ok(plan.files.some(file => file.path === 'config/premium.json'));
+  assert.ok(!plan.files.some(file => file.path === 'config/private.json'));
+  const built = buildPreview(plan);
+  assert.equal(built.status, 'BUILT', built.reasonCode);
+  t.after(() => built.cleanup());
+  assert.equal(JSON.parse(fs.readFileSync(path.join(built.root, 'config/economy.json'))).enabled, false);
+  assert.ok(fs.existsSync(path.join(built.root, 'config/premium.json')));
+  assert.equal(fs.existsSync(path.join(built.root, 'config/private.json')), false);
+
+  fs.unlinkSync(path.join(project, 'config', 'economy.json'));
+  const missing = planPreviewBuild(project);
+  assert.equal(missing.status, 'BLOCKED');
+  assert.equal(missing.reasonCode, 'PREVIEW_ASSET_MISSING');
+});
+
 test('a file changed after another file was read invalidates the entire snapshot', t => {
   const project = newStudioAiProject(t, { git: false });
   const planned = planPreviewBuild(project);

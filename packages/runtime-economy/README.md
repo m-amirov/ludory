@@ -1,4 +1,4 @@
-# @ludory/runtime-economy (E4)
+# @ludory/runtime-economy (E5)
 
 Optional, browser-portable premium Narrative v1, rewards and purchase coordinator. **Disabled by default in all Ludory games.** This is an infrastructure layer, **not** a verified payment gateway; the actual SDK/cloud ports are supplied by Connect.
 
@@ -106,3 +106,24 @@ If a **verified** rewarded view cannot be durably committed, `getView().ready ==
 `getRewardsView()` exposes read-only configured amounts, UTC daily eligibility and pending status, including a fail-closed `ready:false` state. Reward buttons are **not** part of the E2 renderer; the game UI must provide an explicit voluntary opt-in. The E3 tests call actual Connect adapter implementations with simulated SDK/Bridge responses; they are **not real portal tests**.
 
 Approach A remains client-trust-limited: without an owner-operated backend, the browser cannot prove wallet authenticity or ensure atomic cross-device writes. Do not claim real Yandex/VK payment compliance, purchase delivery, release readiness or real-platform testing on the basis of this package.
+
+## Optional player wallet panel (E5)
+
+The DOM panel is only a view/controller over the existing coordinator. It does not create or initialize a wallet, call the platform SDK while rendering, or enable anything in a game automatically:
+
+```js
+import { createEconomyPanel } from '@ludory/runtime-economy';
+
+// The caller must first initialize a genuine cloud-backed wallet and, on
+// Yandex when IAP is installed, reconcile outstanding purchases.
+const panel = createEconomyPanel({
+  root: document.querySelector('#economy-panel'), wallet,
+  locale: 'ru', target: 'yandex-games', storeEnabled: false,
+});
+panel.render();
+// Explicitly set storeEnabled:true only in a Yandex game with registered SKUs,
+// configured purchase adapter and validated cloud storage. VK never shows IAP.
+// panel.dispose() when closing the game.
+```
+
+Daily claims, rewarded ads, reward-save retry, catalog refresh, purchases and purchase restoration are invoked **only from buttons**. The panel displays SDK numeric prices and currency labels, not authored currency conversion rates, and rejects malformed catalog offers. It never renders catalog titles as HTML or displays raw SDK errors which might contain purchase tokens. SDK/cloud failures leave the user with an honest retry path and do not imply delivery. The integrating game remains responsible for lifecycle reconciliation and calling `panel.render()` when another UI component changes the wallet.

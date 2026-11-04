@@ -25,10 +25,10 @@ function external(t) {
 test('built-in catalogs are versioned, valid, and only expose public descriptors', () => {
   const profiles = listCatalog('profiles');
   assert.deepEqual(profiles.map(x => x.id), ['narrative-game', 'web-game']);
-  assert.deepEqual(listCatalog('templates').map(x => x.id), ['narrative-basic', 'narrative-interactive', 'runtime-basic', 'vk-runtime', 'web-basic', 'yandex-runtime']);
+  assert.deepEqual(listCatalog('templates').map(x => x.id), ['narrative-basic', 'narrative-economy', 'narrative-interactive', 'runtime-basic', 'vk-runtime', 'web-basic', 'yandex-runtime']);
   assert.equal(showCatalog('profiles', 'narrative-game').engine, 'web');
-  assert.equal(showCatalog('profiles', 'narrative-game').version, '1.1.0');
-  assert.deepEqual(showCatalog('profiles', 'narrative-game').templates, ['narrative-basic', 'narrative-interactive']);
+  assert.equal(showCatalog('profiles', 'narrative-game').version, '1.2.0');
+  assert.deepEqual(showCatalog('profiles', 'narrative-game').templates, ['narrative-basic', 'narrative-interactive', 'narrative-economy']);
   assert.deepEqual(showCatalog('templates', 'narrative-basic').files, ['index.html', 'src/main.js']);
   assert.equal(showCatalog('templates', 'narrative-basic').version, '1.1.0');
   const interactive = showCatalog('templates', 'narrative-interactive');
