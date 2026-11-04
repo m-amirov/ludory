@@ -6,6 +6,8 @@ on:
       - 'packages/runtime/**'
       - 'packages/runtime-phaser/**'
       - 'packages/runtime-narrative/**'
+      - 'packages/economy/**'
+      - 'packages/runtime-economy/**'
       - 'packages/narrative/**'
       - 'packages/connect-yandex/**'
       - 'packages/connect-vk/**'
@@ -14,6 +16,7 @@ on:
       - 'packages/studio/src/**'
       - 'scripts/build-runtime-template.mjs'
       - 'scripts/build-narrative-template.mjs'
+      - 'scripts/build-economy-template.mjs'
       - 'scripts/build-yandex-template.mjs'
       - 'scripts/build-vk-template.mjs'
       - 'scripts/build-vk-candidate.mjs'
@@ -35,6 +38,7 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run build:runtime-template
       - run: npm run check:narrative-template
+      - run: npm run check:economy-template
       - run: npm run check:yandex-template
       - run: npm run check:vk-template
       - run: npm run check:v5-scripts
@@ -80,6 +84,9 @@ jobs:
         working-directory: packages/runtime-narrative/test/browser
         env:
           LUDORY_N3_ARTIFACT_DIR: artifacts/n3
+      - name: E5 opt-in economy browser simulation (not portal acceptance)
+        run: npm run smoke:economy-e5
+        working-directory: packages/runtime-narrative/test/browser
       - name: Upload N3 Studio browser evidence
         if: always()
         uses: actions/upload-artifact@v4
