@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "narrative-economy",
+  "version": "1.0.0",
+  "description": "Opt-in narrative wallet/store starter (disabled by default; hosted cloud adapters required)",
+  "profile": "narrative-game",
+  "engine": "web",
+  "targets": ["yandex-games", "vk-games"],
+  "files": ["index.html", "src/main.js", "src/entry.js", "src/story.js", "src/restore.js", "config/economy.json", "config/premium.json", "ECONOMY.md", "assets/ludory-economy.js"],
+  "authorFiles": ["src/story.js"]
+}
