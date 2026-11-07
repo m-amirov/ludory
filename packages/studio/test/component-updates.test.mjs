@@ -23,7 +23,8 @@ const physicalPath = value => {
 const transactionPath = value => /\.ludory-components-(?:update|backup)-/.test(physicalPath(value));
 const anchoredBasename = (value, name) => String(value) === name || /[\\/]([^\\/]+)$/.exec(String(value))?.[1] === name;
 
-function fixture(t, { initialVersion = '1.0.0', availableTargets = ['vk-games'], withAuthorStory = false } = {}) {
+function fixture(t, { initialVersion = '1.0.0', availableTargets = ['vk-games'],
+  withAuthorStory = false, withAuthorProof = false } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-components-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const previousTrustRoot = process.env.LUDORY_STUDIO_TRUST_DIR;
@@ -48,11 +49,23 @@ function fixture(t, { initialVersion = '1.0.0', availableTargets = ['vk-games'],
   fs.writeFileSync(descriptor, JSON.stringify({
     schemaVersion: 1, id: 'owned-web', version: initialVersion, description: 'test template',
     profile: 'owned-game', engine: 'web', targets: availableTargets,
-    files: ['index.html', 'src/main.js', ...(withAuthorStory ? ['src/story.js'] : [])],
+    files: ['index.html', 'src/main.js', ...(withAuthorStory || withAuthorProof ? ['src/story.js'] : []),
+      ...(withAuthorProof ? ['narrative-assets.json', 'assets/vis-seed.webp'] : [])],
+    ...(withAuthorProof ? { authorFiles: ['src/story.js', 'narrative-assets.json', 'assets/vis-seed.webp'] } : {}),
   }));
   fs.writeFileSync(app, 'export const version = 1;\n');
   fs.writeFileSync(html, '<main>v1</main>\n');
-  if (withAuthorStory) fs.writeFileSync(path.join(catalog, 'templates/owned-web/src/story.js'), 'export const author = true;\n');
+  if (withAuthorStory || withAuthorProof) fs.writeFileSync(path.join(catalog, 'templates/owned-web/src/story.js'), 'export const author = true;\n');
+  if (withAuthorProof) {
+    const directory = path.join(catalog, 'templates/owned-web');
+    fs.mkdirSync(path.join(directory, 'assets'));
+    const bytes = Buffer.from('RIFF0000WEBPVP8 seed');
+    fs.writeFileSync(path.join(directory, 'assets/vis-seed.webp'), bytes);
+    fs.writeFileSync(path.join(directory, 'narrative-assets.json'), `${JSON.stringify({ schemaVersion: 1,
+      storySha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(directory, 'src/story.js'))).digest('hex'),
+      assets: { 'vis-seed': { path: 'assets/vis-seed.webp', sha256: crypto.createHash('sha256').update(bytes).digest('hex') } },
+    }, null, 2)}\n`);
+  }
   applyCreatePlan(planCreate(project, {
     id: 'owned-game', title: 'Owned', lang: 'en', profile: 'owned-game',
     template: 'owned-web', targets: ['vk-games'], catalog,
@@ -63,6 +76,33 @@ function fixture(t, { initialVersion = '1.0.0', availableTargets = ['vk-games'],
     state: path.join(project, 'ludory.components.json'),
   };
 }
+
+test('managed component upgrade preserves edited narrative, visual proof and extra authored art byte-for-byte', t => {
+  const f = fixture(t, { withAuthorProof: true });
+  const story = path.join(f.project, 'src/story.js');
+  fs.appendFileSync(story, '\n// scene authored by user\n');
+  const proof = path.join(f.project, 'narrative-assets.json');
+  const imagePath = path.join(f.project, 'assets/vis-user.webp');
+  const imageBytes = Buffer.from('RIFF0000WEBPVP8 author');
+  fs.writeFileSync(imagePath, imageBytes);
+  const manifest = JSON.parse(fs.readFileSync(proof, 'utf8'));
+  manifest.storySha256 = crypto.createHash('sha256').update(fs.readFileSync(story)).digest('hex');
+  manifest.assets['vis-user'] = { path: 'assets/vis-user.webp',
+    sha256: crypto.createHash('sha256').update(imageBytes).digest('hex') };
+  fs.writeFileSync(proof, `${JSON.stringify(manifest, null, 2)}\n`);
+  const protectedPath = path.join(f.project, 'user-notes.txt');
+  fs.writeFileSync(protectedPath, 'author notes');
+  const saved = [story, proof, imagePath, protectedPath].map(file => fs.readFileSync(file));
+  version2(f);
+  const plan = planComponentUpdate(f.project, { catalog: f.catalog });
+  assert.equal(plan.status, 'READY', JSON.stringify(plan));
+  assert.equal(plan.writes.includes('src/story.js'), false);
+  assert.equal(plan.writes.includes('narrative-assets.json'), false);
+  assert.equal(plan.writes.includes('assets/vis-user.webp'), false);
+  assert.equal(applyComponentPlan(plan).status, 'APPLIED');
+  [story, proof, imagePath, protectedPath].forEach((file, index) => assert.deepEqual(fs.readFileSync(file), saved[index]));
+  assert.equal(componentStatus(f.project, { catalog: f.catalog }).status, 'IN_SYNC');
+});
 
 test('legacy ownership adoption upgrades only managed bootstrap while preserving edited story', t => {
   const f = fixture(t, { initialVersion: '1.2.1', withAuthorStory: true });

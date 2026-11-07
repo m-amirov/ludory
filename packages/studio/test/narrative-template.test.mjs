@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { parse } from 'parse5';
 import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { loadCatalog, validateNarrativeAuthorProof } from '../src/catalog.mjs';
+import { planPreviewBuild, buildPreview } from '../src/preview-build.mjs';
 import { buildNarrativeBundle, verifyStoryAssets } from '../../../scripts/build-narrative-template.mjs';
 import { graphData, catalogData, assets } from '../catalog/templates/narrative-interactive/src/story.js';
 import { defineNarrativeGraph, defineNarrativeCatalog, createNarrativeState, advanceNarrative, resolveNarrativeView } from '@ludory/narrative';
@@ -40,7 +41,7 @@ test('new narrative games opt into portrait metadata without imposing it on othe
     const htmlPath = path.join(project, 'index.html');
     assert.equal(mobileOrientationMeta(fs.readFileSync(htmlPath, 'utf8')), 'portrait', template);
     const receipt = JSON.parse(fs.readFileSync(path.join(project, 'ludory.studio.json')));
-    assert.equal(receipt.template.version, template === 'narrative-interactive' ? '1.2.2' : '1.1.0');
+    assert.equal(receipt.template.version, template === 'narrative-interactive' ? '1.2.3' : '1.1.0');
     // An author can opt out in a newly created game; catalog and the creation receipt remain unchanged.
     const html = fs.readFileSync(htmlPath, 'utf8');
     fs.writeFileSync(htmlPath, html.replace('content="portrait"', 'content="auto"'));
@@ -61,10 +62,78 @@ test('narrative source bundle is deterministic and exactly matches shipped bytes
   assert.equal(hash(first), hash(second));
   assert.equal(hash(first), hash(fs.readFileSync(path.join(originalTemplate, 'assets/ludory-narrative.js'))));
   assert.ok(first.length > 5_000);
+  assert.match(first.toString(), /defineNarrativePresentation/, 'bundled API must be available to games');
   // N2 parses against this synthetic origin for URL safety; it never fetches it.
   const bundle = first.toString().replaceAll('https://ludory.local/story/', '').replaceAll('https://ludory.local', '');
   assert.doesNotMatch(bundle, /https?:\/\/|from\s*['"]@ludory\/|\bimport\s*\(/);
   assert.doesNotMatch(fs.readFileSync(path.join(originalTemplate, 'src/main.js'), 'utf8'), /https?:\/\/|from\s*['"]@ludory\//);
+});
+
+test('optional story presentation is backward compatible with an old story.js export list', async t => {
+  const source = fs.readFileSync(path.join(originalTemplate, 'src/main.js'), 'utf8');
+  assert.match(source, /import \* as story from ['"]\.\/story\.js['"]/);
+  assert.match(source, /story\.presentationData === undefined/);
+  assert.doesNotMatch(source, /import\s*\{[^}]*presentationData[^}]*\}\s*from\s*['"]\.\/story\.js['"]/);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-legacy-story-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.equal(applyCreatePlan(planCreate(dir, { id: 'old-legacy-story', title: 'Legacy', lang: 'ru',
+    profile: 'narrative-game', template: 'narrative-interactive', targets: ['vk-games', 'yandex-games'] })).status, 'APPLIED');
+  const authored = fs.readFileSync(path.join(dir, 'src/story.js'), 'utf8');
+  const legacy = authored.replace(/^export const presentationData = undefined;?\n/m, '');
+  assert.notEqual(legacy, authored);
+  fs.writeFileSync(path.join(dir, 'src/story.js'), legacy);
+  assert.doesNotMatch(fs.readFileSync(path.join(dir, 'src/story.js'), 'utf8'), /export const presentationData/);
+  const { pathToFileURL } = await import('node:url');
+  assert.equal(typeof (await import(pathToFileURL(path.join(dir, 'src/main.js')).href)).startNarrative, 'function');
+});
+
+test('a proved optional visual file is included in Studio preview; tamper and symlink block', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-art-proof-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.equal(applyCreatePlan(planCreate(dir, { id: 'art-proof', title: 'Art', lang: 'ru',
+    profile: 'narrative-game', template: 'narrative-interactive', targets: ['vk-games', 'yandex-games'] })).status, 'APPLIED');
+  const image = path.join(dir, 'assets/vis-intro.webp');
+  const contents = Buffer.from('RIFF0000WEBPVP8 mock visual proof');
+  fs.writeFileSync(image, contents);
+  const proofPath = path.join(dir, 'narrative-assets.json');
+  const proof = JSON.parse(fs.readFileSync(proofPath, 'utf8'));
+  proof.assets['vis-intro'] = { path: 'assets/vis-intro.webp', sha256: hash(contents) };
+  fs.writeFileSync(proofPath, `${JSON.stringify(proof, null, 2)}\n`);
+  const ready = planPreviewBuild(dir);
+  assert.equal(ready.status, 'READY', ready.reasonCode);
+  const built = buildPreview(ready);
+  assert.equal(built.status, 'BUILT', built.reasonCode);
+  t.after(() => built.cleanup());
+  assert.deepEqual(fs.readFileSync(path.join(built.root, 'assets/vis-intro.webp')), contents);
+  fs.appendFileSync(image, 'tamper');
+  assert.equal(planPreviewBuild(dir).status, 'BLOCKED');
+  fs.unlinkSync(image);
+  fs.symlinkSync(path.join(dir, 'src/story.js'), image);
+  assert.equal(planPreviewBuild(dir).status, 'BLOCKED');
+});
+
+test('narrative preview refuses missing asset proof and unproved visual files', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-art-proof-required-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.equal(applyCreatePlan(planCreate(dir, { id: 'art-proof-required', title: 'Art', lang: 'ru',
+    profile: 'narrative-game', template: 'narrative-interactive', targets: ['vk-games', 'yandex-games'] })).status, 'APPLIED');
+  const proofPath = path.join(dir, 'narrative-assets.json');
+  const original = fs.readFileSync(proofPath);
+  fs.unlinkSync(proofPath);
+  const noProof = planPreviewBuild(dir);
+  assert.equal(noProof.status, 'BLOCKED');
+  assert.match(noProof.reasonCode, /PROOF|MANIFEST/);
+  fs.writeFileSync(proofPath, original);
+  const image = path.join(dir, 'assets/vis-unregistered.png');
+  const bytes = Buffer.from('unregistered-art');
+  fs.writeFileSync(image, bytes);
+  const unproved = planPreviewBuild(dir);
+  assert.equal(unproved.status, 'BLOCKED');
+  assert.match(unproved.reasonCode, /PROOF|MANIFEST/);
+  const proof = JSON.parse(original);
+  proof.assets['vis-unregistered'] = { path: 'assets/vis-unregistered.png', sha256: hash(bytes) };
+  fs.writeFileSync(proofPath, `${JSON.stringify(proof, null, 2)}\n`);
+  assert.equal(planPreviewBuild(dir).status, 'READY');
 });
 
 test('story validates as a canonical graph with complete authored delayed echoes and local images', () => {

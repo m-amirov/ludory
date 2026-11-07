@@ -1,5 +1,8 @@
 // Replace with your own RU/EN story. Every reaction is authored, not AI-generated.
 const t = (ru, en) => ({ ru, en });
+// Optional artwork staging: export a schemaVersion:1 media/beat manifest to enable it.
+// The default leaves the existing text-only game and saves unchanged.
+export const presentationData = undefined;
 export const assets = { lighthouse: './assets/lighthouse.svg', shoreline: './assets/shoreline.svg' };
 export const catalogData = { schemaVersion: 1, interactions: [
   { id: 'camera', type: 'photo', label: t('Сохранить мгновение', 'Keep this moment'), options: [

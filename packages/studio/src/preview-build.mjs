@@ -111,20 +111,40 @@ function localDependency(specifier, owner, known) {
   }
 }
 
-function validateDependencies(files, read) {
+function validateDependencies(files, read, { requireNarrativeProof = false } = {}) {
   const known = new Set(files);
+  if (requireNarrativeProof && !known.has('narrative-assets.json')) {
+    throw new Error('PREVIEW_ASSET_PROOF_MISSING');
+  }
   for (const name of files) {
     const ext = path.extname(name).toLowerCase();
     if (name === 'narrative-assets.json') {
       let data;
       try { data = JSON.parse(read(name).toString('utf8')); }
       catch { throw new Error('PREVIEW_ASSET_MANIFEST_INVALID'); }
-      if (!data?.assets || typeof data.assets !== 'object' || Array.isArray(data.assets)) {
+      if (data?.schemaVersion !== 1 || !/^[a-f0-9]{64}$/.test(data.storySha256) ||
+          !known.has('src/story.js') || sha256(read('src/story.js')) !== data.storySha256 ||
+          !data.assets || typeof data.assets !== 'object' || Array.isArray(data.assets)) {
         throw new Error('PREVIEW_ASSET_MANIFEST_INVALID');
       }
-      for (const asset of Object.values(data.assets)) {
-        if (typeof asset?.path !== 'string') throw new Error('PREVIEW_ASSET_MANIFEST_INVALID');
+      const provedPaths = new Set();
+      for (const [id, asset] of Object.entries(data.assets)) {
+        if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id) || typeof asset?.path !== 'string' ||
+            !/^assets\/[a-z0-9_-]+\.(?:svg|png|webp|jpg|jpeg)$/.test(asset.path) ||
+            !/^[a-f0-9]{64}$/.test(asset.sha256)) throw new Error('PREVIEW_ASSET_MANIFEST_INVALID');
         localDependency(asset.path, 'index.html', known);
+        if (sha256(read(asset.path)) !== asset.sha256) throw new Error('PREVIEW_ASSET_PROOF_MISMATCH');
+        provedPaths.add(asset.path);
+      }
+      if (requireNarrativeProof) {
+        // The presentation contract only accepts local raster paths under assets/.
+        // Require every shipped raster to be attested, even when authored story.js
+        // contains dynamic data that must never be executed during preview planning.
+        for (const candidate of files) {
+          if (/^assets\/.*\.(?:png|webp|jpg|jpeg)$/i.test(candidate) && !provedPaths.has(candidate)) {
+            throw new Error('PREVIEW_ASSET_PROOF_MISSING');
+          }
+        }
       }
       continue;
     }
@@ -192,7 +212,10 @@ function snapshot(project, target) {
   if (target !== 'web' && !manifest.targets?.includes(target === 'vk' ? 'vk-games' : 'yandex-games')) {
     throw new Error('PREVIEW_TARGET_NOT_DECLARED');
   }
-  validateDependencies(names, name => data.get(name));
+  const components = JSON.parse(safeFile(project, 'ludory.components.json').toString('utf8'));
+  validateDependencies(names, name => data.get(name), {
+    requireNarrativeProof: components?.template?.id === 'narrative-interactive',
+  });
   // Each file's fd check alone cannot catch a preceding file changing while
   // a later one is read. Recheck the whole captured inventory and content.
   if (JSON.stringify(listedFiles(project)) !== JSON.stringify(names)) {

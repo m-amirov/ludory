@@ -31,12 +31,79 @@ the same beat never award twice. Only `state.narrative` is persisted; Back uses 
 bounded session-local history (default 64) which resets on reload/restore.
 Connect `canBack` to `update.canGoBack()` to hide unavailable undo after reload.
 
+### M4: opt-in visual scene presentation
+
+`presentation` is a separate author-owned map of per-beat stage cues. It does **not**
+change `graphData`, saved narrative state, choice availability, or existing
+interactive photo/album `assets`. Use the same API in custom games and in
+Studio `narrative-interactive` v1.2.3+:
+
+```js
+import { defineNarrativePresentation, createNarrativeRenderer } from '@ludory/runtime-narrative';
+
+const presentation = defineNarrativePresentation(graph, {
+  schemaVersion: 1,
+  media: {
+    harbor: { kind: 'background', src: 'assets/vis-harbor.webp',
+      alt: { ru: 'Гавань', en: 'Harbor' } },
+    alice: { kind: 'portrait', src: 'assets/vis-alice.webp',
+      alt: { ru: 'Алиса', en: 'Alice' } },
+    memory: { kind: 'cg', src: 'assets/vis-memory.webp',
+      alt: { ru: 'Воспоминание', en: 'Memory' } },
+  },
+  beats: {
+    arrival: [{ id: 'intro', background: 'harbor',
+      portraits: [{ characterId: 'alice', mediaId: 'alice', slot: 'center' }],
+      speaker: { ru: 'Алиса', en: 'Alice' } }],
+    waiting: [{ id: 'neutral-stage', neutral: { reason: 'not-illustrated' } }],
+    ending: [{ id: 'ending-art', cg: { mediaId: 'memory', mode: 'replace-stage' } }],
+  },
+});
+const renderer = createNarrativeRenderer({ graph, catalog, presentation });
+```
+
+Replace example `beatId`s with real IDs from your validated graph.
+`media.kind` is `background|portrait|cg`; `src` is strictly a *flat local image*
+`assets/<safe-name>.(png|webp|jpg|jpeg)` (no directories, SVG, CDN, data URI,
+query string or traversal). Optional `speaker` and media `alt` are RU/EN
+localized text. Portrait slots are `left|center|right`. CG mode
+`replace-stage` suppresses the background and portraits; `overlay` composites
+the CG above them. Use `neutral:{reason:'...'}` for beats with intentionally
+no illustration. It cannot coexist with image layers.
+Every variant must have at least one visible layer or an explicit `neutral.reason`;
+an empty object or a speaker-only variant is invalid.
+
+Each beat may have several variants distinguished by `when` conditions from
+the public Narrative predicate language (e.g. `{flag:'seat-eric'}` and
+`{not:{flag:'seat-eric'}}`). If two variants match at once, resolution throws
+instead of silently showing an unrelated route. Unmapped beats receive a
+neutral stage; the previous art is **never** inherited. Resolver output comes
+solely from the canonical narrative state, including after Back or restore.
+Image decoding failure removes only the failed layer and retains the neutral
+background. Image elements have safe authored `alt` and do not intercept
+pointer input. The dialogue panel remains scrollable above the stage; artwork
+is not part of `state.narrative`.
+
+In a new Studio game, `src/story.js` can export `presentationData` (raw manifest)
+or omit the export for the original text-only behavior. The installed
+`src/main.js` validates it before constructing the renderer. Record every
+image shipped under `assets/` (PNG/JPEG/WebP) in author-owned
+`narrative-assets.json` with `path` and actual `sha256`, and update
+`storySha256` after changing the authored JS. For Studio `narrative-interactive`
+projects the proof file is mandatory: preview and platform-derived builds
+reject its removal, unproved raster images, mismatched bytes and unsafe links.
+The proof checks integrity, **not** copyright or suitability of a real asset.
+The visually separate `narrative-economy` starter was regenerated as v1.0.1
+for compatibility, with no changes to purchases or currency configuration.
+
 `createNarrativeRenderer` exposes Runtime's `mount`, `resize`, `render`, and
 `unmount`, plus optional `setLocale('ru'|'en')`. Give `now` the **same clock** as
 `environment.now`, otherwise the Runtime host may drop events with incompatible
 timestamps. Standard buttons support keyboard, pointer and touch. Author text
-is inserted with `textContent`; asset URLs are limited to same-origin/local
-paths and image data URLs, with visible fallback when unavailable.
+is inserted with `textContent`. Presentation images resolve against the
+document's real URL (ignoring authored HTML `<base>`), require a matching
+HTTP(S) origin, and fail closed when that cannot be established. Legacy
+interactive asset URLs retain their existing local/data-image rules.
 
 ### Optional portrait-first presentation
 
@@ -94,3 +161,18 @@ emulated iPhone/Android, 667×375 landscape, tablet and desktop sizes, long
 choice labels, 200% root-font scaling, a keyboard-space proxy with bounded
 composer/journal scrolling, Back, rotation, save/reload and `auto`
 opt-out. These are emulations, not physical iPhone/WebKit evidence.
+
+M4's real-browser smoke uses a separate opt-in synthetic image fixture:
+
+```sh
+cd packages/runtime-narrative/test/browser
+npm run smoke:m4
+# Optional screenshots: LUDORY_M4_ARTIFACT_DIR=/path/to/evidence npm run smoke:m4
+```
+
+It exercises 390×844 and 1000×720, localized `alt`, explicit neutral stages,
+CG replace/overlay, Back, reload, and a corrupt resource. The synthetic 1px
+images only prove DOM/media geometry and resource handling. Real character
+face crop, image rights, mobile-device and VK/Yandex certification require
+separate game-specific evidence. If Chromium cannot open a socket, record
+`BLOCKED_BROWSER` and do not call the visual gate PASS.

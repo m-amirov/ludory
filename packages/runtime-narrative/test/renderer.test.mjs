@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { advanceNarrative } from '@ludory/narrative';
 import { applyEconomyOperation, createEconomyState } from '@ludory/economy';
 import { createEconomyRuntime, definePremiumManifest } from '@ludory/runtime-economy';
-import { createNarrativeRenderer } from '../src/index.mjs';
+import { createNarrativeRenderer, defineNarrativePresentation } from '../src/index.mjs';
 import { fixture } from './fixture.mjs';
 import { fixture as premiumFixture } from '../../runtime-economy/test/fixture.mjs';
 
@@ -36,14 +36,121 @@ function find(node, predicate) {
   return null;
 }
 
-function screen() {
-  const document = { createElement(tagName) { return new FakeElement(tagName, document); } };
+function screen({ baseURI = 'https://ludory.local/story/index.html' } = {}) {
+  const document = { URL: 'https://ludory.local/story/index.html', baseURI,
+    createElement(tagName) { return new FakeElement(tagName, document); } };
   return { root: document.createElement('div'), find };
 }
 
 function snapshot(state) {
   return { schemaVersion: 1, gameId: 'n2-fixture', gameVersion: '1.0.0', revision: 0, state };
 }
+
+function visualPresentation(graph) {
+  return defineNarrativePresentation(graph, { schemaVersion: 1, media: {
+    harbor: { kind: 'background', src: 'assets/vis-harbor.webp', alt: { ru: 'Гавань', en: 'Harbor' } },
+    alice: { kind: 'portrait', src: 'assets/vis-alice.png', alt: { ru: 'Алиса', en: 'Alice' } },
+    memory: { kind: 'cg', src: 'assets/vis-memory.jpg', alt: { ru: 'Воспоминание', en: 'Memory' } },
+  }, beats: {
+    intro: [{ id: 'welcome', background: 'harbor', portraits: [{ characterId: 'alice', mediaId: 'alice', slot: 'left' }],
+      speaker: { ru: 'Алиса', en: 'Alice' } }],
+    take_photo: [{ id: 'unillustrated', neutral: { reason: 'interactive-ui' } }],
+    take_item: [{ id: 'cg-memory', cg: { mediaId: 'memory', mode: 'replace-stage' } }],
+    send_message: [{ id: 'overlay-memory', background: 'harbor', cg: { mediaId: 'memory', mode: 'overlay' } }],
+  } });
+}
+
+test('opt-in stage draws background, portrait, speaker and accessible artwork, and updates locale', async () => {
+  const { graph, catalog, initialState } = fixture();
+  const { root } = screen();
+  const events = [];
+  const renderer = createNarrativeRenderer({ graph, catalog, presentation: visualPresentation(graph) });
+  await renderer.mount({ root, viewport: { width: 390, height: 844, orientation: 'portrait' },
+    snapshot: snapshot(initialState), dispatchInput: event => events.push(event.action) });
+  const stage = find(root, node => node.className === 'ludory-narrative__stage');
+  assert.ok(stage);
+  assert.equal(stage.dataset.variantId, 'welcome');
+  assert.equal(find(stage, node => node.dataset.role === 'background').getAttribute('src'), 'https://ludory.local/story/assets/vis-harbor.webp');
+  assert.equal(find(stage, node => node.dataset.role === 'portrait').getAttribute('alt'), 'Алиса');
+  assert.equal(find(root, node => node.dataset.ui === 'speaker').textContent, 'Алиса');
+  find(root, node => node.dataset.ui === 'journal').click();
+  assert.equal(find(root, node => node.className === 'ludory-narrative__stage'), stage,
+    'local panel redraw must retain the loaded stage');
+  find(root, node => node.dataset.ui === 'journal').click();
+  renderer.setLocale('en');
+  assert.equal(find(root, node => node.dataset.role === 'background').getAttribute('alt'), 'Harbor');
+  assert.equal(find(root, node => node.dataset.ui === 'speaker').textContent, 'Alice');
+  find(root, node => node.dataset.action === 'narrative:next:intro').click();
+  assert.deepEqual(events, ['narrative:next:intro']);
+  await renderer.unmount();
+});
+
+test('stage is recomputed from Back/Restore state; neutral has no art and broken layer cannot resurrect', async () => {
+  const { graph, catalog, initialState } = fixture();
+  const { root } = screen();
+  const renderer = createNarrativeRenderer({ graph, catalog, presentation: visualPresentation(graph), canBack: () => true });
+  await renderer.mount({ root, viewport: { width: 390, height: 844, orientation: 'portrait' },
+    snapshot: snapshot(initialState), dispatchInput() {} });
+  const background = find(root, node => node.dataset.role === 'background');
+  background.listeners.get('error')();
+  assert.equal(find(root, node => node.dataset.role === 'background'), null);
+  assert.ok(find(root, node => node.className === 'ludory-narrative__stage'));
+  const photo = advanceNarrative(graph, catalog, initialState.narrative, { type: 'next' }).state;
+  renderer.render(snapshot({ narrative: photo }));
+  const neutral = find(root, node => node.className === 'ludory-narrative__stage');
+  assert.equal(neutral.dataset.variantId, 'unillustrated');
+  assert.equal(find(neutral, node => node.tagName === 'IMG'), null);
+  renderer.render(snapshot(initialState));
+  assert.equal(find(root, node => node.dataset.role === 'background').getAttribute('src'), 'https://ludory.local/story/assets/vis-harbor.webp');
+  renderer.render(snapshot({ narrative: photo }));
+  assert.equal(find(root, node => node.dataset.role === 'background'), null);
+  await renderer.unmount();
+});
+
+test('CG replace and overlay modes preserve gameplay buttons and do not persist stage in snapshot', async () => {
+  const { graph, catalog, initialState } = fixture();
+  const { root } = screen();
+  const events = [];
+  const before = structuredClone(initialState);
+  const renderer = createNarrativeRenderer({ graph, catalog, presentation: visualPresentation(graph) });
+  await renderer.mount({ root, viewport: { width: 1000, height: 720, orientation: 'landscape' },
+    snapshot: snapshot(initialState), dispatchInput: event => events.push(event.action) });
+  let narrative = advanceNarrative(graph, catalog, initialState.narrative, { type: 'next' }).state;
+  narrative = advanceNarrative(graph, catalog, narrative, { type: 'interact', optionId: 'take' }).state;
+  renderer.render(snapshot({ narrative }));
+  const replace = find(root, node => node.className === 'ludory-narrative__stage');
+  assert.equal(replace.dataset.cgMode, 'replace-stage');
+  assert.ok(find(replace, node => node.dataset.role === 'cg'));
+  assert.equal(find(replace, node => node.dataset.role === 'background'), null);
+  find(root, node => node.dataset.action === 'narrative:interact:take_item:shell').click();
+  narrative = advanceNarrative(graph, catalog, narrative, { type: 'interact', optionId: 'shell' }).state;
+  renderer.render(snapshot({ narrative }));
+  const overlay = find(root, node => node.className === 'ludory-narrative__stage');
+  assert.equal(overlay.dataset.cgMode, 'overlay');
+  assert.ok(find(overlay, node => node.dataset.role === 'background'));
+  assert.ok(find(overlay, node => node.dataset.role === 'cg'));
+  assert.deepEqual(events, ['narrative:interact:take_item:shell']);
+  assert.deepEqual(JSON.parse(JSON.stringify(initialState)), before);
+  await renderer.unmount();
+});
+
+test('external HTML base cannot redirect presentation images across origins', async () => {
+  const { graph, catalog, initialState } = fixture();
+  const { root } = screen({ baseURI: 'https://evil.example/asset-proxy/' });
+  const renderer = createNarrativeRenderer({ graph, catalog, presentation: visualPresentation(graph) });
+  await renderer.mount({ root, viewport: { width: 390, height: 844, orientation: 'portrait' },
+    snapshot: snapshot(initialState), dispatchInput() {} });
+  const image = find(root, node => node.dataset.role === 'background');
+  assert.equal(image?.getAttribute('src'), 'https://ludory.local/story/assets/vis-harbor.webp');
+  await renderer.unmount();
+});
+
+test('renderer rejects an unvalidated presentation manifest before mounting', () => {
+  const { graph, catalog } = fixture();
+  assert.throws(() => createNarrativeRenderer({ graph, catalog, presentation: {
+    schemaVersion: 1, media: { bad: { kind: 'background', src: 'https://invalid.example/image.png' } }, beats: {},
+  } }), TypeError);
+});
 
 test('renderer mounts safely, shows escaped text and emits finite normalized action', async () => {
   const { graph, catalog, initialState } = fixture();

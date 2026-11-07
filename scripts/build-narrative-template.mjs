@@ -70,7 +70,7 @@ export async function buildNarrativeBundle() {
     stdin: { contents: [
       "export { defineGame } from '@ludory/core';",
       "export { defineNarrativeGraph, defineNarrativeCatalog, createNarrativeState } from '@ludory/narrative';",
-      "export { createNarrativeRenderer, createNarrativeRuntimeUpdate } from '@ludory/runtime-narrative';",
+      "export { createNarrativeRenderer, createNarrativeRuntimeUpdate, defineNarrativePresentation } from '@ludory/runtime-narrative';",
       "export { createRuntimeHost, createBrowserEnvironment, createBrowserStorage } from '@ludory/runtime';",
     ].join('\n'), resolveDir: root, sourcefile: 'narrative-exports.js' },
     bundle: true, platform: 'browser', format: 'esm', target: ['es2022'], minify: true,

@@ -1,9 +1,10 @@
 import {
   defineGame, defineNarrativeGraph, defineNarrativeCatalog, createNarrativeState,
   createRuntimeHost, createBrowserEnvironment, createBrowserStorage,
-  createNarrativeRenderer, createNarrativeRuntimeUpdate,
+  createNarrativeRenderer, createNarrativeRuntimeUpdate, defineNarrativePresentation,
 } from '../assets/ludory-narrative.js';
-import { graphData, catalogData, assets, labels, relationFacts } from './story.js';
+import * as story from './story.js';
+const { graphData, catalogData, assets, labels, relationFacts } = story;
 
 /** Use only validated game title data; never substitute the template demo's identity. */
 export function resolveNarrativeTitle(game, locale) {
@@ -71,10 +72,13 @@ function setStatus(status) { currentStatus = status; updateShell(); }
   const game = defineGame(await response.json());
   const graph = defineNarrativeGraph(graphData);
   const catalog = defineNarrativeCatalog(catalogData);
+  const presentation = story.presentationData === undefined ? undefined :
+    defineNarrativePresentation(graph, story.presentationData);
   const environment = createBrowserEnvironment({ root });
   const update = createNarrativeRuntimeUpdate({ graph, catalog });
   const renderer = createNarrativeRenderer({ graph, catalog, now: environment.now,
-    canBack: () => update.canGoBack(), assets, labels, relationFacts, preferredMobileOrientation });
+    canBack: () => update.canGoBack(), assets, labels, relationFacts, preferredMobileOrientation,
+    presentation });
   let storage;
   let integration;
   if (platform !== null) {

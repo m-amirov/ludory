@@ -1,5 +1,6 @@
 import { buildNarrativeJournal, resolveNarrativeView } from '@ludory/narrative';
 import { narrativeAction } from './update.mjs';
+import { resolveNarrativePresentation } from './presentation.mjs';
 import { NARRATIVE_CSS } from './styles.mjs';
 
 const UI = {
@@ -42,7 +43,7 @@ function localAsset(src) {
 /** Browser-only, DOM-based opt-in RuntimeRenderer. No SDK, server or camera. */
 export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets = {},
   labels = {}, relationFacts = [], preferredMobileOrientation = 'auto',
-  now = () => globalThis.performance.now(), canBack = () => false, premiumChoices } = {}) {
+  now = () => globalThis.performance.now(), canBack = () => false, premiumChoices, presentation } = {}) {
   if (!graph || !catalog) throw new TypeError('graph and catalog required');
   if (!UI[locale]) throw new TypeError('unsupported locale');
   if (!['auto', 'portrait'].includes(preferredMobileOrientation)) throw new TypeError('unsupported mobile orientation preference');
@@ -53,6 +54,11 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
     throw new TypeError('premiumChoices must provide a read-only access and unlock port');
   }
   if (premiumChoices?.assertGraphCompatibility) premiumChoices.assertGraphCompatibility(graph);
+  // Validate before inserting any authored image path in the DOM.
+  if (presentation !== undefined) resolveNarrativePresentation(graph, presentation, {
+    sceneId: graph.startSceneId, beatIndex: 0, flags: {}, memories: [], album: [], routeIntent: null,
+    routeLock: null, relations: {},
+  });
   let root = null;
   let style = null;
   let surface = null;
@@ -69,6 +75,8 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
   let pendingUnlock = null;
   let pendingRecovery = false;
   let unlockError = null;
+  let paintedStage = null;
+  let stageKey = null;
 
   function humanLabel(group, value) {
     const authored = labels?.[group]?.[value];
@@ -228,6 +236,62 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
     container.appendChild(image);
   }
 
+  function visualStage(view, narrativeState) {
+    if (presentation === undefined) return null;
+    // resolveNarrativeView may advance past an unavailable echo on a validated copy.
+    const scene = graph.scenes.find(item => item.id === view.sceneId);
+    const beatIndex = scene.beats.findIndex(item => item.id === view.beatId);
+    const displayState = { ...narrativeState, sceneId: view.sceneId, beatIndex };
+    const cue = resolveNarrativePresentation(graph, presentation, displayState);
+    const key = `${locale}:${view.beatId}:${cue?.id ?? ''}`;
+    if (paintedStage && stageKey === key) return { stage: paintedStage, cue };
+    const stage = element('div', undefined, 'ludory-narrative__stage');
+    paintedStage = stage;
+    stageKey = key;
+    stage.dataset.variantId = cue?.id ?? '';
+    stage.dataset.cgMode = cue?.cg?.mode ?? '';
+    if (!cue || cue.neutral) {
+      stage.dataset.neutral = cue?.neutral?.reason ?? 'unmapped';
+      return { stage, cue };
+    }
+    function addLayer(role, mediaId, extra = {}) {
+      const media = presentation.media[mediaId];
+      // document.baseURI may be redirected by an authored <base> element.
+      // Resolve against the actual document URL and reject non-HTTP origins.
+      let source;
+      try {
+        const documentUrl = new URL(root.ownerDocument.URL);
+        source = new URL(media.src, documentUrl);
+        if (!['http:', 'https:'].includes(source.protocol) || source.origin !== documentUrl.origin) {
+          throw new TypeError('presentation image origin mismatch');
+        }
+      } catch {
+        stage.dataset.degraded = 'true';
+        return;
+      }
+      const image = element('img', undefined, `ludory-narrative__${role}`);
+      image.dataset.role = role;
+      if (extra.slot) image.dataset.slot = extra.slot;
+      if (extra.characterId) image.dataset.characterId = extra.characterId;
+      image.setAttribute('src', source.href);
+      image.setAttribute('alt', media.alt?.[locale] ?? '');
+      image.setAttribute('decoding', 'async');
+      image.setAttribute('draggable', 'false');
+      image.addEventListener('error', () => {
+        // Only discard this broken layer. Do not restore the art from a previous beat.
+        image.remove();
+        stage.dataset.degraded = 'true';
+      });
+      stage.appendChild(image);
+    }
+    if (cue.cg?.mode !== 'replace-stage') {
+      if (cue.background) addLayer('background', cue.background);
+      for (const portrait of cue.portraits ?? []) addLayer('portrait', portrait.mediaId, portrait);
+    }
+    if (cue.cg) addLayer('cg', cue.cg.mediaId);
+    return { stage, cue };
+  }
+
   function unique(items) { return [...new Set(items)]; }
 
   function composer(panel, view) {
@@ -336,6 +400,7 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
       `${premiumChoices?.getRevision() ?? ''}:${confirmUnlock}:${pendingUnlock}:${pendingRecovery}:${unlockError}`;
     if (!force && lastRenderKey === key) return; // preserve focus and click targets across high-FPS frames
     const view = resolveNarrativeView(graph, catalog, state, locale);
+    const visual = visualStage(view, state);
     const beatChanged = selectedBeatId !== view.beatId;
     if (beatChanged) {
       selectedBeatId = view.beatId;
@@ -361,6 +426,11 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
     panel.appendChild(toolbar);
     if (journalOpen) journal(panel);
     else {
+      if (visual?.cue?.speaker) {
+        const speaker = element('p', visual.cue.speaker[locale], 'ludory-narrative__speaker');
+        speaker.dataset.ui = 'speaker';
+        panel.appendChild(speaker);
+      }
       const heading = element('h2', view.label || (view.type === 'ending' ? UI[locale].ending : view.sceneId));
       heading.setAttribute('tabindex', '-1');
       panel.appendChild(heading);
@@ -382,7 +452,8 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
     }
     const priorFocus = root.ownerDocument.activeElement;
     const focusWasInside = surface.contains?.(priorFocus) ?? false;
-    surface.replaceChildren(panel);
+    if (visual) surface.replaceChildren(visual.stage, panel);
+    else surface.replaceChildren(panel);
     if (focusWasInside) {
       let candidate;
       if (focusHint && typeof surface.querySelectorAll === 'function') {
@@ -407,6 +478,7 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
       dispatchInput = nextDispatch;
       style = element('style', NARRATIVE_CSS);
       surface = element('section', undefined, 'ludory-narrative');
+      if (presentation !== undefined) surface.dataset.visual = 'true';
       surface.dataset.mobilePreference = preferredMobileOrientation;
       surface.setAttribute('role', 'region');
       surface.setAttribute('aria-label', UI[locale].story);
@@ -446,6 +518,8 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
       pendingUnlock = null;
       pendingRecovery = false;
       unlockError = null;
+      paintedStage = null;
+      stageKey = null;
     },
   });
 }

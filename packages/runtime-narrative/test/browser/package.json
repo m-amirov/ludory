@@ -6,6 +6,7 @@
   "scripts": {
     "smoke": "node smoke.mjs",
     "smoke:n3": "node studio-n3-smoke.mjs",
+    "smoke:m4": "node studio-m4-visual-smoke.mjs",
     "smoke:f5b3": "node f5b3-platform-smoke.mjs",
     "smoke:economy-e5": "node economy-e5-smoke.mjs"
   },
