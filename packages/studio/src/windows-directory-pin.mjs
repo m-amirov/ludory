@@ -5,13 +5,16 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const nativePath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../native/build/Release/directory_pin.node');
-const requiredPinContractVersion = 4;
+const requiredPinContractVersion = 5;
 let native;
 
 export function assertWindowsDirectoryPinContract(candidate) {
   if (candidate?.pinContractVersion !== requiredPinContractVersion ||
       typeof candidate.open !== 'function' || typeof candidate.close !== 'function' ||
-      typeof candidate.createGuard !== 'function' || typeof candidate.removeGuard !== 'function') {
+      typeof candidate.createGuard !== 'function' || typeof candidate.removeGuard !== 'function' ||
+      typeof candidate.createRecoveryLock !== 'function' ||
+      typeof candidate.readRecoveryRecord !== 'function' ||
+      typeof candidate.createRecoveryRecord !== 'function') {
     throw new Error(`Stale or invalid Win32 native pin security contract: requires pinContractVersion=${requiredPinContractVersion}; rebuild from trusted Ludory source with npm run build:windows-pin`);
   }
 }
@@ -42,7 +45,13 @@ export function openProtectedDirectory(directory) {
         pin.fileId !== after.ino) {
       throw new Error(`Changed Windows directory while pinning: ${directory}`);
     }
+    const created = nativeRecord => ({ fileId: nativeRecord.fileId,
+      close: () => addon.close(nativeRecord.token),
+      remove: () => addon.removeGuard(nativeRecord.token) });
     return { dev: after.dev, ino: after.ino, close: () => addon.close(pin.token),
+      createRecoveryLock: basename => created(addon.createRecoveryLock(pin.token, basename)),
+      readRecoveryRecord: basename => addon.readRecoveryRecord(pin.token, basename),
+      createRecoveryRecord: (basename, bytes) => created(addon.createRecoveryRecord(pin.token, basename, bytes)),
       createGuard: basename => {
         const guard = addon.createGuard(pin.token, basename);
         try {

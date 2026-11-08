@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { canonicalPhysicalDirectory } from '@ludory/core';
+import { openRecoveryStore } from './host-recovery-writer.mjs';
 
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const digest = /^[a-f0-9]{64}$/;
@@ -247,19 +248,34 @@ function validRecoveryDetails(details) {
     [details.fromCommit, details.toCommit].every(value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value));
 }
 
-export function readComponentRecoveryCheckpoint(project) {
+export function readComponentRecoveryCheckpoint(project, options = {}) {
   let location;
   try { location = recoveryPath(project); }
   catch (error) {
     if (error.code === 'TRUST_MISSING') return null;
     throw error;
   }
+  const basename = hash(Buffer.from(path.resolve(project)));
+  const binding = componentHostRegistryBinding(project);
+  const store = openRecoveryStore(location.root, { ...options, readOnly: true });
   let bytes;
-  try { bytes = readSecure(location.checkpoint); }
-  catch (error) {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  }
+  try {
+    if (!binding.rootExists || store.rootIdentity !== binding.ancestorIdentity) {
+      throw trustError('host registry identity changed during checkpoint read');
+    }
+    const locked = () => {
+      if (store.read(`${basename}.json.lock`) !== null) {
+        throw trustError('unfinished host recovery publication lock exists; inspect before trust');
+      }
+    };
+    locked();
+    bytes = store.read(`${basename}.recovery.json`);
+    locked();
+    if (!encode(componentHostRegistryBinding(project)).equals(encode(binding))) {
+      throw trustError('host registry identity changed during checkpoint read');
+    }
+    if (bytes === null) return null;
+  } finally { store.close(); }
   let record;
   try { record = JSON.parse(bytes.toString('utf8')); }
   catch { throw trustError('invalid component recovery checkpoint JSON'); }
@@ -285,7 +301,7 @@ export function assertComponentRecoveryCheckpoint(project, expected) {
 }
 
 export function registerComponentRecoveryCheckpoint(project, details,
-  expectedHostBinding = componentHostRegistryBinding(project)) {
+  expectedHostBinding = componentHostRegistryBinding(project), options = {}) {
   if (!validRecoveryDetails(details)) throw trustError('invalid component recovery checkpoint details');
   assertHostRegistryBinding(project, expectedHostBinding);
   const location = recoveryPath(project, true);
@@ -296,31 +312,51 @@ export function registerComponentRecoveryCheckpoint(project, details,
   if (!createdRootBinding.rootExists || createdRootBinding.root !== location.root) {
     throw trustError('created host registry destination differs from expected path');
   }
-  return withRecordLock(location, () => {
+  const basename = hash(Buffer.from(path.resolve(project)));
+  const store = openRecoveryStore(location.root, options);
+  let lock;
+  let checkpoint;
+  try {
+    if (store.rootIdentity !== createdRootBinding.ancestorIdentity) {
+      throw trustError('pinned host registry identity changed before checkpoint publication');
+    }
+    lock = store.createLock(`${basename}.json.lock`);
+    const checkRegistry = () => {
+      if (store.rootIdentity !== createdRootBinding.ancestorIdentity ||
+          !encode(componentHostRegistryBinding(project)).equals(encode(createdRootBinding))) {
+        throw trustError('host registry physical identity changed during checkpoint publication');
+      }
+    };
     assertHostRegistryBinding(project, expectedHostBinding, { created: true });
-    if (!encode(componentHostRegistryBinding(project)).equals(encode(createdRootBinding))) {
-      throw trustError('created host registry physical identity changed before checkpoint write');
-    }
-    try {
-      load(project, location);
+    checkRegistry();
+    if (store.read(`${basename}.json`) !== null) {
       throw trustError('already trusted Studio project cannot be re-anchored by recovery');
-    } catch (error) {
-      if (error.code !== 'TRUST_MISSING') throw error;
     }
-    try {
-      fs.lstatSync(location.checkpoint);
+    if (store.read(`${basename}.recovery.json`) !== null) {
       throw trustError('existing component recovery checkpoint cannot be replaced');
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
     }
     const record = { schemaVersion: 1, project: path.resolve(project), ...details };
-    const fd = fs.openSync(location.checkpoint, fs.constants.O_WRONLY | fs.constants.O_CREAT |
-      fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
-    try { fs.writeFileSync(fd, encode(record)); fs.fsyncSync(fd); }
-    finally { fs.closeSync(fd); }
-    syncDir(location.root);
+    checkpoint = store.createRecord(`${basename}.recovery.json`, encode(record));
+    assertHostRegistryBinding(project, expectedHostBinding, { created: true });
+    checkRegistry();
+    // The checkpoint is not authority until this pinned lock is removed.
+    store.removeCreated(lock);
+    lock = null;
     return record;
-  });
+  } catch (error) {
+    // Never remove an old checkpoint. Only this call's retained exclusive
+    // creation handle may be rolled back through the *same* pinned directory.
+    let rollbackSafe = !error.recoveryRollbackUnsafe;
+    if (checkpoint) {
+      try { store.removeCreated(checkpoint); }
+      catch (rollbackError) { rollbackSafe = false; error.rollbackError = rollbackError; }
+    }
+    if (lock && rollbackSafe) {
+      try { store.removeCreated(lock); }
+      catch (rollbackError) { error.lockCleanupError = rollbackError; }
+    }
+    throw error;
+  } finally { store.close(); }
 }
 
 // Separate, host-owned checkpoints bind source-repair consent and journal events.

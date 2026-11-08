@@ -383,6 +383,27 @@ directory identity, selected host registry path/physical identity, or history
 witness change after preview, apply refuses to use the stale digest. Git is
 not cryptographic proof of who authored a
 commit; **the owner's independent review is the authorization boundary**.
+
+Recovery checkpoint publication holds a **physical host-registry directory
+handle** throughout its exclusive lock, conflict checks, canonical record
+write, flush, and rollback. Linux requires a working `/proc/self/fd` procfs
+mount with safe directory-descriptor operations. Windows requires the trusted
+native `npm run build:windows-pin` module with `pinContractVersion=5`, whose
+`NtCreateFile(RootDirectory)` operations resolve only reserved checkpoint
+names relative to the held handle. Windows preview/read is read-only;
+publication additionally holds an undeletable native child guard. There is
+**no path-based fallback** on unsupported hosts or when the native module is
+missing/stale. Ordinary Studio trust and recovery remain separate decisions.
+
+The per-project `.json.lock` is the **publication commit barrier**: a complete
+checkpoint must not be trusted until that lock has been removed. An aborted
+write removes only its own newly created checkpoint through the pinned root;
+if rollback cannot be verified, the lock is deliberately retained and later
+`components trust`, status and recovery reads block. Do not manually remove
+the lock or replay the recovery without inspecting the physical registry and
+confirming no writer is running. Windows native/NTFS behavior requires an
+actual Windows CI result; a Linux PASS does not establish that gate.
+
 Neither `RECOVERED` nor `IN_SYNC` means artwork rights, platform SDK,
 moderation or publication readiness.
 
@@ -501,7 +522,7 @@ code: `ludory components native --json` returns `READY` only after acquiring
 and releasing a real native directory handle, `BLOCKED` with a precise build
 command if Windows setup is missing, or `NOT_REQUIRED` off Windows. Build
 once from the trusted Ludory checkout using `npm run build:windows-pin`, then
-repeat the doctor. The loader requires `pinContractVersion=4` on every use;
+repeat the doctor. The loader requires `pinContractVersion=5` on every use;
 stale `.node` files from earlier metadata-only builds fail closed even if
 they still load and expose the same functions. Rebuild after updating the
 native source. Do not use a downloaded or unverified `.node` binary;

@@ -257,6 +257,134 @@ test('recovery refuses a just-created registry replaced before lock acquisition'
   assert.equal(readComponentRecoveryCheckpoint(f.project), null);
 });
 
+for (const initiallyExisting of [false, true]) {
+  test(`recovery never publishes into a swapped registry at checkpoint open (root initially ${initiallyExisting ? 'present' : 'absent'})`, t => {
+    if (process.platform !== 'linux') return t.skip('Linux descriptor-relative host publication');
+    const f = fixture(t);
+    const selectedHost = process.env.LUDORY_STUDIO_TRUST_DIR;
+    if (initiallyExisting) fs.mkdirSync(selectedHost, { recursive: true, mode: 0o700 });
+    const preview = previewComponentGitRecovery(f.project, {
+      fromCommit: f.fromCommit, toCommit: f.toCommit, catalog: f.catalog,
+    });
+    assert.equal(preview.status, 'NEEDS_USER_ACTION', JSON.stringify(preview));
+    const beforeGame = fs.readFileSync(path.join(f.project, 'src/main.js'));
+    const oldOpen = fs.openSync;
+    let swapped = false;
+    fs.openSync = function swapJustBeforeCheckpointCreate(filename, ...args) {
+      if (!swapped && String(filename).endsWith('.recovery.json') &&
+          (args[0] & fs.constants.O_CREAT)) {
+        swapped = true;
+        fs.renameSync(selectedHost, `${selectedHost}-original`);
+        fs.mkdirSync(selectedHost, { mode: 0o700 });
+      }
+      return oldOpen.call(this, filename, ...args);
+    };
+    try {
+      assert.throws(() => acceptComponentGitRecovery(preview, preview.recoverySha256),
+        /host|registry|changed|ENOENT|identity|conflict/i);
+    } finally { fs.openSync = oldOpen; }
+    assert.equal(swapped, true, 'attack must intercept the actual checkpoint create');
+    assert.equal(readComponentRecoveryCheckpoint(f.project), null,
+      'substituted registry must contain no usable recovery authority');
+    assert.deepEqual(fs.readFileSync(path.join(f.project, 'src/main.js')), beforeGame);
+  });
+}
+
+test('recovery interrupted after record bytes were written cannot expose usable authority', t => {
+  if (process.platform !== 'linux') return t.skip('Linux rooted store interruption');
+  const f = fixture(t);
+  const selectedHost = process.env.LUDORY_STUDIO_TRUST_DIR;
+  const preview = previewComponentGitRecovery(f.project, {
+    fromCommit: f.fromCommit, toCommit: f.toCommit, catalog: f.catalog,
+  });
+  assert.equal(preview.status, 'NEEDS_USER_ACTION', JSON.stringify(preview));
+  const oldFsync = fs.fsyncSync;
+  let switched = false;
+  fs.fsyncSync = function swapAfterCheckpointWrite(fd) {
+    let target = '';
+    try { target = fs.readlinkSync(`/proc/self/fd/${fd}`); } catch { /* Closed or anonymous handle. */ }
+    if (!switched && target.endsWith('.recovery.json')) {
+      switched = true;
+      fs.renameSync(selectedHost, `${selectedHost}-original`);
+      fs.mkdirSync(selectedHost, { mode: 0o700 });
+    }
+    return oldFsync.call(this, fd);
+  };
+  try {
+    assert.throws(() => acceptComponentGitRecovery(preview, preview.recoverySha256),
+      /host|registry|changed|ENOENT|identity|conflict/i);
+  } finally { fs.fsyncSync = oldFsync; }
+  assert.equal(switched, true, 'attack must occur after checkpoint bytes were written');
+  assert.equal(readComponentRecoveryCheckpoint(f.project), null);
+  process.env.LUDORY_STUDIO_TRUST_DIR = `${selectedHost}-original`;
+  try {
+    assert.equal(readComponentRecoveryCheckpoint(f.project), null,
+      'a clean rollback must remove the incomplete checkpoint');
+  } catch (error) {
+    if (error instanceof assert.AssertionError) throw error;
+    assert.match(error.message, /lock|unfinished|blocked|conflict/i,
+      'a retained lock must prevent adoption of an interrupted checkpoint');
+  }
+});
+
+test('failed rollback retains the physical registry lock and blocks checkpoint readers', t => {
+  if (process.platform !== 'linux') return t.skip('Linux pinned rollback');
+  const f = fixture(t);
+  const selectedHost = process.env.LUDORY_STUDIO_TRUST_DIR;
+  const preview = previewComponentGitRecovery(f.project, {
+    fromCommit: f.fromCommit, toCommit: f.toCommit, catalog: f.catalog,
+  });
+  assert.equal(preview.status, 'NEEDS_USER_ACTION', JSON.stringify(preview));
+  const originalOpen = fs.openSync;
+  const originalUnlink = fs.unlinkSync;
+  let swapped = false;
+  let rollbackDenied = false;
+  fs.openSync = function swapAfterRecordOpen(filename, ...args) {
+    if (!swapped && String(filename).endsWith('.recovery.json') &&
+        (args[0] & fs.constants.O_CREAT)) {
+      swapped = true;
+      fs.renameSync(selectedHost, `${selectedHost}-original`);
+      fs.mkdirSync(selectedHost, { mode: 0o700 });
+    }
+    return originalOpen.call(this, filename, ...args);
+  };
+  fs.unlinkSync = function denyRollback(filename, ...args) {
+    if (swapped && String(filename).endsWith('.recovery.json')) {
+      rollbackDenied = true;
+      throw Object.assign(new Error('injected rollback EACCES'), { code: 'EACCES' });
+    }
+    return originalUnlink.call(this, filename, ...args);
+  };
+  try {
+    assert.throws(() => acceptComponentGitRecovery(preview, preview.recoverySha256), /registry|host|identity|changed/i);
+  } finally {
+    fs.openSync = originalOpen;
+    fs.unlinkSync = originalUnlink;
+  }
+  assert.equal(swapped, true);
+  assert.equal(rollbackDenied, true);
+  assert.equal(readComponentRecoveryCheckpoint(f.project), null);
+  process.env.LUDORY_STUDIO_TRUST_DIR = `${selectedHost}-original`;
+  assert.throws(() => readComponentRecoveryCheckpoint(f.project), /lock|unfinished|blocked/i);
+});
+
+test('a canonical checkpoint is not trusted while its stable publication lock exists', t => {
+  const f = fixture(t);
+  const preview = previewComponentGitRecovery(f.project, {
+    fromCommit: f.fromCommit, toCommit: f.toCommit, catalog: f.catalog,
+  });
+  assert.equal(preview.status, 'NEEDS_USER_ACTION', JSON.stringify(preview));
+  assert.equal(acceptComponentGitRecovery(preview, preview.recoverySha256).status, 'RECOVERED');
+  const registry = process.env.LUDORY_STUDIO_TRUST_DIR;
+  const checkpoints = fs.readdirSync(registry).filter(name => name.endsWith('.recovery.json'));
+  assert.equal(checkpoints.length, 1);
+  const lock = path.join(registry, checkpoints[0].replace('.recovery.json', '.json.lock'));
+  fs.writeFileSync(lock, 'interrupted\n', { flag: 'wx', mode: 0o600 });
+  assert.throws(() => readComponentRecoveryCheckpoint(f.project), /lock|unfinished|blocked|conflict/i);
+  assert.equal(previewComponentTrust(f.project).status, 'CONFLICT');
+  assert.equal(componentStatus(f.project, { catalog: f.catalog }).status, 'BLOCKED');
+});
+
 test('stale author proof cannot be silently accepted after preview', t => {
   const f = fixture(t);
   const preview = previewComponentGitRecovery(f.project, {
