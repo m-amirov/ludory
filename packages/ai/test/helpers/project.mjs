@@ -5,8 +5,13 @@ import { spawnSync } from 'node:child_process';
 import { planCreate, applyCreatePlan } from '../../../studio/src/scaffold.mjs';
 
 export function runGit(project, ...args) {
-  const result = spawnSync('git', args, { cwd: project, encoding: 'utf8', timeout: 5_000 });
-  if (result.status !== 0) throw new Error(`Git ${args.join(' ')}: ${result.stderr || result.error?.message}`);
+  // Concurrent Windows CI fixtures can spend more than five seconds in git add
+  // while checking out LF-authored files with core.autocrlf enabled.
+  const result = spawnSync('git', args, { cwd: project, encoding: 'utf8', timeout: 30_000 });
+  if (result.status !== 0) {
+    const failure = result.error?.message || result.stderr || `exit status ${result.status}`;
+    throw new Error(`Git ${args.join(' ')}: ${failure}`);
+  }
   return result.stdout.trim();
 }
 
