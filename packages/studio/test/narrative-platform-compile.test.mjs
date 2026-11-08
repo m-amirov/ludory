@@ -54,6 +54,20 @@ test('F5b2 compiles actual authored story and HTML into distinct platform SDK en
   }
 });
 
+test('F5b2 compiles legacy authored stories without optional presentationData export', t => {
+  const { project } = fixture(t);
+  const filename = path.join(project, 'src/story.js');
+  const current = fs.readFileSync(filename, 'utf8');
+  const legacy = current.replace(/^export const presentationData = undefined;?\n/m, '');
+  assert.notEqual(legacy, current, 'fixture must remove the optional export');
+  fs.writeFileSync(filename, legacy);
+  refreshStoryProof(project);
+  for (const target of ['yandex-games', 'vk-games']) {
+    const output = compileNarrativePlatformEntrypoint({ sourceRoot: project, target });
+    assert.match(output.entryBytes.toString('utf8'), /F5B2_CUSTOM_STORY_214/);
+  }
+});
+
 test('F5b2 materializes separate trusted Studio SDK projects without editing author files', t => {
   const { project } = fixture(t);
   const before = fs.readFileSync(path.join(project, 'src/story.js'));

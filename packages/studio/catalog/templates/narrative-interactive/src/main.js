@@ -72,8 +72,12 @@ function setStatus(status) { currentStatus = status; updateShell(); }
   const game = defineGame(await response.json());
   const graph = defineNarrativeGraph(graphData);
   const catalog = defineNarrativeCatalog(catalogData);
-  const presentation = story.presentationData === undefined ? undefined :
-    defineNarrativePresentation(graph, story.presentationData);
+  // Reflect.get keeps the opt-in export optional for legacy authored stories.
+  // Static property reads on an ESM namespace trigger an esbuild missing-export
+  // warning, which is a hard gate in SDK platform export compilation.
+  const authoredPresentation = Reflect.get(story, 'presentationData');
+  const presentation = authoredPresentation === undefined ? undefined :
+    defineNarrativePresentation(graph, authoredPresentation);
   const environment = createBrowserEnvironment({ root });
   const update = createNarrativeRuntimeUpdate({ graph, catalog });
   const renderer = createNarrativeRenderer({ graph, catalog, now: environment.now,

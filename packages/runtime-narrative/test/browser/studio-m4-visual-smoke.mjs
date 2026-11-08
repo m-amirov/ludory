@@ -75,18 +75,23 @@ async function runCase(base, size, name) {
     await page.reload();
     if (await stage.getAttribute('data-variant-id') !== 'intro') throw new Error(`${name}: reload lost initial visual beat`);
     await page.getByRole('button', { name: 'Далее' }).click();
+    // Runtime paints on a later frame; wait for the *new* stage, not the click event.
+    await page.locator('.ludory-narrative__stage[data-variant-id="neutral"]').waitFor();
     if (await stage.getAttribute('data-variant-id') !== 'neutral' || await stage.locator('img').count()) {
       throw new Error(`${name}: explicit neutral leaked previous art`);
     }
     await page.getByRole('button', { name: 'Сфотографировать огни маяка' }).click();
+    await page.locator('.ludory-narrative__stage[data-variant-id="replace"]').waitFor();
     if (await stage.getAttribute('data-cg-mode') !== 'replace-stage' ||
         await stage.locator('img').count() !== 1) throw new Error(`${name}: CG replace-stage invalid`);
     await stage.locator('[data-role=cg]').evaluate(img => img.decode());
     await page.getByRole('button', { name: 'Белая ракушка' }).click();
+    await page.locator('.ludory-narrative__stage[data-variant-id="overlay"]').waitFor();
     if (await stage.getAttribute('data-cg-mode') !== 'overlay' ||
         await stage.locator('[data-role=background]').count() !== 1 ||
         await stage.locator('[data-role=cg]').count() !== 1) throw new Error(`${name}: CG overlay invalid`);
     await page.getByRole('button', { name: 'Назад' }).click();
+    await page.locator('.ludory-narrative__stage[data-variant-id="replace"]').waitFor();
     if (await stage.getAttribute('data-cg-mode') !== 'replace-stage') throw new Error(`${name}: Back did not restore CG`);
     await page.getByRole('button', { name: 'Белая ракушка' }).click();
     await page.getByRole('button', { name: 'Отправить' }).click();

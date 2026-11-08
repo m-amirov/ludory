@@ -72,7 +72,7 @@ test('narrative source bundle is deterministic and exactly matches shipped bytes
 test('optional story presentation is backward compatible with an old story.js export list', async t => {
   const source = fs.readFileSync(path.join(originalTemplate, 'src/main.js'), 'utf8');
   assert.match(source, /import \* as story from ['"]\.\/story\.js['"]/);
-  assert.match(source, /story\.presentationData === undefined/);
+  assert.match(source, /Reflect\.get\(story, 'presentationData'\)/);
   assert.doesNotMatch(source, /import\s*\{[^}]*presentationData[^}]*\}\s*from\s*['"]\.\/story\.js['"]/);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-legacy-story-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
