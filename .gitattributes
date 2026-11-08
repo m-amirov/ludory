@@ -10,6 +10,10 @@ packages/ai/vendor/codex-chatgpt-web/LICENSES/* text eol=lf
 # F6e BOM is compared byte-exactly with canonical LF-rendered inventory.
 docs/evidence/f6e-components.cdx.json text eol=lf
 
+# Studio template bundles are compared byte-for-byte with freshly built LF output.
+# Never let Windows checkout normalize the committed JS bundles to CRLF.
+packages/studio/catalog/templates/*/assets/ludory-*.js text eol=lf
+
 # N3 author proofs hash the exact text bytes; Windows checkout must not rewrite LF.
 packages/studio/catalog/templates/narrative-interactive/*.json text eol=lf
 packages/studio/catalog/templates/narrative-interactive/*.html text eol=lf
