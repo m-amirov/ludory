@@ -41,7 +41,7 @@ test('new narrative games opt into portrait metadata without imposing it on othe
     const htmlPath = path.join(project, 'index.html');
     assert.equal(mobileOrientationMeta(fs.readFileSync(htmlPath, 'utf8')), 'portrait', template);
     const receipt = JSON.parse(fs.readFileSync(path.join(project, 'ludory.studio.json')));
-    assert.equal(receipt.template.version, template === 'narrative-interactive' ? '1.2.3' : '1.1.0');
+    assert.equal(receipt.template.version, template === 'narrative-interactive' ? '1.2.4' : '1.1.0');
     // An author can opt out in a newly created game; catalog and the creation receipt remain unchanged.
     const html = fs.readFileSync(htmlPath, 'utf8');
     fs.writeFileSync(htmlPath, html.replace('content="portrait"', 'content="auto"'));
