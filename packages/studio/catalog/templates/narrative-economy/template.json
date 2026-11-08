@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "narrative-economy",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Opt-in narrative wallet/store starter (disabled by default; hosted cloud adapters required)",
   "profile": "narrative-game",
   "engine": "web",

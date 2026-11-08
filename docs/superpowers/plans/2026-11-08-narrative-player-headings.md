@@ -13,6 +13,7 @@
 ## Global Constraints
 
 - Template `narrative-interactive` must advance exactly `1.2.4` → `1.2.5` with deterministic generated assets.
+- Because both templates embed the shared Runtime, `narrative-economy` must advance `1.0.1` → `1.0.2` with a regenerated managed bundle; economy remains opt-in.
 - Do not change internal narrative IDs, state/save shape, authored graph, media rights, music, economy, or platform release behavior.
 - Do not manually edit Studio-managed files in the game; no host-trust bypass. Game PR #3 stays Draft against PR #2.
 - Work from merged Ludory `main`, in `LUDORY/.worktrees/<branch>`; preserve unrelated dirty work and backups.
@@ -49,6 +50,7 @@
 **Files:**
 - Modify: `packages/studio/catalog/templates/narrative-interactive/template.json`.
 - Regenerate: `packages/studio/catalog/templates/narrative-interactive/assets/ludory-narrative.js` using the canonical script.
+- Modify: `packages/studio/catalog/templates/narrative-economy/template.json` and regenerate its `assets/ludory-economy.js` bundle (shared Runtime dependency).
 - Modify tests: `packages/studio/test/catalog.test.mjs`, `packages/studio/test/narrative-template.test.mjs`, `packages/studio/test/component-updates.test.mjs`.
 - Update relevant version documentation in `packages/studio/README.md` if it calls 1.2.4 the latest.
 
@@ -56,10 +58,10 @@
 - Consumes updated Runtime exports and `scripts/build-narrative-template.mjs`.
 - Produces real template descriptor version `1.2.5` and a changed managed bundle; Studio `planComponentUpdate()` must yield `READY` for an unmodified, owned 1.2.4 fixture.
 
-- [ ] **Step 1: Write red tests.** Assert template version `1.2.5`, generated bundle check behavior, and fixture upgrading real `1.2.4` managed bundle to `1.2.5` without writes to `src/story.js`, `narrative-assets.json` or image assets; backup persists.
+- [ ] **Step 1: Write red tests.** Assert interactive version `1.2.5`, economy version `1.0.2`, generated bundle check behavior, and fixture upgrading the owned `1.2.4` managed bundle to `1.2.5` without writes to `src/story.js`, `narrative-assets.json` or image assets; backup persists.
 - [ ] **Step 2: Verify red.** `node --test packages/studio/test/catalog.test.mjs packages/studio/test/narrative-template.test.mjs packages/studio/test/component-updates.test.mjs`; expect new version/upgrade assertions to fail against 1.2.4.
-- [ ] **Step 3: Regenerate.** Bump the descriptor to `1.2.5`; execute `npm run build:narrative-template`; adjust version-aware tests and README without unrelated edits.
-- [ ] **Step 4: Verify green and reproducibility.** Run `npm run check:narrative-template`, the three focused Studio tests, `npm run check`, and `git diff --check`; check rebuilt asset is deterministic. No `npm test` PASS claim unless the complete run finishes.
+- [ ] **Step 3: Regenerate.** Bump descriptors to `1.2.5` / `1.0.2`; execute `npm run build:narrative-template` and `npm run build:economy-template`; adjust version-aware tests and README without unrelated edits.
+- [ ] **Step 4: Verify green and reproducibility.** Run `npm run check:narrative-template`, `npm run check:economy-template`, the three focused Studio tests, `npm run check`, `npm test`, and `git diff --check`; check rebuilt assets are deterministic. No `npm test` PASS claim unless the complete run finishes.
 - [ ] **Step 5: Commit.** Stage only template, generated bundle, relevant tests and documentation; `git commit -m "fix(studio): ship narrative heading policy in template 1.2.5"`.
 
 ### Task 3: GitHub review, then game-side adoption

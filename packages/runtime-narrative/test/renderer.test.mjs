@@ -25,6 +25,9 @@ class FakeElement {
   replaceChildren(...nodes) { for (const node of this.children) node.parent = null; this.children = []; nodes.forEach(node => this.appendChild(node)); }
   addEventListener(type, listener) { this.listeners.set(type, listener); }
   click() { this.listeners.get('click')?.({ detail: 1 }); }
+  contains(node) { return node === this || this.children.some(child => child.contains(node)); }
+  querySelector(selector) { return selector === 'h2' ? find(this, node => node.tagName === 'H2') : null; }
+  focus() { this.ownerDocument.activeElement = this; }
 }
 
 function find(node, predicate) {
@@ -46,6 +49,17 @@ function snapshot(state) {
   return { schemaVersion: 1, gameId: 'n2-fixture', gameVersion: '1.0.0', revision: 0, state };
 }
 
+function pilotStates(graph, catalog, initialState) {
+  const states = [initialState.narrative];
+  const actions = [
+    { type: 'next' }, { type: 'interact', optionId: 'take' },
+    { type: 'interact', optionId: 'shell' }, { type: 'interact', optionId: 'warm' },
+    { type: 'next' }, { type: 'choose', optionId: 'apart' },
+  ];
+  for (const action of actions) states.push(advanceNarrative(graph, catalog, states.at(-1), action).state);
+  return states.map(narrative => snapshot({ narrative }));
+}
+
 function visualPresentation(graph) {
   return defineNarrativePresentation(graph, { schemaVersion: 1, media: {
     harbor: { kind: 'background', src: 'assets/vis-harbor.webp', alt: { ru: 'Гавань', en: 'Harbor' } },
@@ -59,6 +73,72 @@ function visualPresentation(graph) {
     send_message: [{ id: 'overlay-memory', background: 'harbor', cg: { mediaId: 'memory', mode: 'overlay' } }],
   } });
 }
+
+test('unlabeled dialogue, choice and echo keep engine IDs in data attributes, not headings or accessible names', async () => {
+  const { graph, catalog, initialState } = fixture();
+  const { root } = screen();
+  const renderer = createNarrativeRenderer({ graph, catalog });
+  const states = pilotStates(graph, catalog, initialState);
+  await renderer.mount({ root, viewport: { width: 390, height: 844, orientation: 'portrait' },
+    snapshot: snapshot(initialState), dispatchInput() {} });
+  const panel = () => find(root, node => node.tagName === 'ARTICLE');
+  assert.equal(Boolean(find(panel(), node => node.tagName === 'H2')), false);
+  assert.equal(panel().getAttribute('aria-label'), 'История');
+  assert.equal(panel().dataset.sceneId, 'start');
+  assert.equal(panel().dataset.beatId, 'intro');
+  renderer.setLocale('en');
+  assert.equal(panel().getAttribute('aria-label'), 'Narrative');
+  renderer.render(states[5]);
+  assert.equal(find(panel(), node => node.tagName === 'H2'), null);
+  assert.equal(panel().dataset.beatId, 'branch');
+  renderer.render(states[4]);
+  assert.equal(find(panel(), node => node.tagName === 'H2'), null);
+  assert.equal(panel().dataset.beatId, 'echo');
+  await renderer.unmount();
+});
+
+test('authored interaction labels and localized ending headings remain visible', async () => {
+  const { graph, catalog, initialState } = fixture();
+  const { root } = screen();
+  const renderer = createNarrativeRenderer({ graph, catalog });
+  const states = pilotStates(graph, catalog, initialState);
+  await renderer.mount({ root, viewport: { width: 390, height: 844, orientation: 'portrait' },
+    snapshot: snapshot(initialState), dispatchInput() {} });
+  const heading = () => find(root, node => node.tagName === 'H2');
+  renderer.render(states[1]);
+  assert.equal(heading()?.textContent, 'Сделать фото');
+  renderer.render(states[2]);
+  assert.equal(heading()?.textContent, 'Выбрать сувенир');
+  renderer.render(states[3]);
+  assert.equal(heading()?.textContent, 'Написать сообщение');
+  renderer.setLocale('en');
+  assert.equal(heading()?.textContent, 'Compose a message');
+  renderer.render(states[6]);
+  assert.equal(heading()?.textContent, 'The end');
+  renderer.setLocale('ru');
+  assert.equal(heading()?.textContent, 'Конец истории');
+  await renderer.unmount();
+});
+
+test('focus moves to authored heading, then to panel when a following beat has no heading', async () => {
+  const { graph, catalog, initialState } = fixture();
+  const { root } = screen();
+  const renderer = createNarrativeRenderer({ graph, catalog });
+  const states = pilotStates(graph, catalog, initialState);
+  await renderer.mount({ root, viewport: { width: 390, height: 844, orientation: 'portrait' },
+    snapshot: snapshot(initialState), dispatchInput() {} });
+  const action = () => find(root, node => node.tagName === 'BUTTON' && node.dataset.action);
+  action().focus();
+  renderer.render(states[1]);
+  assert.equal(root.ownerDocument.activeElement.tagName, 'H2');
+  action().focus();
+  renderer.render(states[5]);
+  const panel = find(root, node => node.tagName === 'ARTICLE');
+  assert.equal(root.ownerDocument.activeElement, panel);
+  assert.equal(panel.getAttribute('tabindex'), '-1');
+  assert.equal(panel.getAttribute('aria-live'), 'polite');
+  await renderer.unmount();
+});
 
 test('opt-in stage draws background, portrait, speaker and accessible artwork, and updates locale', async () => {
   const { graph, catalog, initialState } = fixture();

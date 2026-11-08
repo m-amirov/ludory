@@ -35,9 +35,14 @@ it is deliberately out of scope for this corrective change.
 ## Distribution and dependencies
 
 - Change only the shared `packages/runtime-narrative/src/renderer.mjs` behavior,
-  its tests, and the generated Studio narrative bundle. Increment the real
+  its tests, and the generated Studio bundles that embed it. Increment the real
   `narrative-interactive` template version from `1.2.4` to **`1.2.5`** because
   its managed `assets/ludory-narrative.js` bytes change.
+- The same shared renderer is also bundled into the separately opt-in
+  `narrative-economy` template. Keep its checked-in bundle reproducible and
+  advance its managed template version from `1.0.1` to **`1.0.2`**, without
+  changing wallet, purchases or premium-choice behavior. This is a packaging
+  dependency discovered by the full workspace check, not economy activation.
 - Test a legitimate Studio `1.2.4` → `1.2.5` component update: only managed
   bundle/manifest may change, and an ownership backup must be kept; authored
   story, visual map and asset proof bytes must remain identical.
