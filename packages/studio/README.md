@@ -345,7 +345,7 @@ unreferenced demo media is supported. New images are author data, not
 Studio-managed components; do not treat an `IN_SYNC` result as narrative,
 copyright or release QA.
 
-`narrative-interactive` **1.2.3** adds optional `presentationData` consumed
+`narrative-interactive` **1.2.3** added optional `presentationData` consumed
 from the author-owned `src/story.js` via namespace import. Older authored
 stories without that export continue to launch unchanged; the newer runtime
 bundle is still managed by Studio. Visual images use flat `assets/vis-*.webp`
@@ -355,6 +355,10 @@ image SHA before staging or exporting, rejects deletion of the proof file and
 rejects any unproved raster file under `assets/`; unsafe symlinks also fail.
 Updating
 managed components never grants Studio ownership over such new files.
+Template **1.2.4** preserves that contract and increments the SemVer after
+the launcher switched to `Reflect.get(story, 'presentationData')` for warning-free
+legacy SDK exports. Studio-created 1.2.3 games can update the managed launcher
+without rewriting their authored story, proofs or visual assets.
 The shared Narrative Runtime bundle in the separately opt-in
 `narrative-economy` template is refreshed in **1.0.1**; this does not enable
 currency or premium choices in the interactive template.

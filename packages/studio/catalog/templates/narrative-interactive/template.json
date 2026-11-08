@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "narrative-interactive",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "description": "Offline, graph-driven interactive narrative sample with memories and messages",
   "profile": "narrative-game",
   "engine": "web",

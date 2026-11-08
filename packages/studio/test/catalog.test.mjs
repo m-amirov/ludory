@@ -32,7 +32,7 @@ test('built-in catalogs are versioned, valid, and only expose public descriptors
   assert.deepEqual(showCatalog('templates', 'narrative-basic').files, ['index.html', 'src/main.js']);
   assert.equal(showCatalog('templates', 'narrative-basic').version, '1.1.0');
   const interactive = showCatalog('templates', 'narrative-interactive');
-  assert.equal(interactive.version, '1.2.3');
+  assert.equal(interactive.version, '1.2.4');
   assert.deepEqual(interactive.authorFiles, [
     'src/story.js', 'narrative-assets.json', 'assets/lighthouse.svg', 'assets/shoreline.svg',
   ]);
@@ -43,6 +43,21 @@ test('built-in catalogs are versioned, valid, and only expose public descriptors
   const first = loadCatalog().templates.get('web-basic');
   assert.ok(first.assets.get('index.html').bytes.length > 0);
   assert.match(first.assets.get('index.html').sha256, /^[a-f0-9]{64}$/);
+});
+
+test('M4 native launcher changes require a new template version for existing Studio owners', () => {
+  // An actual Studio-created game from the pre-merge M4A build owns these bytes.
+  // Without a version bump, components status/update reject the upgraded launcher.
+  const installedVersion = '1.2.3';
+  const installedLauncherSha256 = '9c50a1fee60fb6156ce411286eb1dcf609f37fe9df462495fdec02f9f669cb8a';
+  const template = loadCatalog().templates.get('narrative-interactive');
+  const launcherSha256 = template.assets.get('src/main.js').sha256;
+  assert.notEqual(launcherSha256, installedLauncherSha256, 'fixture must exercise the post-merge launcher change');
+  const [major, minor, patch] = template.version.split('.').map(Number);
+  const [previousMajor, previousMinor, previousPatch] = installedVersion.split('.').map(Number);
+  assert.ok(major > previousMajor || (major === previousMajor &&
+    (minor > previousMinor || (minor === previousMinor && patch > previousPatch))),
+  `launcher changed from ${installedLauncherSha256} to ${launcherSha256} without a SemVer increase`);
 });
 
 test('catalog rejects declaring executable launcher and unknown paths as author-owned', t => {
