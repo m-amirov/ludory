@@ -12,7 +12,7 @@ const nativeRecoveryOptions = () => process.platform === 'win32'
   ? { windowsPin: openProtectedDirectory } : {};
 
 export function registerComponentRecoveryCheckpoint(project, details, expectedBinding) {
-  return registerRecovery(project, details, expectedBinding, nativeRecoveryOptions());
+  return registerRecovery(projectRoot(project), details, expectedBinding, nativeRecoveryOptions());
 }
 
 export function readComponentRecoveryCheckpoint(project) {

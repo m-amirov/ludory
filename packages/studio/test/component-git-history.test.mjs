@@ -37,7 +37,10 @@ function historyFixture(t) {
   git(root, 'add', '.');
   git(root, 'commit', '-qm', 'native Studio 1.2.4');
   const toCommit = git(root, 'rev-parse', 'HEAD');
-  return { root, project, fromCommit, toCommit };
+  // Git reports the physical repository path. Windows may provide os.tmpdir()
+  // through an 8.3 alias (RUNNER~1), so compare physical identities as Studio does.
+  return { root: fs.realpathSync.native(root), project: fs.realpathSync.native(project),
+    fromCommit, toCommit };
 }
 
 test('reads a bounded, real Git history with committed managed bytes and no network', t => {

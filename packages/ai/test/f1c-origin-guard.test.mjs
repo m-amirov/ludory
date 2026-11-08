@@ -47,6 +47,9 @@ function treeFingerprint(root) {
   function visit(folder, relative = '') {
     for (const entry of fs.readdirSync(folder, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : 1)) {
       const name = relative ? `${relative}/${entry.name}` : entry.name;
+      // Git may autonomously create/remove transient maintenance and index
+      // locks while a read-only origin check runs; these are not game bytes.
+      if (name.startsWith('.git/') && name.endsWith('.lock')) continue;
       if (entry.isDirectory()) visit(path.join(folder, entry.name), name);
       else entries.push([name, crypto.createHash('sha256').update(fs.readFileSync(path.join(folder, entry.name))).digest('hex')]);
     }
@@ -54,6 +57,17 @@ function treeFingerprint(root) {
   visit(root);
   return JSON.stringify(entries);
 }
+
+test('origin guard fingerprint ignores ephemeral Git maintenance locks but not game files', t => {
+  const project = nativeProject(t);
+  const before = treeFingerprint(project);
+  const maintenance = path.join(project, '.git', 'objects', 'maintenance.lock');
+  fs.writeFileSync(maintenance, '');
+  assert.equal(treeFingerprint(project), before,
+    'a transient lock created by Git maintenance is not a game write');
+  fs.writeFileSync(path.join(project, 'src', 'main.js'), '// user edit\n');
+  assert.notEqual(treeFingerprint(project), before, 'real project edits must remain detectable');
+});
 
 function forgeReceipt(project) {
   fs.writeFileSync(path.join(project, 'ludory.studio.json'), JSON.stringify({
