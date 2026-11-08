@@ -359,9 +359,20 @@ Template **1.2.4** preserves that contract and increments the SemVer after
 the launcher switched to `Reflect.get(story, 'presentationData')` for warning-free
 legacy SDK exports. Studio-created 1.2.3 games can update the managed launcher
 without rewriting their authored story, proofs or visual assets.
+Template **1.2.5** updates only the managed Narrative Runtime bundle: unlabeled
+dialogue, echo and choice beats no longer expose internal scene IDs as visible
+headings or accessible panel names. Authored interaction headings and localized
+ending titles remain, while `data-scene-id`/`data-beat-id` support test and
+diagnostic tooling. Existing 1.2.4 games can update the managed bundle through
+native Studio component updates with a retained backup; no author files or
+story/save identifiers change.
 The shared Narrative Runtime bundle in the separately opt-in
 `narrative-economy` template is refreshed in **1.0.1**; this does not enable
 currency or premium choices in the interactive template.
+The same player-facing heading change refreshes the separately opt-in
+`narrative-economy` managed bundle in **1.0.2**; wallet, store, premium-choice
+and adapter behavior are unchanged, and those features remain disabled in
+`narrative-interactive`.
 
 An already-created legacy Studio narrative keeps schema 1 until an explicit
 `components adopt` operation. `components status`/`components update` return

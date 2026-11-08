@@ -410,7 +410,9 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
       unlockError = null;
     }
     const panel = element('article', undefined, 'ludory-narrative__panel');
-    panel.setAttribute('aria-label', `${view.sceneId}: ${view.beatId}`);
+    panel.dataset.sceneId = view.sceneId;
+    panel.dataset.beatId = view.beatId;
+    panel.setAttribute('aria-label', UI[locale].story);
     panel.setAttribute('aria-live', 'polite');
     panel.setAttribute('tabindex', '-1');
     const toolbar = element('nav', undefined, 'ludory-narrative__toolbar');
@@ -431,9 +433,12 @@ export function createNarrativeRenderer({ graph, catalog, locale = 'ru', assets 
         speaker.dataset.ui = 'speaker';
         panel.appendChild(speaker);
       }
-      const heading = element('h2', view.label || (view.type === 'ending' ? UI[locale].ending : view.sceneId));
-      heading.setAttribute('tabindex', '-1');
-      panel.appendChild(heading);
+      const headingText = view.label || (view.type === 'ending' ? UI[locale].ending : null);
+      if (headingText) {
+        const heading = element('h2', headingText);
+        heading.setAttribute('tabindex', '-1');
+        panel.appendChild(heading);
+      }
       if (view.text) panel.appendChild(element('p', view.text));
       if (view.type === 'choice') actions(panel, view.choices, 'choose', view.beatId);
       if (['photo','keepsake'].includes(view.type)) actions(panel, view.options, 'interact', view.beatId);

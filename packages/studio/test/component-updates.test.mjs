@@ -131,7 +131,8 @@ test('real 1.2.3 narrative launcher upgrades to 1.2.4 with authored bytes and ba
   const launcherPath = path.join(catalog, 'templates', fixtureTemplateId, 'src/main.js');
   const currentLauncher = fs.readFileSync(launcherPath, 'utf8');
   const currentDescriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf8'));
-  assert.equal(currentDescriptor.version, '1.2.4');
+  assert.equal(currentDescriptor.version, '1.2.5');
+  currentDescriptor.version = '1.2.4'; // Keep this historical 1.2.3 → 1.2.4 regression isolated.
   currentDescriptor.id = fixtureTemplateId;
   currentDescriptor.profile = fixtureProfileId;
   const upgradedBlock = [
@@ -188,6 +189,63 @@ test('real 1.2.3 narrative launcher upgrades to 1.2.4 with authored bytes and ba
   [story, image, proof].forEach((filename, index) => assert.deepEqual(fs.readFileSync(filename), authored[index]));
   assert.ok(fs.readdirSync(project).some(name => name.startsWith('.ludory-components-backup-')),
     'Studio must retain the previous managed bytes in a backup');
+});
+
+test('narrative template 1.2.4 to 1.2.5 upgrades only the managed Runtime bundle', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-narrative-125-upgrade-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const priorTrustRoot = process.env.LUDORY_STUDIO_TRUST_DIR;
+  process.env.LUDORY_STUDIO_TRUST_DIR = path.join(root, 'host-trust');
+  t.after(() => {
+    if (priorTrustRoot === undefined) delete process.env.LUDORY_STUDIO_TRUST_DIR;
+    else process.env.LUDORY_STUDIO_TRUST_DIR = priorTrustRoot;
+  });
+  const builtinCatalog = fileURLToPath(new URL('../catalog/', import.meta.url));
+  const catalog = path.join(root, 'catalog');
+  const templateId = 'narrative-upgrade-125';
+  const profileId = 'narrative-upgrade-profile';
+  const templateDir = path.join(catalog, 'templates', templateId);
+  fs.mkdirSync(path.join(catalog, 'profiles'), { recursive: true });
+  fs.mkdirSync(path.join(catalog, 'templates'), { recursive: true });
+  fs.cpSync(path.join(builtinCatalog, 'templates/narrative-interactive'), templateDir, { recursive: true });
+  const profile = JSON.parse(fs.readFileSync(path.join(builtinCatalog, 'profiles/narrative-game.json'), 'utf8'));
+  profile.id = profileId;
+  profile.templates = [templateId];
+  fs.writeFileSync(path.join(catalog, 'profiles', `${profileId}.json`), `${JSON.stringify(profile, null, 2)}\n`);
+  const descriptorPath = path.join(templateDir, 'template.json');
+  const descriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf8'));
+  assert.equal(descriptor.version, '1.2.5');
+  descriptor.id = templateId;
+  descriptor.profile = profileId;
+  const bundlePath = path.join(templateDir, 'assets/ludory-narrative.js');
+  const newBundle = fs.readFileSync(bundlePath);
+  const historicalBundle = Buffer.from('// owned 1.2.4 bundle fixture; Runtime semantics are tested separately\n');
+  fs.writeFileSync(bundlePath, historicalBundle);
+  fs.writeFileSync(descriptorPath, `${JSON.stringify({ ...descriptor, version: '1.2.4' }, null, 2)}\n`);
+
+  const project = path.join(root, 'game');
+  fs.mkdirSync(project);
+  const created = applyCreatePlan(planCreate(project, { id: 'upgrade-125', title: 'Narrative', lang: 'ru',
+    profile: profileId, template: templateId, targets: ['vk-games', 'yandex-games'], catalog }));
+  assert.equal(created.status, 'APPLIED');
+  const story = path.join(project, 'src/story.js');
+  const proof = path.join(project, 'narrative-assets.json');
+  const original = [story, proof].map(file => fs.readFileSync(file));
+  const imageFiles = ['assets/lighthouse.svg', 'assets/shoreline.svg'];
+  const images = imageFiles.map(file => fs.readFileSync(path.join(project, file)));
+
+  fs.writeFileSync(bundlePath, newBundle);
+  fs.writeFileSync(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`);
+  const plan = planComponentUpdate(project, { catalog });
+  assert.equal(plan.status, 'READY', JSON.stringify(plan));
+  assert.deepEqual(plan.writes, ['assets/ludory-narrative.js', 'ludory.components.json']);
+  assert.equal(applyComponentPlan(plan).status, 'APPLIED');
+  assert.equal(componentStatus(project, { catalog }).status, 'IN_SYNC');
+  assert.deepEqual(fs.readFileSync(path.join(project, 'assets/ludory-narrative.js')), newBundle);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(project, 'ludory.components.json'))).template.version, '1.2.5');
+  [story, proof].forEach((file, index) => assert.deepEqual(fs.readFileSync(file), original[index]));
+  imageFiles.forEach((file, index) => assert.deepEqual(fs.readFileSync(path.join(project, file)), images[index]));
+  assert.ok(fs.readdirSync(project).some(name => name.startsWith('.ludory-components-backup-')));
 });
 
 test('legacy ownership adoption upgrades only managed bootstrap while preserving edited story', t => {
