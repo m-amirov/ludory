@@ -208,7 +208,12 @@ export function componentHostRegistryBinding(project) {
       throw trustError('unsafe host registry ancestor');
     }
     if (ancestor === root) secureDirectory(root);
+    // An inode can be reused immediately after rmdir/mkdir. Before apply,
+    // bind the physical directory generation, not just its device/inode.
+    // Its ctime will change when our own lock is later created, after which
+    // the open descriptor is the publication authority.
     return { root, ancestor, ancestorIdentity: `${stat.dev}:${stat.ino}`,
+      ancestorCtimeNs: String(stat.ctimeNs),
       rootExists: ancestor === root };
   }
 }
@@ -216,6 +221,7 @@ export function componentHostRegistryBinding(project) {
 function assertHostRegistryBinding(project, expected, { created = false } = {}) {
   if (!expected || typeof expected !== 'object' || typeof expected.root !== 'string' ||
       typeof expected.ancestor !== 'string' || typeof expected.ancestorIdentity !== 'string' ||
+      typeof expected.ancestorCtimeNs !== 'string' || !/^\d+$/.test(expected.ancestorCtimeNs) ||
       typeof expected.rootExists !== 'boolean' || trustedRoot(project) !== expected.root) {
     throw trustError('host registry destination changed since preview');
   }
@@ -316,14 +322,23 @@ export function registerComponentRecoveryCheckpoint(project, details,
   const store = openRecoveryStore(location.root, options);
   let lock;
   let checkpoint;
+  let committed = false;
+  let publicationFailure;
   try {
     if (store.rootIdentity !== createdRootBinding.ancestorIdentity) {
       throw trustError('pinned host registry identity changed before checkpoint publication');
     }
     lock = store.createLock(`${basename}.json.lock`);
     const checkRegistry = () => {
+      const visible = componentHostRegistryBinding(project);
+      // ctime is deliberately *not* rechecked after the first exclusive
+      // write: the pinned fd prevents inode reuse during this transaction,
+      // and adding/removing our own lock updates directory ctime.
       if (store.rootIdentity !== createdRootBinding.ancestorIdentity ||
-          !encode(componentHostRegistryBinding(project)).equals(encode(createdRootBinding))) {
+          visible.root !== createdRootBinding.root ||
+          visible.ancestor !== createdRootBinding.ancestor ||
+          visible.ancestorIdentity !== createdRootBinding.ancestorIdentity ||
+          !visible.rootExists) {
         throw trustError('host registry physical identity changed during checkpoint publication');
       }
     };
@@ -340,10 +355,19 @@ export function registerComponentRecoveryCheckpoint(project, details,
     assertHostRegistryBinding(project, expectedHostBinding, { created: true });
     checkRegistry();
     // The checkpoint is not authority until this pinned lock is removed.
-    store.removeCreated(lock);
+    try { store.removeCreated(lock); }
+    catch (error) {
+      // On POSIX unlink is the namespace commit point. A later fsync/close
+      // error cannot turn an already visible, committed checkpoint into a
+      // failed apply that a caller might unsafely retry.
+      if (!lock.removed) throw error;
+      process.emitWarning(`Host recovery lock removal completed but durability/close check failed: ${error.message}`);
+    }
     lock = null;
+    committed = true;
     return record;
   } catch (error) {
+    publicationFailure = error;
     // Never remove an old checkpoint. Only this call's retained exclusive
     // creation handle may be rolled back through the *same* pinned directory.
     let rollbackSafe = !error.recoveryRollbackUnsafe;
@@ -356,7 +380,14 @@ export function registerComponentRecoveryCheckpoint(project, details,
       catch (rollbackError) { error.lockCleanupError = rollbackError; }
     }
     throw error;
-  } finally { store.close(); }
+  } finally {
+    try { store.close(); }
+    catch (error) {
+      if (publicationFailure) publicationFailure.closeError = error;
+      else if (committed) process.emitWarning(`Committed host recovery cleanup failed: ${error.message}`);
+      else throw error;
+    }
+  }
 }
 
 // Separate, host-owned checkpoints bind source-repair consent and journal events.

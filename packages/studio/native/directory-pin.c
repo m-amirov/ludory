@@ -1,6 +1,7 @@
 #include <node_api.h>
 #include <windows.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <wchar.h>
@@ -295,8 +296,14 @@ static LONG open_relative_recovery(HANDLE parent, wchar_t* filename, HANDLE* ope
   pin_object_attributes object = { sizeof(pin_object_attributes), parent,
       &name, 0x40 | 0x1000 /* OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE */, NULL, NULL };
   pin_io_status io = {0};
+  // A reader must share DELETE with our own held create token (which requests
+  // DELETE for handle-relative rollback); it does not itself request DELETE.
+  // Exclusive creators continue to deny deletion sharing to other writers.
+  ULONG sharing = disposition == 1 /* FILE_OPEN */
+      ? FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE
+      : FILE_SHARE_READ | FILE_SHARE_WRITE;
   return create_file(opened, rights | SYNCHRONIZE, &object, &io, NULL, attributes,
-      FILE_SHARE_READ | FILE_SHARE_WRITE, disposition,
+      sharing, disposition,
       0x40 | 0x20 | 0x00200000 /* NON_DIRECTORY | SYNCHRONOUS | OPEN_REPARSE_POINT */,
       NULL, 0);
 }

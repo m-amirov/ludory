@@ -10,6 +10,7 @@ import { planComponentUpdate, componentStatus, applyComponentPlan,
   previewComponentTrust, acceptComponentTrust, previewComponentGitRecovery,
   acceptComponentGitRecovery } from '../src/component-updates.mjs';
 import { registerComponentTrust, readComponentRecoveryCheckpoint } from '../src/component-trust.mjs';
+import { projectRoot } from '../src/projects.mjs';
 
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 function git(root, ...args) {
@@ -179,6 +180,7 @@ test('recovery approval rejects replacement of the existing host registry direct
 });
 
 test('recovery refuses registry switch between preview checks and the record lock', t => {
+  if (process.platform === 'win32') return t.skip('Linux pathname lock interception; Windows uses native RootDirectory and its own tests');
   const f = fixture(t);
   const selectedHost = process.env.LUDORY_STUDIO_TRUST_DIR;
   const preview = previewComponentGitRecovery(f.project, {
@@ -206,6 +208,7 @@ test('recovery refuses registry switch between preview checks and the record loc
 });
 
 test('recovery refuses physical registry substitution during checkpoint locking', t => {
+  if (process.platform === 'win32') return t.skip('Linux pathname lock interception; Windows uses native RootDirectory and its own tests');
   const f = fixture(t);
   const selectedHost = process.env.LUDORY_STUDIO_TRUST_DIR;
   fs.mkdirSync(selectedHost, { recursive: true, mode: 0o700 });
@@ -232,6 +235,7 @@ test('recovery refuses physical registry substitution during checkpoint locking'
 });
 
 test('recovery refuses a just-created registry replaced before lock acquisition', t => {
+  if (process.platform === 'win32') return t.skip('Linux pathname lock interception; Windows uses native RootDirectory and its own tests');
   const f = fixture(t);
   const selectedHost = process.env.LUDORY_STUDIO_TRUST_DIR;
   assert.equal(fs.existsSync(selectedHost), false, 'host registry must not exist at preview time');
@@ -368,6 +372,35 @@ test('failed rollback retains the physical registry lock and blocks checkpoint r
   assert.throws(() => readComponentRecoveryCheckpoint(f.project), /lock|unfinished|blocked/i);
 });
 
+test('Linux lock unlink remains a successful publication even if its subsequent fsync fails', t => {
+  if (process.platform !== 'linux') return t.skip('Linux directory fsync fault injection');
+  const f = fixture(t);
+  const registry = process.env.LUDORY_STUDIO_TRUST_DIR;
+  const preview = previewComponentGitRecovery(f.project, {
+    fromCommit: f.fromCommit, toCommit: f.toCommit, catalog: f.catalog,
+  });
+  assert.equal(preview.status, 'NEEDS_USER_ACTION');
+  const originalFsync = fs.fsyncSync;
+  let injected = false;
+  fs.fsyncSync = function afterUnlinkSync(fd) {
+    let target = '';
+    try { target = fs.readlinkSync(`/proc/self/fd/${fd}`); } catch { /* Other file descriptor. */ }
+    if (!injected && target === registry &&
+        fs.readdirSync(registry).some(name => name.endsWith('.recovery.json')) &&
+        !fs.readdirSync(registry).some(name => name.endsWith('.json.lock'))) {
+      injected = true;
+      throw Object.assign(new Error('injected post-unlink fsync failure'), { code: 'EIO' });
+    }
+    return originalFsync.call(this, fd);
+  };
+  let result;
+  try { result = acceptComponentGitRecovery(preview, preview.recoverySha256); }
+  finally { fs.fsyncSync = originalFsync; }
+  assert.equal(injected, true);
+  assert.equal(result.status, 'RECOVERED');
+  assert.equal(readComponentRecoveryCheckpoint(f.project)?.recoverySha256, preview.recoverySha256);
+});
+
 test('a canonical checkpoint is not trusted while its stable publication lock exists', t => {
   const f = fixture(t);
   const preview = previewComponentGitRecovery(f.project, {
@@ -400,7 +433,7 @@ test('existing contradictory host pin cannot be overridden by Git recovery', t =
   const f = fixture(t);
   const receipt = fs.readFileSync(path.join(f.project, 'ludory.studio.json'));
   const manifest = fs.readFileSync(path.join(f.project, 'ludory.project.json'));
-  registerComponentTrust(f.project, { rootIdentity: '0:0',
+  registerComponentTrust(projectRoot(f.project), { rootIdentity: '0:0',
     receiptSha256: hash(receipt), manifestSha256: hash(manifest), stateSha256: 'f'.repeat(64) });
   const result = previewComponentGitRecovery(f.project, {
     fromCommit: f.fromCommit, toCommit: f.toCommit, catalog: f.catalog,

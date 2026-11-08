@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { openProtectedDirectory, assertWindowsDirectoryPinContract } from '../src/windows-directory-pin.mjs';
 import { openRecoveryStore } from '../../studio-trust/src/host-recovery-writer.mjs';
+import { registerComponentRecoveryCheckpoint, componentHostRegistryBinding,
+  readComponentRecoveryCheckpoint } from '../../studio-trust/src/index.mjs';
 
 const id = 'b'.repeat(64);
 
@@ -43,6 +45,10 @@ test('Windows pinned native recovery lock and checkpoint use the physical root h
     const lock = store.createLock(`${id}.json.lock`);
     assert.deepEqual(store.read(`${id}.json.lock`), Buffer.alloc(0));
     assert.throws(() => store.createLock(`${id}.json.lock`), /exists|already|exclusive|NTSTATUS|native/i);
+    const existingPin = Buffer.from('existing normal trust pin\n');
+    fs.writeFileSync(path.join(f.registry, `${id}.json`), existingPin);
+    assert.deepEqual(store.read(`${id}.json`), existingPin,
+      'native lookup must detect existing ordinary Studio trust records');
     const bytes = Buffer.from('{"version":1}\n');
     const record = store.createRecord(`${id}.recovery.json`, bytes);
     assert.deepEqual(store.read(`${id}.recovery.json`), bytes);
@@ -69,4 +75,58 @@ test('Windows root pin prevents replacement and no checkpoint may appear in a su
     store.removeCreated(record);
     store.removeCreated(lock);
   } finally { store.close(); }
+});
+
+test('Windows registry first created at apply remains pinned through native lock acquisition', t => {
+  if (process.platform !== 'win32') return t.skip('Real Windows NTFS RootDirectory required');
+  const f = fixture(t);
+  const project = path.join(f.dir, 'game');
+  fs.mkdirSync(project);
+  const selectedHost = path.join(f.dir, 'first-created-host');
+  const previous = process.env.LUDORY_STUDIO_TRUST_DIR;
+  process.env.LUDORY_STUDIO_TRUST_DIR = selectedHost;
+  t.after(() => {
+    if (previous === undefined) delete process.env.LUDORY_STUDIO_TRUST_DIR;
+    else process.env.LUDORY_STUDIO_TRUST_DIR = previous;
+  });
+  const binding = componentHostRegistryBinding(project);
+  assert.equal(binding.rootExists, false);
+  const hash = ch => ch.repeat(64);
+  const details = { rootIdentity: '1:2', receiptSha256: hash('a'), manifestSha256: hash('b'),
+    stateSha256: hash('c'), recoverySha256: hash('d'),
+    fromCommit: '1'.repeat(40), toCommit: '2'.repeat(40) };
+  let intercepted = false;
+  let rootRenamed = false;
+  const factory = root => {
+    const pinned = openProtectedDirectory(root);
+    return { ...pinned,
+      createRecoveryLock(name) {
+        intercepted = true;
+        try {
+          fs.renameSync(root, `${root}-detached`);
+          rootRenamed = true;
+          fs.mkdirSync(root);
+        } catch (error) {
+          assert.match(String(error), /EPERM|EBUSY|EACCES|permission|access|resource|denied/i);
+        }
+        return pinned.createRecoveryLock(name);
+      } };
+  };
+  if (rootRenamed) assert.fail('root must not have been renamed before the test hook');
+  let failed = false;
+  try {
+    registerComponentRecoveryCheckpoint(project, details, binding, { windowsPin: factory });
+  } catch (error) {
+    failed = true;
+    assert.match(error.message, /registry|host|changed|identity/i);
+  }
+  assert.equal(intercepted, true, 'native lock creation must be intercepted');
+  if (rootRenamed) {
+    assert.equal(failed, true, 'a changed visible registry cannot be acknowledged');
+    assert.equal(readComponentRecoveryCheckpoint(project, { windowsPin: openProtectedDirectory }), null);
+  } else {
+    assert.equal(failed, false, 'held NTFS root denies rename and permits normal recovery');
+    assert.deepEqual(readComponentRecoveryCheckpoint(project, { windowsPin: openProtectedDirectory }),
+      { schemaVersion: 1, project: path.resolve(project), ...details });
+  }
 });
