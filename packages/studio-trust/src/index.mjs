@@ -84,8 +84,7 @@ function readSecure(filename) {
   } finally { fs.closeSync(fd); }
 }
 
-function load(project) {
-  const locations = recordPath(project);
+function load(project, locations = recordPath(project)) {
   let bytes;
   try { bytes = readSecure(locations.record); }
   catch (error) {
@@ -183,6 +182,146 @@ export function advanceComponentTrust(project, expected, nextStateSha256) {
 
 export function hostTrustDigest(bytes) { return hash(bytes); }
 export function isMissingHostTrust(error) { return error?.code === 'TRUST_MISSING'; }
+
+// A recovered history anchor is a *separate owner-approved host record*, never
+// a replacement for Studio's normal component trust pin or a native backup.
+const recoveryKeys = ['schemaVersion', 'project', 'rootIdentity', 'receiptSha256',
+  'manifestSha256', 'stateSha256', 'recoverySha256', 'fromCommit', 'toCommit'];
+
+/** Bind owner consent to an existing registry inode or to an absent directory's
+ * nearest existing physical ancestor. Preview does not create host directories. */
+export function componentHostRegistryBinding(project) {
+  const root = trustedRoot(project);
+  let ancestor = root;
+  while (true) {
+    let stat;
+    try { stat = fs.lstatSync(ancestor, { bigint: true }); }
+    catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) throw trustError('no existing host registry ancestor');
+      ancestor = parent;
+      continue;
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw trustError('unsafe host registry ancestor');
+    }
+    if (ancestor === root) secureDirectory(root);
+    return { root, ancestor, ancestorIdentity: `${stat.dev}:${stat.ino}`,
+      rootExists: ancestor === root };
+  }
+}
+
+function assertHostRegistryBinding(project, expected, { created = false } = {}) {
+  if (!expected || typeof expected !== 'object' || typeof expected.root !== 'string' ||
+      typeof expected.ancestor !== 'string' || typeof expected.ancestorIdentity !== 'string' ||
+      typeof expected.rootExists !== 'boolean' || trustedRoot(project) !== expected.root) {
+    throw trustError('host registry destination changed since preview');
+  }
+  const current = created ? null : componentHostRegistryBinding(project);
+  if (current && !encode(current).equals(encode(expected))) {
+    throw trustError('host registry identity changed since preview');
+  }
+  const ancestor = fs.lstatSync(expected.ancestor, { bigint: true });
+  if (!ancestor.isDirectory() || ancestor.isSymbolicLink() ||
+      `${ancestor.dev}:${ancestor.ino}` !== expected.ancestorIdentity) {
+    throw trustError('host registry physical identity changed since preview');
+  }
+  if (created) secureDirectory(expected.root);
+}
+
+function recoveryPath(project, create = false) {
+  const locations = recordPath(project, { create });
+  const basename = hash(Buffer.from(path.resolve(project)));
+  return { ...locations, checkpoint: path.join(locations.root, `${basename}.recovery.json`) };
+}
+
+function validRecoveryDetails(details) {
+  return details && typeof details === 'object' && !Array.isArray(details) &&
+    Object.keys(details).length === 7 &&
+    ['rootIdentity', 'receiptSha256', 'manifestSha256', 'stateSha256',
+      'recoverySha256', 'fromCommit', 'toCommit'].every(key => Object.hasOwn(details, key)) &&
+    typeof details.rootIdentity === 'string' && /^\d+:\d+$/.test(details.rootIdentity) &&
+    [details.receiptSha256, details.manifestSha256, details.stateSha256,
+      details.recoverySha256].every(value => typeof value === 'string' && digest.test(value)) &&
+    [details.fromCommit, details.toCommit].every(value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value));
+}
+
+export function readComponentRecoveryCheckpoint(project) {
+  let location;
+  try { location = recoveryPath(project); }
+  catch (error) {
+    if (error.code === 'TRUST_MISSING') return null;
+    throw error;
+  }
+  let bytes;
+  try { bytes = readSecure(location.checkpoint); }
+  catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  let record;
+  try { record = JSON.parse(bytes.toString('utf8')); }
+  catch { throw trustError('invalid component recovery checkpoint JSON'); }
+  const { schemaVersion, project: savedProject, ...details } = record ?? {};
+  if (schemaVersion !== 1 || savedProject !== path.resolve(project) ||
+      Object.keys(record ?? {}).length !== recoveryKeys.length ||
+      recoveryKeys.some(key => !Object.hasOwn(record, key)) ||
+      !validRecoveryDetails(details) || !encode(record).equals(bytes)) {
+    throw trustError('invalid or noncanonical component recovery checkpoint');
+  }
+  return record;
+}
+
+export function assertComponentRecoveryCheckpoint(project, expected) {
+  const record = readComponentRecoveryCheckpoint(project);
+  if (!record) throw trustError('no owner-approved component recovery checkpoint', 'TRUST_MISSING');
+  for (const [key, value] of Object.entries(expected)) {
+    if (!recoveryKeys.includes(key) || record[key] !== value) {
+      throw trustError(`component recovery checkpoint ${key} differs from expected state`);
+    }
+  }
+  return record;
+}
+
+export function registerComponentRecoveryCheckpoint(project, details,
+  expectedHostBinding = componentHostRegistryBinding(project)) {
+  if (!validRecoveryDetails(details)) throw trustError('invalid component recovery checkpoint details');
+  assertHostRegistryBinding(project, expectedHostBinding);
+  const location = recoveryPath(project, true);
+  // A registry absent during preview is created here. Pin its *new* inode as
+  // well: the original ancestor anchor alone cannot detect substitution of
+  // this directory between mkdir and the exclusive checkpoint lock.
+  const createdRootBinding = componentHostRegistryBinding(project);
+  if (!createdRootBinding.rootExists || createdRootBinding.root !== location.root) {
+    throw trustError('created host registry destination differs from expected path');
+  }
+  return withRecordLock(location, () => {
+    assertHostRegistryBinding(project, expectedHostBinding, { created: true });
+    if (!encode(componentHostRegistryBinding(project)).equals(encode(createdRootBinding))) {
+      throw trustError('created host registry physical identity changed before checkpoint write');
+    }
+    try {
+      load(project, location);
+      throw trustError('already trusted Studio project cannot be re-anchored by recovery');
+    } catch (error) {
+      if (error.code !== 'TRUST_MISSING') throw error;
+    }
+    try {
+      fs.lstatSync(location.checkpoint);
+      throw trustError('existing component recovery checkpoint cannot be replaced');
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    const record = { schemaVersion: 1, project: path.resolve(project), ...details };
+    const fd = fs.openSync(location.checkpoint, fs.constants.O_WRONLY | fs.constants.O_CREAT |
+      fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0), 0o600);
+    try { fs.writeFileSync(fd, encode(record)); fs.fsyncSync(fd); }
+    finally { fs.closeSync(fd); }
+    syncDir(location.root);
+    return record;
+  });
+}
 
 // Separate, host-owned checkpoints bind source-repair consent and journal events.
 // A game-local SHA chain alone is not an authorization boundary: a game editor

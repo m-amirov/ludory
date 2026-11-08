@@ -334,6 +334,58 @@ command, including if the pin disagrees with the game. A crash between game
 publication and host registry publication may require operator recovery; never
 automatically re-anchor a mismatched host pin.
 
+### Missing Studio upgrade archives: owner-approved Git recovery
+
+If a legitimate Studio component upgrade was committed to Git but its
+`.ludory-components-backup-*` directories were lost during a host transfer,
+`components trust` intentionally returns `CONFLICT` because the original
+Studio transaction chain is missing. Prefer restoring the **actual archived
+transactions** from the original Studio host when available. Do not fabricate
+`component-transition.json`, edit `ludory.components.json` or reset the host
+registry to bypass the failure.
+
+For a project with a **complete, local, non-shallow Git history**, the optional
+`components recover` command can attest the committed *content continuity*
+from the original Studio creation state to the installed version. It reads Git
+objects offline, checks every intermediate committed managed file against its
+component state, and refuses merges, unsafe paths, mutated receipts,
+downgrades, ownership expansion, corrupt real archives, or an existing host
+trust pin. It never contacts GitHub itself or changes game files. A checkout
+containing only the latest snapshot commit cannot be recovered this way.
+Raw Git commit-parent bytes are checked against reported ancestry to reject
+locally configured grafts. Every referenced commit, tree and managed blob is
+checked against its Git object SHA; missing promisor blobs fail closed instead
+of triggering lazy remote fetch. A partial clone is not sufficient evidence.
+
+```sh
+# Inspect two genuine full commit SHAs in the project's local Git history:
+# FROM = original Studio creation state; TO = committed current component state.
+node packages/studio/bin/ludory.mjs components recover --project /path/to/game-studio --from-commit <FROM_SHA40> --to-commit <TO_SHA40> --json
+
+# Inspect the full path/version/hash/commit witness in the preview, then explicitly
+# authorize the exact recoverySha256 on this host:
+node packages/studio/bin/ludory.mjs components recover --project /path/to/game-studio --from-commit <FROM_SHA40> --to-commit <TO_SHA40> --accept-recovery-sha256 <RECOVERY_SHA256> --apply --json
+
+# RECOVERED is not trusted: separate owner consent is still mandatory.
+node packages/studio/bin/ludory.mjs components trust --project /path/to/game-studio --json
+node packages/studio/bin/ludory.mjs components trust --project /path/to/game-studio --accept-state-sha256 <STATE_SHA256_FROM_TRUST_PREVIEW> --apply --json
+node packages/studio/bin/ludory.mjs components status --project /path/to/game-studio --json
+# Only after IN_SYNC/READY and full authored-file review:
+node packages/studio/bin/ludory.mjs components update --project /path/to/game-studio --json
+```
+
+The explicit recovery acceptance writes one **host-owned, private,
+create-once checkpoint** outside the game. The normal Studio trust pin is
+separate and is never created or replaced by recovery. Later native upgrades
+still make real transaction archives linking back to that exact recovered
+state. If source commits, current managed files, authored proofs, physical
+directory identity, selected host registry path/physical identity, or history
+witness change after preview, apply refuses to use the stale digest. Git is
+not cryptographic proof of who authored a
+commit; **the owner's independent review is the authorization boundary**.
+Neither `RECOVERED` nor `IN_SYNC` means artwork rights, platform SDK,
+moderation or publication readiness.
+
 For `narrative-interactive` template **1.2.2+**, Studio owns only the
 launcher/bootstrap (`index.html`, `src/main.js`, `src/entry.js`) and bundled
 runtime (`assets/ludory-narrative.js`). `src/story.js`,

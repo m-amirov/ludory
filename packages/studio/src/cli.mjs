@@ -7,7 +7,8 @@ import { listCatalog, showCatalog } from './catalog.mjs';
 import { planCreate, applyCreatePlan } from './scaffold.mjs';
 import { runPreviewCli } from './preview-cli.mjs';
 import { planComponentUpdate, planAuthorAdoption, componentStatus, applyComponentPlan,
-  previewComponentTrust, acceptComponentTrust } from './component-updates.mjs';
+  previewComponentTrust, acceptComponentTrust,
+  previewComponentGitRecovery, acceptComponentGitRecovery } from './component-updates.mjs';
 import { inspectWindowsDirectoryPin } from './windows-directory-pin.mjs';
 import { planProfileApply, planProfileUpdate, profileStatus, applyProfilePlan } from './profile-management.mjs';
 import { planQaWebReview } from './qa-review-contract.mjs';
@@ -44,6 +45,7 @@ const usage = `Ludory Studio ${studioVersion} — native game-development workfl
   ludory components update --project <new-studio-game> [--catalog <directory>] [--apply] [--json]
   ludory components adopt --project <legacy-narrative> [--catalog <directory>] [--accept-state-sha256 <sha256> --accept-proposal-sha256 <sha256> --apply] [--json]
   ludory components trust --project <transferred-studio-game> [--catalog <directory>] [--accept-state-sha256 <64-hex> --apply] [--json]
+  ludory components recover --project <transferred-studio-game> --from-commit <full-40-hex> --to-commit <full-40-hex> [--catalog <directory>] [--accept-recovery-sha256 <64-hex> --apply] [--json]
   ludory components native [--json]
   ludory quality enable --project <new-studio-game> [--apply] [--json]
   ludory quality check --project <new-studio-game> [--tier <quick|deep>] [--apply] [--json]
@@ -189,6 +191,7 @@ function argumentsFor(command, argv) {
       : command === 'components-update' ? new Set([...common, '--catalog', '--apply'])
         : command === 'components-adopt' ? new Set([...common, '--catalog', '--apply', '--accept-state-sha256', '--accept-proposal-sha256'])
         : command === 'components-trust' ? new Set([...common, '--catalog', '--apply', '--accept-state-sha256'])
+        : command === 'components-recover' ? new Set([...common, '--catalog', '--from-commit', '--to-commit', '--apply', '--accept-recovery-sha256'])
         : command === 'components-status' ? new Set([...common, '--catalog'])
       : command === 'migrate' ? new Set([...common, '--apply'])
         : command === 'profiles-list' || command === 'templates-list' ? new Set(['--json', '--catalog'])
@@ -612,6 +615,15 @@ function display(result, json, out) {
     for (const filename of result.authorCandidates ?? []) out(`  author path to review: ${filename}\n`);
     if (result.warning) out(`  review required: ${result.warning}\n`);
   }
+  if (result.mode === 'component-recovery') {
+    if (result.fromCommit) out(`  source Git commit: ${result.fromCommit}\n`);
+    if (result.toCommit) out(`  current Git commit: ${result.toCommit}\n`);
+    if (result.recoverySha256) out(`  owner recovery SHA-256: ${result.recoverySha256}\n`);
+    for (const name of result.managedPaths ?? []) out(`  managed path to review: ${name}\n`);
+    for (const transition of result.transitions ?? []) {
+      out(`  history: ${transition.fromVersion} → ${transition.toVersion} (${transition.fromCommit} → ${transition.toCommit})\n`);
+    }
+  }
   if (result.mode !== 'component-trust' && result.status === 'NEEDS_USER_ACTION' && result.stateSha256) {
     out(`  component state SHA-256: ${result.stateSha256}\n`);
     if (result.proposalSha256) out(`  proposed adoption SHA-256: ${result.proposalSha256}\n`);
@@ -906,7 +918,7 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
     }
     if (command === 'components') {
       const [operation, ...args] = rest;
-      if (!['status', 'update', 'adopt', 'trust', 'native'].includes(operation)) {
+      if (!['status', 'update', 'adopt', 'trust', 'recover', 'native'].includes(operation)) {
         throw new Error(`Unknown components operation: ${operation || '(missing)'}`);
       }
       const flags = argumentsFor(`components-${operation}`, args);
@@ -929,6 +941,25 @@ export function runCli(argv, { out = text => process.stdout.write(text), err = t
           ? acceptComponentTrust(preview, flags.get('--accept-state-sha256')) : preview;
         display(accepted, flags.has('--json'), out);
         return ['CONFLICT', 'BLOCKED', 'NEEDS_USER_ACTION'].includes(accepted.status) ? 2 : 0;
+      }
+      if (operation === 'recover') {
+        if (!flags.has('--from-commit') || !flags.has('--to-commit')) {
+          throw new Error('Recovery requires --from-commit and --to-commit full SHA IDs');
+        }
+        if (flags.has('--apply') !== flags.has('--accept-recovery-sha256')) {
+          throw new Error('Recovery confirmation requires --accept-recovery-sha256 <sha256> and --apply together');
+        }
+        const preview = previewComponentGitRecovery(flags.get('--project'), {
+          fromCommit: flags.get('--from-commit'), toCommit: flags.get('--to-commit'),
+          catalog: flags.get('--catalog'),
+        });
+        let outcome = preview;
+        if (flags.has('--apply') && preview.status === 'NEEDS_USER_ACTION') {
+          try { outcome = acceptComponentGitRecovery(preview, flags.get('--accept-recovery-sha256')); }
+          catch (error) { outcome = { ...preview, status: 'CONFLICT', conflicts: [error.message] }; }
+        }
+        display(outcome, flags.has('--json'), out);
+        return ['CONFLICT', 'BLOCKED', 'NEEDS_USER_ACTION'].includes(outcome.status) ? 2 : 0;
       }
       if (operation === 'adopt' && new Set([
         flags.has('--apply'), flags.has('--accept-state-sha256'), flags.has('--accept-proposal-sha256'),

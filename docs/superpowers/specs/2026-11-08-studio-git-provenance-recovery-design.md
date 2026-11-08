@@ -1,7 +1,7 @@
 # Owner-approved Git provenance recovery for Studio components — design
 
 Date: 2026-11-08  
-Status: proposed; awaiting owner approval for implementation
+Status: approved by owner; implemented in Draft PR #94, pending CI and merge approval
 
 ## Intent and observed blocker
 
