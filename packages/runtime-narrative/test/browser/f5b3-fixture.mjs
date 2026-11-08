@@ -199,6 +199,12 @@ export async function createF5b3Fixture() {
     const original = fs.readFileSync(story, 'utf8');
     if (!original.includes('Маяк мигнул трижды.')) throw new Error('F5B3_EXPECTED_STORY_NOT_FOUND');
     fs.writeFileSync(story, original.replace('Маяк мигнул трижды.', 'F5B3_AUTHORED_STORY_317'));
+    // This synthetic fixture intentionally authors a new story. Keep its local
+    // author proof bound to those exact bytes; production proof checks stay strict.
+    const authorProofPath = path.join(author, 'narrative-assets.json');
+    const authorProof = JSON.parse(fs.readFileSync(authorProofPath, 'utf8'));
+    authorProof.storySha256 = sha(fs.readFileSync(story));
+    fs.writeFileSync(authorProofPath, `${JSON.stringify(authorProof, null, 2)}\n`);
     const sourcePlan = planNarrativePlatformExport(author);
     if (sourcePlan.status !== 'READY_TO_DERIVE') throw new Error(sourcePlan.reasonCode);
     const beforeAuthorHashes = authorHashes(sourcePlan, author);
