@@ -11,6 +11,9 @@ import { planComponentUpdate, componentStatus, applyComponentPlan,
   acceptComponentGitRecovery } from '../src/component-updates.mjs';
 import { registerComponentTrust, readComponentRecoveryCheckpoint } from '../src/component-trust.mjs';
 import { projectRoot } from '../src/projects.mjs';
+import { openRecoveryStore } from '../../studio-trust/src/host-recovery-writer.mjs';
+import { registerComponentRecoveryCheckpoint as registerRecovery } from '../../studio-trust/src/index.mjs';
+import { openProtectedDirectory } from '../src/windows-directory-pin.mjs';
 
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 function git(root, ...args) {
@@ -331,6 +334,50 @@ test('recovery interrupted after record bytes were written cannot expose usable 
   }
 });
 
+test('recovery rejects a reused root identity whose directory generation differs at fd pin', t => {
+  if (process.platform !== 'linux') return t.skip('Linux fd/inode reuse simulation');
+  const f = fixture(t);
+  const registry = process.env.LUDORY_STUDIO_TRUST_DIR;
+  fs.mkdirSync(registry, { mode: 0o700 });
+  const preview = previewComponentGitRecovery(f.project, {
+    fromCommit: f.fromCommit, toCommit: f.toCommit, catalog: f.catalog,
+  });
+  assert.equal(preview.status, 'NEEDS_USER_ACTION');
+  const oldOpen = fs.openSync;
+  const oldFstat = fs.fstatSync;
+  const original = fs.lstatSync(registry, { bigint: true });
+  let substitutedFd;
+  fs.openSync = function swapAtPin(filename, flags, ...rest) {
+    if (filename === registry && substitutedFd === undefined) {
+      fs.renameSync(registry, `${registry}-original`);
+      fs.mkdirSync(registry, { mode: 0o700 });
+      const fd = oldOpen.call(this, filename, flags, ...rest);
+      substitutedFd = fd;
+      return fd;
+    }
+    return oldOpen.call(this, filename, flags, ...rest);
+  };
+  fs.fstatSync = function simulateReusedInode(fd, ...args) {
+    const stat = oldFstat.call(this, fd, ...args);
+    if (fd === substitutedFd && args[0]?.bigint) {
+      return Object.assign(Object.create(Object.getPrototypeOf(stat)), stat,
+        { dev: original.dev, ino: original.ino });
+    }
+    return stat;
+  };
+  try {
+    assert.throws(() => registerRecovery(f.project, {
+      rootIdentity: preview.rootIdentity, receiptSha256: preview.receiptSha256,
+      manifestSha256: preview.manifestSha256, stateSha256: preview.stateSha256,
+      recoverySha256: preview.recoverySha256, fromCommit: preview.fromCommit,
+      toCommit: preview.toCommit,
+    }, preview.hostRegistry),
+      /generation|identity|changed|registry|host/i);
+  } finally { fs.openSync = oldOpen; fs.fstatSync = oldFstat; }
+  assert.notEqual(substitutedFd, undefined, 'attack must intercept the pinned open');
+  assert.equal(readComponentRecoveryCheckpoint(f.project), null);
+});
+
 test('failed rollback retains the physical registry lock and blocks checkpoint readers', t => {
   if (process.platform !== 'linux') return t.skip('Linux pinned rollback');
   const f = fixture(t);
@@ -413,6 +460,14 @@ test('a canonical checkpoint is not trusted while its stable publication lock ex
   assert.equal(checkpoints.length, 1);
   const lock = path.join(registry, checkpoints[0].replace('.recovery.json', '.json.lock'));
   fs.writeFileSync(lock, 'interrupted\n', { flag: 'wx', mode: 0o600 });
+  assert.equal(fs.readFileSync(lock, 'utf8'), 'interrupted\n');
+  const store = openRecoveryStore(registry, {
+    ...(process.platform === 'win32' ? { windowsPin: openProtectedDirectory } : {}), readOnly: true,
+  });
+  try {
+    assert.deepEqual(store.read(path.basename(lock)), Buffer.from('interrupted\n'),
+      'the physical reader must see an externally created stable lock');
+  } finally { store.close(); }
   assert.throws(() => readComponentRecoveryCheckpoint(f.project), /lock|unfinished|blocked|conflict/i);
   assert.equal(previewComponentTrust(f.project).status, 'CONFLICT');
   assert.equal(componentStatus(f.project, { catalog: f.catalog }).status, 'BLOCKED');

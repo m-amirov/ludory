@@ -1612,10 +1612,11 @@ test('stale Windows native pins cannot claim the share-enforced security contrac
     /stale|contract|version/i);
   assert.throws(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 4 }),
     /stale|contract|version/i);
-  assert.throws(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 5 }),
-    /stale|contract|version/i, 'v5 requires native recovery operations as well as the old pin API');
-  assert.doesNotThrow(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 5,
-    createRecoveryLock() {}, readRecoveryRecord() {}, createRecoveryRecord() {} }));
+  assert.throws(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 5,
+    createRecoveryLock() {}, readRecoveryRecord() {}, createRecoveryRecord() {} }),
+  /stale|contract|version/i, 'v6 requires the native deletion marker as well as recovery operations');
+  assert.doesNotThrow(() => assertWindowsDirectoryPinContract({ ...validShape, pinContractVersion: 6,
+    createRecoveryLock() {}, readRecoveryRecord() {}, createRecoveryRecord() {}, isDeletionMarked() {} }));
 });
 
 test('Windows-native pinned parents must permit ordinary child reads, metadata and writes', t => {

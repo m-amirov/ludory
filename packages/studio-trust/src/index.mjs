@@ -266,7 +266,8 @@ export function readComponentRecoveryCheckpoint(project, options = {}) {
   const store = openRecoveryStore(location.root, { ...options, readOnly: true });
   let bytes;
   try {
-    if (!binding.rootExists || store.rootIdentity !== binding.ancestorIdentity) {
+    if (!binding.rootExists || store.rootIdentity !== binding.ancestorIdentity ||
+        store.rootCtimeNs !== binding.ancestorCtimeNs) {
       throw trustError('host registry identity changed during checkpoint read');
     }
     const locked = () => {
@@ -318,6 +319,10 @@ export function registerComponentRecoveryCheckpoint(project, details,
   if (!createdRootBinding.rootExists || createdRootBinding.root !== location.root) {
     throw trustError('created host registry destination differs from expected path');
   }
+  if (expectedHostBinding.rootExists &&
+      createdRootBinding.ancestorCtimeNs !== expectedHostBinding.ancestorCtimeNs) {
+    throw trustError('host registry directory generation changed since owner preview');
+  }
   const basename = hash(Buffer.from(path.resolve(project)));
   const store = openRecoveryStore(location.root, options);
   let lock;
@@ -325,7 +330,8 @@ export function registerComponentRecoveryCheckpoint(project, details,
   let committed = false;
   let publicationFailure;
   try {
-    if (store.rootIdentity !== createdRootBinding.ancestorIdentity) {
+    if (store.rootIdentity !== createdRootBinding.ancestorIdentity ||
+        store.rootCtimeNs !== createdRootBinding.ancestorCtimeNs) {
       throw trustError('pinned host registry identity changed before checkpoint publication');
     }
     lock = store.createLock(`${basename}.json.lock`);

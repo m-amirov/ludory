@@ -388,7 +388,7 @@ Recovery checkpoint publication holds a **physical host-registry directory
 handle** throughout its exclusive lock, conflict checks, canonical record
 write, flush, and rollback. Linux requires a working `/proc/self/fd` procfs
 mount with safe directory-descriptor operations. Windows requires the trusted
-native `npm run build:windows-pin` module with `pinContractVersion=5`, whose
+native `npm run build:windows-pin` module with `pinContractVersion=6`, whose
 `NtCreateFile(RootDirectory)` operations resolve only reserved checkpoint
 names relative to the held handle. Windows preview/read is read-only;
 publication additionally holds an undeletable native child guard. There is
@@ -403,6 +403,11 @@ if rollback cannot be verified, the lock is deliberately retained and later
 the lock or replay the recovery without inspecting the physical registry and
 confirming no writer is running. Windows native/NTFS behavior requires an
 actual Windows CI result; a Linux PASS does not establish that gate.
+If removing the publication lock succeeds but a subsequent directory durability
+check or native close reports an error, Studio returns the committed checkpoint
+with a warning; inspect the host registry before a process restart or retry.
+This protects against accidental rollback of an already visible grant, but it
+does not guarantee crash/power-loss durability.
 
 Neither `RECOVERED` nor `IN_SYNC` means artwork rights, platform SDK,
 moderation or publication readiness.
@@ -522,7 +527,7 @@ code: `ludory components native --json` returns `READY` only after acquiring
 and releasing a real native directory handle, `BLOCKED` with a precise build
 command if Windows setup is missing, or `NOT_REQUIRED` off Windows. Build
 once from the trusted Ludory checkout using `npm run build:windows-pin`, then
-repeat the doctor. The loader requires `pinContractVersion=5` on every use;
+repeat the doctor. The loader requires `pinContractVersion=6` on every use;
 stale `.node` files from earlier metadata-only builds fail closed even if
 they still load and expose the same functions. Rebuild after updating the
 native source. Do not use a downloaded or unverified `.node` binary;

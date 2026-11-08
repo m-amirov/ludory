@@ -95,6 +95,7 @@ function linuxStore(root) {
   };
   return {
     rootIdentity: fileIdentity(opened),
+    rootCtimeNs: String(opened.ctimeNs),
     read(name) {
       const filename = located(name);
       let before;
@@ -175,6 +176,7 @@ function windowsStore(root, pinFactory, { readOnly = false } = {}) {
   };
   return {
     rootIdentity: `${pin.dev}:${pin.ino}`,
+    rootCtimeNs: pin.ctimeNs,
     read(name) {
       ensureOpen();
       return pin.readRecoveryRecord(validateName(name));
@@ -184,7 +186,16 @@ function windowsStore(root, pinFactory, { readOnly = false } = {}) {
     removeCreated(handle) {
       ensureOpen();
       if (!handles.has(handle) || handle.removed) throw conflict('invalid native recovery rollback handle');
-      handle.native.remove();
+      try { handle.native.remove(); }
+      catch (error) {
+        // The native delete disposition is the Windows publication point.
+        // A later CloseHandle error cannot roll back a committed record.
+        if (error.recoveryDeleteMarked) {
+          handle.removed = true;
+          handles.delete(handle);
+        }
+        throw error;
+      }
       handle.removed = true;
       handles.delete(handle);
     },

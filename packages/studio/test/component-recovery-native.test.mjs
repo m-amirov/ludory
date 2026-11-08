@@ -3,12 +3,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { openProtectedDirectory, assertWindowsDirectoryPinContract } from '../src/windows-directory-pin.mjs';
 import { openRecoveryStore } from '../../studio-trust/src/host-recovery-writer.mjs';
 import { registerComponentRecoveryCheckpoint, componentHostRegistryBinding,
   readComponentRecoveryCheckpoint } from '../../studio-trust/src/index.mjs';
 
 const id = 'b'.repeat(64);
+const junctionProbe = path.join(path.dirname(fileURLToPath(import.meta.url)),
+  'fixtures', 'windows-junction-in-place.ps1');
 
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-native-recovery-'));
@@ -130,3 +134,64 @@ test('Windows registry first created at apply remains pinned through native lock
       { schemaVersion: 1, project: path.resolve(project), ...details });
   }
 });
+
+test('Windows post-delete close failure cannot roll back a committed checkpoint', t => {
+  if (process.platform !== 'win32') return t.skip('Windows native deletion commit protocol');
+  const f = fixture(t);
+  const project = path.join(f.dir, 'game');
+  fs.mkdirSync(project);
+  const previous = process.env.LUDORY_STUDIO_TRUST_DIR;
+  process.env.LUDORY_STUDIO_TRUST_DIR = f.registry;
+  t.after(() => {
+    if (previous === undefined) delete process.env.LUDORY_STUDIO_TRUST_DIR;
+    else process.env.LUDORY_STUDIO_TRUST_DIR = previous;
+  });
+  const binding = componentHostRegistryBinding(project);
+  const details = { rootIdentity: '1:2', receiptSha256: 'a'.repeat(64),
+    manifestSha256: 'b'.repeat(64), stateSha256: 'c'.repeat(64),
+    recoverySha256: 'd'.repeat(64), fromCommit: '1'.repeat(40), toCommit: '2'.repeat(40) };
+  let injected = false;
+  const factory = root => {
+    const pin = openProtectedDirectory(root);
+    return { ...pin, createRecoveryLock(name) {
+      const lock = pin.createRecoveryLock(name);
+      return { ...lock, remove() {
+        lock.remove();
+        injected = true;
+        throw Object.assign(new Error('injected close error after native delete disposition'),
+          { recoveryDeleteMarked: true });
+      } };
+    } };
+  };
+  assert.deepEqual(registerComponentRecoveryCheckpoint(project, details, binding,
+    { windowsPin: factory }), { schemaVersion: 1, project: path.resolve(project), ...details });
+  assert.equal(injected, true);
+  assert.deepEqual(readComponentRecoveryCheckpoint(project, { windowsPin: openProtectedDirectory }),
+    { schemaVersion: 1, project: path.resolve(project), ...details });
+  assert.equal(fs.readdirSync(f.registry).some(name => name.endsWith('.json.lock')), false);
+});
+
+for (const mode of ['Full', 'Attributes']) {
+  test(`Windows native recovery root rejects in-place NTFS junction injection (${mode})`, t => {
+    if (process.platform !== 'win32') return t.skip('Windows NTFS junction proof required');
+    const f = fixture(t);
+    const outside = path.join(f.dir, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'sentinel.txt'), 'outside untouched\n');
+    const store = openRecoveryStore(f.registry, { windowsPin: openProtectedDirectory });
+    try {
+      const probe = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass', '-File', junctionProbe, '-Source', f.registry,
+        '-Target', outside, '-AccessMode', mode], { encoding: 'utf8', timeout: 20000 });
+      assert.equal(probe.status, 2, `held recovery guard must block ${mode} junction: ${probe.stdout}\n${probe.stderr}`);
+      assert.match(probe.stdout, /BLOCKED:\d+/);
+      const lock = store.createLock(`${id}.json.lock`);
+      const record = store.createRecord(`${id}.recovery.json`, Buffer.from('anchored\n'));
+      assert.equal(fs.readFileSync(path.join(f.registry, `${id}.recovery.json`), 'utf8'), 'anchored\n');
+      assert.equal(fs.existsSync(path.join(outside, `${id}.recovery.json`)), false);
+      assert.equal(fs.readFileSync(path.join(outside, 'sentinel.txt'), 'utf8'), 'outside untouched\n');
+      store.removeCreated(record);
+      store.removeCreated(lock);
+    } finally { store.close(); }
+  });
+}

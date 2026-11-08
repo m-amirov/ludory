@@ -64,7 +64,7 @@
 - Extend `openProtectedDirectory()` with `createRecoveryLock`, `readRecoveryRecord`, `createRecoveryRecord` wrappers; include existing `createGuard` to prevent in-place junction replacement. `acceptComponentGitRecovery()` injects this Windows adapter into `registerComponentRecoveryCheckpoint`; an unavailable native binary blocks apply.
 
 - [ ] **Step 1:** Add v5 contract RED tests and NTFS-only integration tests for handle-relative record creation, lock exclusivity, rooted read, abort removal, held directory replacement/reparse guard, and a stale/missing native module fail-closed case. Tests must exercise real N-API on Windows in the existing Core CI matrix (Node 22/24).
-- [ ] **Step 2:** Run Linux contract-focused tests. Expected: RED until version 5 and methods are implemented; Windows tests SKIP explicitly off NTFS.
+- [ ] **Step 2:** Run Linux contract-focused tests. Expected: RED until version 6 and methods are implemented; Windows tests SKIP explicitly off NTFS.
 - [ ] **Step 3:** Implement minimal N-API additions reusing `NtCreateFile`/`removeGuard` patterns, check file type/identity, write/flush bytes and preserve held tokens. No arbitrary-path native write method. Add thin Studio-owned injection while keeping trust package independent.
 - [ ] **Step 4:** Run Linux focused suite and, on GitHub Actions, Windows N-API build plus native recovery tests. Expected: exact-head Windows PASS; any missing evidence keeps PR Draft.
 - [ ] **Step 5:** Commit `feat(studio): publish recovery checkpoints relative to Win32 directory pin`.

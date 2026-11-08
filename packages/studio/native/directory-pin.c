@@ -9,6 +9,7 @@
 
 typedef struct {
   HANDLE handle;
+  int deletion_marked;
 } directory_pin;
 
 // Stable NT native handle-relative create ABI. RootDirectory is the pinned
@@ -232,10 +233,27 @@ static napi_value remove_guard(napi_env env, napi_callback_info info) {
   if (!SetFileInformationByHandle(guard->handle, FileDispositionInfo, &disposition, sizeof(disposition))) {
     return throw_native(env, "Marking anchored guard for deletion", GetLastError());
   }
+  guard->deletion_marked = 1;
   if (!CloseHandle(guard->handle)) return throw_native(env, "Closing removed anchored guard", GetLastError());
   guard->handle = INVALID_HANDLE_VALUE;
   napi_value result;
   napi_get_undefined(env, &result);
+  return result;
+}
+
+// A successful delete disposition is irreversible publication for recovery.
+// Expose the marker even when the subsequent CloseHandle reports an error.
+static napi_value is_deletion_marked(napi_env env, napi_callback_info info) {
+  size_t argc = 1;
+  napi_value args[1];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+  directory_pin* pin = NULL;
+  if (argc != 1 || napi_get_value_external(env, args[0], (void**)&pin) != napi_ok || pin == NULL) {
+    napi_throw_type_error(env, "LUDORY_WIN32_RECOVERY", "Deletion marker requires a native file token");
+    return NULL;
+  }
+  napi_value result;
+  napi_get_boolean(env, pin->deletion_marked != 0, &result);
   return result;
 }
 
@@ -468,13 +486,13 @@ static napi_value read_recovery_record(napi_env env, napi_callback_info info) {
 }
 
 NAPI_MODULE_INIT() {
-  // Security protocol v5 additionally requires native handle-relative host
-  // recovery lock/read/write. v4 supports only the held transaction guard.
+  // Security protocol v6 requires a native post-delete disposition marker;
+  // v5 already supported handle-relative host recovery lock/read/write.
   // v4 also requires a held handle-relative guard
   // file in each directory before any operation can temporarily empty it.
   // Earlier binary versions allowed the confirmed transient NTFS escape.
   napi_value version;
-  if (napi_create_uint32(env, 5, &version) != napi_ok ||
+  if (napi_create_uint32(env, 6, &version) != napi_ok ||
       napi_set_named_property(env, exports, "pinContractVersion", version) != napi_ok) {
     napi_throw_error(env, NULL, "Creating native pin security contract failed");
     return NULL;
@@ -484,6 +502,7 @@ NAPI_MODULE_INIT() {
     {"close", NULL, close_directory, NULL, NULL, NULL, napi_default, NULL},
     {"createGuard", NULL, create_guard, NULL, NULL, NULL, napi_default, NULL},
     {"removeGuard", NULL, remove_guard, NULL, NULL, NULL, napi_default, NULL},
+    {"isDeletionMarked", NULL, is_deletion_marked, NULL, NULL, NULL, napi_default, NULL},
     {"createRecoveryLock", NULL, create_recovery_lock, NULL, NULL, NULL, napi_default, NULL},
     {"readRecoveryRecord", NULL, read_recovery_record, NULL, NULL, NULL, napi_default, NULL},
     {"createRecoveryRecord", NULL, create_recovery_record, NULL, NULL, NULL, napi_default, NULL},
