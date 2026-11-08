@@ -5,7 +5,10 @@ import { defineGame } from '@ludory/core';
 import { loadCatalog, isStudioComponentPath, isStudioAuthorPath } from './catalog.mjs';
 import { projectRoot, directoryIdentity, isOriginalDirectory } from './projects.mjs';
 import { assertComponentTrust, advanceComponentTrust, registerComponentTrust,
-  hostTrustDigest, isMissingHostTrust } from './component-trust.mjs';
+  hostTrustDigest, isMissingHostTrust, readComponentRecoveryCheckpoint,
+  assertComponentRecoveryCheckpoint, registerComponentRecoveryCheckpoint,
+  componentHostRegistryBinding } from './component-trust.mjs';
+import { collectComponentGitHistory } from './component-git-history.mjs';
 import { openProtectedDirectory } from './windows-directory-pin.mjs';
 
 const stateName = 'ludory.components.json';
@@ -181,12 +184,37 @@ function originalOwnershipMatches(installed, receipt) {
     owned.every(([name, sha256]) => authors.has(name) || installed.state.files[name] === sha256);
 }
 
+function assertHistoricalOwnershipStep(a, b) {
+  const released = Object.keys(a.files).filter(name => !Object.hasOwn(b.files, name));
+  const adoption = a.schemaVersion === 1 && b.schemaVersion === 2 &&
+    released.length === b.authorFiles.length &&
+    released.every(name => b.authorFiles.includes(name)) &&
+    b.authorFiles.every(name => Object.hasOwn(a.files, name));
+  const order = versionCompare(b.template.version, a.template.version);
+  const authorRegression = a.schemaVersion === 2 &&
+    (b.schemaVersion !== 2 || JSON.stringify(a.authorFiles) !== JSON.stringify(b.authorFiles));
+  if (authorRegression || (order <= 0 && !(order === 0 && adoption &&
+        b.template.sourceSha256 === a.template.sourceSha256 &&
+        Object.keys(b.files).every(name => b.files[name] === a.files[name]))) ||
+      a.template.id !== b.template.id || a.template.profile !== b.template.profile ||
+      a.template.origin !== b.template.origin ||
+      released.some(name => !adoption || !isStudioAuthorPath(name))) {
+    throw new Error('Component transition attempts ownership regression');
+  }
+}
+
 // The standalone components manifest is not an ownership grant. It must be
 // traceable to the initial creation receipt through real, retained Studio
 // transaction archives. This is local tamper evidence, not a digital signature
 // against an attacker who can rewrite the *entire* project and all archives.
 function verifyOwnershipHistory(project, installed, receipt) {
   if (originalOwnershipMatches(installed, receipt)) return;
+  const checkpoint = readComponentRecoveryCheckpoint(project);
+  const anchor = checkpoint ? {
+    rootIdentity: directoryIdentity(project),
+    receiptSha256: hash(secureFile(path.join(project, 'ludory.studio.json'), 'creation receipt')),
+    manifestSha256: hash(secureFile(path.join(project, 'ludory.project.json'), 'game manifest')),
+  } : null;
   const archives = fs.readdirSync(project).filter(name => name.startsWith(backupPrefix));
   if (archives.length > 128) throw new Error('Too many component provenance archives');
   const steps = new Map();
@@ -209,6 +237,10 @@ function verifyOwnershipHistory(project, installed, receipt) {
   let current = installed;
   for (let hop = 0; hop <= steps.size; hop++) {
     if (originalOwnershipMatches(current, receipt)) return;
+    if (checkpoint?.stateSha256 === current.sha256) {
+      assertComponentRecoveryCheckpoint(project, { ...anchor, stateSha256: current.sha256 });
+      return;
+    }
     const candidates = steps.get(current.sha256) ?? [];
     const valid = [];
     for (const { proof, archive } of candidates) {
@@ -224,23 +256,7 @@ function verifyOwnershipHistory(project, installed, receipt) {
     if (!valid.length) throw new Error('Component ownership has no verified creation/upgrade provenance');
     const previous = valid[0];
     if (valid.some(item => item.sha256 !== previous.sha256)) throw new Error('Ambiguous component transition provenance');
-    const a = previous.state, b = current.state;
-    const released = Object.keys(a.files).filter(name => !Object.hasOwn(b.files, name));
-    const adoption = a.schemaVersion === 1 && b.schemaVersion === 2 &&
-      released.length === b.authorFiles.length &&
-      released.every(name => b.authorFiles.includes(name)) &&
-      b.authorFiles.every(name => Object.hasOwn(a.files, name));
-    const order = versionCompare(b.template.version, a.template.version);
-    const authorRegression = a.schemaVersion === 2 &&
-      (b.schemaVersion !== 2 || JSON.stringify(a.authorFiles) !== JSON.stringify(b.authorFiles));
-    if (authorRegression || (order <= 0 && !(order === 0 && adoption &&
-          b.template.sourceSha256 === a.template.sourceSha256 &&
-          Object.keys(b.files).every(name => b.files[name] === a.files[name]))) ||
-        a.template.id !== b.template.id || a.template.profile !== b.template.profile ||
-        a.template.origin !== b.template.origin ||
-        released.some(name => !adoption || !isStudioAuthorPath(name))) {
-      throw new Error('Component transition attempts ownership regression');
-    }
+    assertHistoricalOwnershipStep(previous.state, current.state);
     current = previous;
   }
   throw new Error('Cyclic component ownership provenance');
@@ -541,6 +557,139 @@ export function acceptComponentTrust(preview, confirmedSha256) {
     stateSha256: fresh.stateSha256 });
   return { ...fresh, status: 'TRUSTED' };
 }
+
+/** Recover missing native transaction archives only from complete, owner-reviewed Git evidence. */
+export function previewComponentGitRecovery(projectDir, { fromCommit, toCommit, catalog } = {}) {
+  const project = projectRoot(projectDir);
+  const catalogPath = catalog === undefined ? undefined : path.resolve(catalog);
+  const output = (status, conflicts = [], more = {}) => ({
+    mode: 'component-recovery', project, status, writes: [], conflicts, ...more,
+  });
+  const projectEntries = fs.readdirSync(project);
+  if (projectEntries.some(entry => entry === lockName || entry.startsWith(stagingPrefix))) {
+    return output('CONFLICT', ['Unfinished component update transaction; recovery is forbidden']);
+  }
+  // Real native archives must be examined or restored, never ignored by a
+  // fallback Git witness. This operation is strictly for *missing* archives.
+  if (projectEntries.some(entry => entry.startsWith(backupPrefix))) {
+    return output('CONFLICT', ['Native component archive exists; inspect its provenance instead of Git recovery']);
+  }
+  try {
+    if (readComponentRecoveryCheckpoint(project)) {
+      return output('CONFLICT', ['Existing component recovery checkpoint cannot be replaced']);
+    }
+    const installed = readState(project);
+    const receiptBytes = secureFile(path.join(project, 'ludory.studio.json'), 'creation receipt');
+    const receipt = JSON.parse(receiptBytes.toString('utf8'));
+    const manifestBytes = secureFile(path.join(project, 'ludory.project.json'), 'game manifest');
+    defineGame(JSON.parse(manifestBytes.toString('utf8')));
+    const receiptSha256 = hash(receiptBytes), manifestSha256 = hash(manifestBytes);
+    const rootIdentity = directoryIdentity(project);
+    const expected = { rootIdentity, receiptSha256, manifestSha256, stateSha256: installed.sha256 };
+    try {
+      assertComponentTrust(project, expected);
+      return output('CONFLICT', ['This Studio project already has a host trust pin; recovery cannot re-anchor it']);
+    } catch (error) {
+      if (!isMissingHostTrust(error)) return output('CONFLICT', [error.message]);
+    }
+    if (originalOwnershipMatches(installed, receipt)) {
+      return output('CONFLICT', ['Installed component already matches its original creation receipt; use components trust']);
+    }
+    const authorCandidates = installed.state.authorFiles ?? [];
+    assertAuthoredFilesSafe(project, authorCandidates);
+    const authorDigest = authorIdentityDigest(project, authorCandidates);
+    const managedPaths = Object.keys(installed.state.files).sort();
+    for (const [name, expectedHash] of Object.entries(installed.state.files)) {
+      if (hash(checkedFile(project, name)) !== expectedHash) throw new Error(`Managed file modified: ${name}`);
+    }
+    const evidence = collectComponentGitHistory(project, { fromCommit, toCommit });
+    if (evidence.commits.length < 2) throw new Error('Git recovery has no historical component transition');
+    const transitions = [];
+    let previous;
+    for (const commit of evidence.commits) {
+      const state = parseState(commit.files.get(stateName).bytes);
+      if (!commit.files.get('ludory.studio.json').bytes.equals(receiptBytes) ||
+          !commit.files.get('ludory.project.json').bytes.equals(manifestBytes)) {
+        throw new Error(`Committed creation receipt or game manifest changed at ${commit.sha}`);
+      }
+      for (const [name, expectedHash] of Object.entries(state.state.files)) {
+        const gitFile = commit.files.get(name);
+        if (!gitFile || hash(gitFile.bytes) !== expectedHash) {
+          throw new Error(`Committed managed file hash mismatch at ${commit.sha}: ${name}`);
+        }
+      }
+      if (!previous) {
+        if (!originalOwnershipMatches(state, receipt)) {
+          throw new Error('Git source state does not match original Studio creation contract');
+        }
+      } else if (state.sha256 !== previous.state.sha256) {
+        assertHistoricalOwnershipStep(previous.state.state, state.state);
+        const added = Object.keys(state.state.files).filter(name => !Object.hasOwn(previous.state.state.files, name));
+        if (added.length) throw new Error(`Git transition introduces new managed ownership: ${added.join(', ')}`);
+        transitions.push({ fromCommit: previous.commit, toCommit: commit.sha,
+          fromVersion: previous.state.state.template.version, toVersion: state.state.template.version,
+          beforeSha256: previous.state.sha256, afterSha256: state.sha256 });
+      }
+      previous = { state, commit: commit.sha };
+    }
+    if (previous.state.sha256 !== installed.sha256 || !previous.state.bytes.equals(installed.bytes)) {
+      throw new Error('Git destination component state differs from current project');
+    }
+    for (const name of managedPaths) {
+      if (!previous.state.state.files[name] ||
+          !previous.state.bytes || !evidence.commits.at(-1).files.get(name).bytes.equals(checkedFile(project, name))) {
+        throw new Error(`Git destination managed file differs from current project: ${name}`);
+      }
+    }
+    if (!transitions.length) throw new Error('Git history contains no verified Studio ownership transition');
+    if (catalogPath) {
+      const template = loadCatalog(catalogPath).templates.get(installed.state.template.id);
+      if (!template || template.profile !== installed.state.template.profile ||
+          template.origin !== installed.state.template.origin) {
+        throw new Error('Catalog identity differs from recovered component');
+      }
+    }
+    const hostRegistry = componentHostRegistryBinding(project);
+    if (!hostRegistry.rootExists) {
+      return output('BLOCKED', [
+        'Host registry does not exist. Initialize the selected host-registry directory separately, then rerun recovery preview and review its new SHA-256 before accepting.',
+      ], { hostRegistryPath: hostRegistry.root,
+        nextAction: 'Create hostRegistryPath as a private directory outside the game, then run components recover without --apply for a fresh owner review.' });
+    }
+    const witness = { schemaVersion: 1, project, repositoryRoot: evidence.repositoryRoot,
+      projectPath: evidence.projectPath, fromCommit, toCommit,
+      rootIdentity, receiptSha256, manifestSha256, stateSha256: installed.sha256,
+      hostRegistry,
+      authorDigest, managedPaths, transitions };
+    const recoverySha256 = hash(encode(witness));
+    return output('NEEDS_USER_ACTION', [], { ...witness, recoverySha256, catalogPath,
+      warning: 'Git content continuity is not owner authentication. Review commits, hashes, paths, and this digest; separate components trust is mandatory after recovery.' });
+  } catch (error) {
+    return output('CONFLICT', [`Git component recovery failed: ${error.message}`]);
+  }
+}
+
+export function acceptComponentGitRecovery(preview, confirmedRecoverySha256) {
+  if (!preview || preview.mode !== 'component-recovery' || preview.status !== 'NEEDS_USER_ACTION') {
+    throw new Error('Only an explicitly previewed component recovery may be accepted');
+  }
+  if (confirmedRecoverySha256 !== preview.recoverySha256) {
+    throw new Error('Recovery confirmation SHA-256 does not match preview');
+  }
+  const fresh = previewComponentGitRecovery(preview.project, {
+    fromCommit: preview.fromCommit, toCommit: preview.toCommit, catalog: preview.catalogPath,
+  });
+  if (fresh.status !== 'NEEDS_USER_ACTION' || fresh.recoverySha256 !== preview.recoverySha256) {
+    throw new Error('Stale or conflicting component recovery preview');
+  }
+  registerComponentRecoveryCheckpoint(fresh.project, {
+    rootIdentity: fresh.rootIdentity, receiptSha256: fresh.receiptSha256,
+    manifestSha256: fresh.manifestSha256, stateSha256: fresh.stateSha256,
+    recoverySha256: fresh.recoverySha256, fromCommit: fresh.fromCommit, toCommit: fresh.toCommit,
+  }, fresh.hostRegistry);
+  return { ...fresh, status: 'RECOVERED' };
+}
+
 function stagedFile(newDirectory, relative, bytes, mode = 0o600) {
   const filename = path.isAbsolute(relative) ? relative : path.join(newDirectory, relative);
   const fd = fs.openSync(filename, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL |

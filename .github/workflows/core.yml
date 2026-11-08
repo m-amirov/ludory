@@ -25,7 +25,7 @@ jobs:
       # Fail early on actual NTFS native-handle and in-place reparse-point
       # regressions; the complete suite still runs after this focused gate.
       - if: runner.os == 'Windows'
-        run: node packages/studio/test/component-updates.test.mjs
+        run: node --test packages/studio/test/component-updates.test.mjs packages/studio/test/component-recovery-native.test.mjs packages/studio/test/component-git-recovery.test.mjs
       - run: npm test
       - run: npm run check
       - run: node examples/core-session.mjs

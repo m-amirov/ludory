@@ -334,6 +334,100 @@ command, including if the pin disagrees with the game. A crash between game
 publication and host registry publication may require operator recovery; never
 automatically re-anchor a mismatched host pin.
 
+### Missing Studio upgrade archives: owner-approved Git recovery
+
+If a legitimate Studio component upgrade was committed to Git but its
+`.ludory-components-backup-*` directories were lost during a host transfer,
+`components trust` intentionally returns `CONFLICT` because the original
+Studio transaction chain is missing. Prefer restoring the **actual archived
+transactions** from the original Studio host when available. Do not fabricate
+`component-transition.json`, edit `ludory.components.json` or reset the host
+registry to bypass the failure.
+
+For a project with a **complete, local, non-shallow Git history**, the optional
+`components recover` command can attest the committed *content continuity*
+from the original Studio creation state to the installed version. It reads Git
+objects offline, checks every intermediate committed managed file against its
+component state, and refuses merges, unsafe paths, mutated receipts,
+downgrades, ownership expansion, corrupt real archives, or an existing host
+trust pin. It never contacts GitHub itself or changes game files. A checkout
+containing only the latest snapshot commit cannot be recovered this way.
+Raw Git commit-parent bytes are checked against reported ancestry to reject
+locally configured grafts. Every referenced commit, tree and managed blob is
+checked against its Git object SHA; missing promisor blobs fail closed instead
+of triggering lazy remote fetch. A partial clone is not sufficient evidence.
+
+The selected **host registry must already exist before the recovery preview**.
+If it does not, the command returns `BLOCKED`, with `hostRegistryPath` and
+`nextAction` in `--json`, and **no confirmation digest**. Initialize that
+specific directory as a separate host setup step, outside the game, with
+private owner permissions (and an appropriate Windows ACL). For example:
+
+```sh
+# Use the exact absolute hostRegistryPath reported by BLOCKED (not the game path).
+node -e "require('node:fs').mkdirSync(process.argv[1], { recursive: true, mode: 0o700 })" "<hostRegistryPath>"
+```
+
+Then run `components recover` **again without `--apply`**, review the new
+`hostRegistry` identity and `recoverySha256`, and only then confirm that digest.
+An old blocked/absent-registry preview is never valid approval for a new root.
+Recovery apply never creates host directories, including on Windows.
+
+```sh
+# Inspect two genuine full commit SHAs in the project's local Git history:
+# FROM = original Studio creation state; TO = committed current component state.
+node packages/studio/bin/ludory.mjs components recover --project /path/to/game-studio --from-commit <FROM_SHA40> --to-commit <TO_SHA40> --json
+
+# Inspect the full path/version/hash/commit witness in the preview, then explicitly
+# authorize the exact recoverySha256 on this host:
+node packages/studio/bin/ludory.mjs components recover --project /path/to/game-studio --from-commit <FROM_SHA40> --to-commit <TO_SHA40> --accept-recovery-sha256 <RECOVERY_SHA256> --apply --json
+
+# RECOVERED is not trusted: separate owner consent is still mandatory.
+node packages/studio/bin/ludory.mjs components trust --project /path/to/game-studio --json
+node packages/studio/bin/ludory.mjs components trust --project /path/to/game-studio --accept-state-sha256 <STATE_SHA256_FROM_TRUST_PREVIEW> --apply --json
+node packages/studio/bin/ludory.mjs components status --project /path/to/game-studio --json
+# Only after IN_SYNC/READY and full authored-file review:
+node packages/studio/bin/ludory.mjs components update --project /path/to/game-studio --json
+```
+
+The explicit recovery acceptance writes one **host-owned, private,
+create-once checkpoint** outside the game. The normal Studio trust pin is
+separate and is never created or replaced by recovery. Later native upgrades
+still make real transaction archives linking back to that exact recovered
+state. If source commits, current managed files, authored proofs, physical
+directory identity, selected host registry path/physical identity, or history
+witness change after preview, apply refuses to use the stale digest. Git is
+not cryptographic proof of who authored a
+commit; **the owner's independent review is the authorization boundary**.
+
+Recovery checkpoint publication holds a **physical host-registry directory
+handle** throughout its exclusive lock, conflict checks, canonical record
+write, flush, and rollback. Linux requires a working `/proc/self/fd` procfs
+mount with safe directory-descriptor operations. Windows requires the trusted
+native `npm run build:windows-pin` module with `pinContractVersion=6`, whose
+`NtCreateFile(RootDirectory)` operations resolve only reserved checkpoint
+names relative to the held handle. Windows preview/read is read-only;
+publication additionally holds an undeletable native child guard. There is
+**no path-based fallback** on unsupported hosts or when the native module is
+missing/stale. Ordinary Studio trust and recovery remain separate decisions.
+
+The per-project `.json.lock` is the **publication commit barrier**: a complete
+checkpoint must not be trusted until that lock has been removed. An aborted
+write removes only its own newly created checkpoint through the pinned root;
+if rollback cannot be verified, the lock is deliberately retained and later
+`components trust`, status and recovery reads block. Do not manually remove
+the lock or replay the recovery without inspecting the physical registry and
+confirming no writer is running. Windows native/NTFS behavior requires an
+actual Windows CI result; a Linux PASS does not establish that gate.
+If removing the publication lock succeeds but a subsequent directory durability
+check or native close reports an error, Studio returns the committed checkpoint
+with a warning; inspect the host registry before a process restart or retry.
+This protects against accidental rollback of an already visible grant, but it
+does not guarantee crash/power-loss durability.
+
+Neither `RECOVERED` nor `IN_SYNC` means artwork rights, platform SDK,
+moderation or publication readiness.
+
 For `narrative-interactive` template **1.2.2+**, Studio owns only the
 launcher/bootstrap (`index.html`, `src/main.js`, `src/entry.js`) and bundled
 runtime (`assets/ludory-narrative.js`). `src/story.js`,
@@ -449,7 +543,7 @@ code: `ludory components native --json` returns `READY` only after acquiring
 and releasing a real native directory handle, `BLOCKED` with a precise build
 command if Windows setup is missing, or `NOT_REQUIRED` off Windows. Build
 once from the trusted Ludory checkout using `npm run build:windows-pin`, then
-repeat the doctor. The loader requires `pinContractVersion=4` on every use;
+repeat the doctor. The loader requires `pinContractVersion=6` on every use;
 stale `.node` files from earlier metadata-only builds fail closed even if
 they still load and expose the same functions. Rebuild after updating the
 native source. Do not use a downloaded or unverified `.node` binary;
