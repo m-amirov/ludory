@@ -46,12 +46,15 @@ test('built-in catalogs are versioned, valid, and only expose public descriptors
 });
 
 test('M4 native launcher changes require a new template version for existing Studio owners', () => {
-  // An actual Studio-created game from the pre-merge M4A build owns these bytes.
+  // Provenance: m-amirov/kiss-at-the-edge-of-the-world-ludory commit a43e9c9,
+  // game-studio/src/main.js and game-studio/ludory.components.json at 1.2.3.
   // Without a version bump, components status/update reject the upgraded launcher.
   const installedVersion = '1.2.3';
   const installedLauncherSha256 = '9c50a1fee60fb6156ce411286eb1dcf609f37fe9df462495fdec02f9f669cb8a';
   const template = loadCatalog().templates.get('narrative-interactive');
   const launcherSha256 = template.assets.get('src/main.js').sha256;
+  assert.equal(launcherSha256, '3c6855df43381e831f6a9ad482b89ba887457d12aa864a76ce0b3332ca6d8da0',
+    'launcher bytes changed: explicitly version and review any new managed source');
   assert.notEqual(launcherSha256, installedLauncherSha256, 'fixture must exercise the post-merge launcher change');
   const [major, minor, patch] = template.version.split('.').map(Number);
   const [previousMajor, previousMinor, previousPatch] = installedVersion.split('.').map(Number);

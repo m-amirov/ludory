@@ -104,6 +104,92 @@ test('managed component upgrade preserves edited narrative, visual proof and ext
   assert.equal(componentStatus(f.project, { catalog: f.catalog }).status, 'IN_SYNC');
 });
 
+test('real 1.2.3 narrative launcher upgrades to 1.2.4 with authored bytes and backup retained', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-m4-launcher-upgrade-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const priorTrustRoot = process.env.LUDORY_STUDIO_TRUST_DIR;
+  process.env.LUDORY_STUDIO_TRUST_DIR = path.join(root, 'host-trust');
+  t.after(() => {
+    if (priorTrustRoot === undefined) delete process.env.LUDORY_STUDIO_TRUST_DIR;
+    else process.env.LUDORY_STUDIO_TRUST_DIR = priorTrustRoot;
+  });
+  const catalog = path.join(root, 'catalog');
+  const builtinCatalog = fileURLToPath(new URL('../catalog/', import.meta.url));
+  // A separate local catalog avoids overriding IDs reserved by the built-in catalog.
+  // Keep the real 1.2.3/1.2.4 launcher bytes and ownership/update mechanisms.
+  const fixtureTemplateId = 'm4-narrative-fixture';
+  const fixtureProfileId = 'm4-profile-fixture';
+  fs.mkdirSync(path.join(catalog, 'profiles'), { recursive: true });
+  fs.mkdirSync(path.join(catalog, 'templates'), { recursive: true });
+  fs.cpSync(path.join(builtinCatalog, 'templates/narrative-interactive'),
+    path.join(catalog, 'templates', fixtureTemplateId), { recursive: true });
+  const profile = JSON.parse(fs.readFileSync(path.join(builtinCatalog, 'profiles/narrative-game.json'), 'utf8'));
+  profile.id = fixtureProfileId;
+  profile.templates = [fixtureTemplateId];
+  fs.writeFileSync(path.join(catalog, 'profiles', `${fixtureProfileId}.json`), `${JSON.stringify(profile, null, 2)}\n`);
+  const descriptorPath = path.join(catalog, 'templates', fixtureTemplateId, 'template.json');
+  const launcherPath = path.join(catalog, 'templates', fixtureTemplateId, 'src/main.js');
+  const currentLauncher = fs.readFileSync(launcherPath, 'utf8');
+  const currentDescriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf8'));
+  assert.equal(currentDescriptor.version, '1.2.4');
+  currentDescriptor.id = fixtureTemplateId;
+  currentDescriptor.profile = fixtureProfileId;
+  const upgradedBlock = [
+    '  // Reflect.get keeps the opt-in export optional for legacy authored stories.',
+    '  // Static property reads on an ESM namespace trigger an esbuild missing-export',
+    '  // warning, which is a hard gate in SDK platform export compilation.',
+    "  const authoredPresentation = Reflect.get(story, 'presentationData');",
+    '  const presentation = authoredPresentation === undefined ? undefined :',
+    '    defineNarrativePresentation(graph, authoredPresentation);',
+  ].join('\n');
+  const historicalBlock = [
+    '  const presentation = story.presentationData === undefined ? undefined :',
+    '    defineNarrativePresentation(graph, story.presentationData);',
+  ].join('\n');
+  assert.ok(currentLauncher.includes(upgradedBlock), 'test fixture must reflect the released launcher');
+  const historicalLauncher = currentLauncher.replace(upgradedBlock, historicalBlock);
+  // Source: game commit a43e9c9:game-studio/src/main.js, created from native Studio 1.2.3.
+  assert.equal(crypto.createHash('sha256').update(historicalLauncher).digest('hex'),
+    '9c50a1fee60fb6156ce411286eb1dcf609f37fe9df462495fdec02f9f669cb8a');
+  fs.writeFileSync(launcherPath, historicalLauncher);
+  fs.writeFileSync(descriptorPath, `${JSON.stringify({ ...currentDescriptor, version: '1.2.3' }, null, 2)}\n`);
+
+  const project = path.join(root, 'game');
+  fs.mkdirSync(project);
+  const created = applyCreatePlan(planCreate(project, { id: 'm4-upgrade', title: 'Narrative', lang: 'ru',
+    profile: fixtureProfileId, template: fixtureTemplateId, targets: ['vk-games', 'yandex-games'], catalog }));
+  assert.equal(created.status, 'APPLIED');
+  assert.equal(crypto.createHash('sha256').update(fs.readFileSync(path.join(project, 'src/main.js'))).digest('hex'),
+    '9c50a1fee60fb6156ce411286eb1dcf609f37fe9df462495fdec02f9f669cb8a');
+
+  const story = path.join(project, 'src/story.js');
+  fs.appendFileSync(story, '\n// owner narrative text\n');
+  const image = path.join(project, 'assets/vis-m4.webp');
+  fs.writeFileSync(image, Buffer.from('RIFF0000WEBPVP8 user image'));
+  const proof = path.join(project, 'narrative-assets.json');
+  const proofData = JSON.parse(fs.readFileSync(proof, 'utf8'));
+  proofData.storySha256 = crypto.createHash('sha256').update(fs.readFileSync(story)).digest('hex');
+  proofData.assets['vis-m4'] = { path: 'assets/vis-m4.webp',
+    sha256: crypto.createHash('sha256').update(fs.readFileSync(image)).digest('hex') };
+  fs.writeFileSync(proof, `${JSON.stringify(proofData, null, 2)}\n`);
+  const authored = [story, image, proof].map(filename => fs.readFileSync(filename));
+
+  fs.writeFileSync(launcherPath, currentLauncher);
+  assert.equal(planComponentUpdate(project, { catalog }).status, 'CONFLICT',
+    'the old SemVer must not silently accept different managed launcher bytes');
+  fs.writeFileSync(descriptorPath, `${JSON.stringify(currentDescriptor, null, 2)}\n`);
+  const plan = planComponentUpdate(project, { catalog });
+  assert.equal(plan.status, 'READY', JSON.stringify(plan));
+  assert.deepEqual(plan.writes, ['src/main.js', 'ludory.components.json']);
+  assert.equal(applyComponentPlan(plan).status, 'APPLIED');
+  assert.equal(componentStatus(project, { catalog }).status, 'IN_SYNC');
+  assert.deepEqual(fs.readFileSync(path.join(project, 'src/main.js')), Buffer.from(currentLauncher));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(project, 'ludory.components.json'))).template.version, '1.2.4');
+  [story, image, proof].forEach((filename, index) => assert.deepEqual(fs.readFileSync(filename), authored[index]));
+  assert.ok(fs.readdirSync(project).some(name => name.startsWith('.ludory-components-backup-')),
+    'Studio must retain the previous managed bytes in a backup');
+});
+
 test('legacy ownership adoption upgrades only managed bootstrap while preserving edited story', t => {
   const f = fixture(t, { initialVersion: '1.2.1', withAuthorStory: true });
   const authoredPath = path.join(f.project, 'src/story.js');
