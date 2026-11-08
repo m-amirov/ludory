@@ -5,12 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { registerComponentRecoveryCheckpoint, readComponentRecoveryCheckpoint,
   assertComponentRecoveryCheckpoint, registerComponentTrust } from '../src/component-trust.mjs';
+import { projectRoot } from '../src/projects.mjs';
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-recovery-host-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const old = process.env.LUDORY_STUDIO_TRUST_DIR;
   process.env.LUDORY_STUDIO_TRUST_DIR = path.join(root, 'host-registry');
+  fs.mkdirSync(process.env.LUDORY_STUDIO_TRUST_DIR, { mode: 0o700 });
   t.after(() => {
     if (old === undefined) delete process.env.LUDORY_STUDIO_TRUST_DIR;
     else process.env.LUDORY_STUDIO_TRUST_DIR = old;
@@ -48,13 +50,15 @@ test('mismatched or corrupted recovery records fail closed', t => {
   assert.throws(() => assertComponentRecoveryCheckpoint(f.project, { ...f.details, stateSha256: 'e'.repeat(64) }),
     /differs|match|conflict/i);
   const file = fs.readdirSync(path.join(f.root, 'host-registry')).find(name => name.endsWith('.json'));
-  fs.writeFileSync(path.join(f.root, 'host-registry', file), '{"bad":true}\n');
+  // Native Windows checkpoints are hidden. CREATE_ALWAYS/'w' cannot reopen a
+  // hidden file without specifying its attributes; mutate the existing handle.
+  fs.writeFileSync(path.join(f.root, 'host-registry', file), '{"bad":true}\n', { flag: 'r+' });
   assert.throws(() => readComponentRecoveryCheckpoint(f.project), /invalid|record|checkpoint/i);
 });
 
 test('existing Studio trust pin cannot be replaced by recovery', t => {
   const f = fixture(t);
-  registerComponentTrust(f.project, { rootIdentity: f.details.rootIdentity,
+  registerComponentTrust(projectRoot(f.project), { rootIdentity: f.details.rootIdentity,
     receiptSha256: f.details.receiptSha256, manifestSha256: f.details.manifestSha256,
     stateSha256: 'f'.repeat(64) });
   assert.throws(() => registerComponentRecoveryCheckpoint(f.project, f.details), /already.*trusted|existing.*trust|conflict/i);

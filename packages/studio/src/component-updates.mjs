@@ -649,10 +649,17 @@ export function previewComponentGitRecovery(projectDir, { fromCommit, toCommit, 
         throw new Error('Catalog identity differs from recovered component');
       }
     }
+    const hostRegistry = componentHostRegistryBinding(project);
+    if (!hostRegistry.rootExists) {
+      return output('BLOCKED', [
+        'Host registry does not exist. Initialize the selected host-registry directory separately, then rerun recovery preview and review its new SHA-256 before accepting.',
+      ], { hostRegistryPath: hostRegistry.root,
+        nextAction: 'Create hostRegistryPath as a private directory outside the game, then run components recover without --apply for a fresh owner review.' });
+    }
     const witness = { schemaVersion: 1, project, repositoryRoot: evidence.repositoryRoot,
       projectPath: evidence.projectPath, fromCommit, toCommit,
       rootIdentity, receiptSha256, manifestSha256, stateSha256: installed.sha256,
-      hostRegistry: componentHostRegistryBinding(project),
+      hostRegistry,
       authorDigest, managedPaths, transitions };
     const recoverySha256 = hash(encode(witness));
     return output('NEEDS_USER_ACTION', [], { ...witness, recoverySha256, catalogPath,

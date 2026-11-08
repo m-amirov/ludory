@@ -12,7 +12,8 @@ import { planComponentUpdate, componentStatus, applyComponentPlan,
 import { registerComponentTrust, readComponentRecoveryCheckpoint } from '../src/component-trust.mjs';
 import { projectRoot } from '../src/projects.mjs';
 import { openRecoveryStore } from '../../studio-trust/src/host-recovery-writer.mjs';
-import { registerComponentRecoveryCheckpoint as registerRecovery } from '../../studio-trust/src/index.mjs';
+import { registerComponentRecoveryCheckpoint as registerRecovery,
+  componentHostRegistryBinding } from '../../studio-trust/src/index.mjs';
 import { openProtectedDirectory } from '../src/windows-directory-pin.mjs';
 
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
@@ -22,7 +23,7 @@ function git(root, ...args) {
   return result.stdout.trim();
 }
 
-function fixture(t) {
+function fixture(t, { newHostExists = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-git-recovery-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const initialTrustDir = process.env.LUDORY_STUDIO_TRUST_DIR;
@@ -83,9 +84,38 @@ function fixture(t) {
   for (const name of archives) fs.rmSync(path.join(project, name), { recursive: true });
   // The original host's real transaction archives are absent after transfer.
   process.env.LUDORY_STUDIO_TRUST_DIR = path.join(root, 'new-host');
+  if (newHostExists) fs.mkdirSync(process.env.LUDORY_STUDIO_TRUST_DIR, { mode: 0o700 });
   return { root, project, catalog, template, descriptor, writeDescriptor,
     fromCommit, toCommit, story, authorBefore };
 }
+
+test('missing host registry requires separate initialization and a fresh owner preview', t => {
+  const f = fixture(t, { newHostExists: false });
+  const registry = process.env.LUDORY_STUDIO_TRUST_DIR;
+  const history = { fromCommit: f.fromCommit, toCommit: f.toCommit, catalog: f.catalog };
+  const missing = previewComponentGitRecovery(f.project, history);
+  assert.equal(missing.status, 'BLOCKED', JSON.stringify(missing));
+  assert.equal(missing.hostRegistryPath, registry);
+  assert.match(missing.conflicts.join(' '), /initializ|create|host registry/i);
+  assert.equal(fs.existsSync(registry), false, 'preview must not create the registry');
+  assert.throws(() => acceptComponentGitRecovery(missing, 'a'.repeat(64)), /preview|accept/i);
+  const absentBinding = componentHostRegistryBinding(f.project);
+  assert.equal(absentBinding.rootExists, false);
+  const details = { rootIdentity: '1:2', receiptSha256: 'a'.repeat(64),
+    manifestSha256: 'b'.repeat(64), stateSha256: 'c'.repeat(64),
+    recoverySha256: 'd'.repeat(64), fromCommit: '1'.repeat(40), toCommit: '2'.repeat(40) };
+  assert.throws(() => registerRecovery(f.project, details), /initializ|exist|registry/i,
+    'direct registration must reject a missing root before any host writes');
+  assert.equal(fs.existsSync(registry), false);
+  fs.mkdirSync(registry, { mode: 0o700 });
+  assert.throws(() => registerRecovery(f.project, details, absentBinding), /initializ|exist|registry/i,
+    'a previously absent-root binding cannot authorize a newly created root');
+  assert.deepEqual(fs.readdirSync(registry), []);
+  const fresh = previewComponentGitRecovery(f.project, history);
+  assert.equal(fresh.status, 'NEEDS_USER_ACTION', JSON.stringify(fresh));
+  assert.equal(fresh.hostRegistry.rootExists, true);
+  assert.equal(acceptComponentGitRecovery(fresh, fresh.recoverySha256).status, 'RECOVERED');
+});
 
 test('native lost-archive upgrade recovers only with Git evidence, owner consent and separate trust', t => {
   const f = fixture(t);
@@ -237,15 +267,15 @@ test('recovery refuses physical registry substitution during checkpoint locking'
   assert.equal(readComponentRecoveryCheckpoint(f.project), null);
 });
 
-test('recovery refuses a just-created registry replaced before lock acquisition', t => {
+test('an absent-root preview cannot reach checkpoint locking or a just-created replacement', t => {
   if (process.platform === 'win32') return t.skip('Linux pathname lock interception; Windows uses native RootDirectory and its own tests');
-  const f = fixture(t);
+  const f = fixture(t, { newHostExists: false });
   const selectedHost = process.env.LUDORY_STUDIO_TRUST_DIR;
   assert.equal(fs.existsSync(selectedHost), false, 'host registry must not exist at preview time');
   const preview = previewComponentGitRecovery(f.project, {
     fromCommit: f.fromCommit, toCommit: f.toCommit, catalog: f.catalog,
   });
-  assert.equal(preview.status, 'NEEDS_USER_ACTION', JSON.stringify(preview));
+  assert.equal(preview.status, 'BLOCKED', JSON.stringify(preview));
   const originalOpen = fs.openSync;
   let swapped = false;
   fs.openSync = function openWithNewRegistrySwap(filename, ...args) {
@@ -258,18 +288,16 @@ test('recovery refuses a just-created registry replaced before lock acquisition'
   };
   try {
     assert.throws(() => acceptComponentGitRecovery(preview, preview.recoverySha256),
-      /registry|host|identity|changed/i);
-    assert.equal(swapped, true);
+      /preview|accept/i);
+    assert.equal(swapped, false, 'an absent-root preview cannot reach checkpoint locking');
   } finally { fs.openSync = originalOpen; }
   assert.equal(readComponentRecoveryCheckpoint(f.project), null);
 });
 
-for (const initiallyExisting of [false, true]) {
-  test(`recovery never publishes into a swapped registry at checkpoint open (root initially ${initiallyExisting ? 'present' : 'absent'})`, t => {
+test('recovery never publishes into a swapped existing registry at checkpoint open', t => {
     if (process.platform !== 'linux') return t.skip('Linux descriptor-relative host publication');
     const f = fixture(t);
     const selectedHost = process.env.LUDORY_STUDIO_TRUST_DIR;
-    if (initiallyExisting) fs.mkdirSync(selectedHost, { recursive: true, mode: 0o700 });
     const preview = previewComponentGitRecovery(f.project, {
       fromCommit: f.fromCommit, toCommit: f.toCommit, catalog: f.catalog,
     });
@@ -294,8 +322,7 @@ for (const initiallyExisting of [false, true]) {
     assert.equal(readComponentRecoveryCheckpoint(f.project), null,
       'substituted registry must contain no usable recovery authority');
     assert.deepEqual(fs.readFileSync(path.join(f.project, 'src/main.js')), beforeGame);
-  });
-}
+});
 
 test('recovery interrupted after record bytes were written cannot expose usable authority', t => {
   if (process.platform !== 'linux') return t.skip('Linux rooted store interruption');
@@ -338,7 +365,7 @@ test('recovery rejects a reused root identity whose directory generation differs
   if (process.platform !== 'linux') return t.skip('Linux fd/inode reuse simulation');
   const f = fixture(t);
   const registry = process.env.LUDORY_STUDIO_TRUST_DIR;
-  fs.mkdirSync(registry, { mode: 0o700 });
+  fs.mkdirSync(registry, { recursive: true, mode: 0o700 });
   const preview = previewComponentGitRecovery(f.project, {
     fromCommit: f.fromCommit, toCommit: f.toCommit, catalog: f.catalog,
   });

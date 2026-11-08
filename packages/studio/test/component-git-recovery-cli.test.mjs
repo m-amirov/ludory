@@ -18,7 +18,7 @@ function git(root, ...args) {
   assert.equal(run.status, 0, run.stderr);
   return run.stdout.trim();
 }
-function fixture(t) {
+function fixture(t, { newHostExists = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-recover-cli-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const old = process.env.LUDORY_STUDIO_TRUST_DIR;
@@ -63,8 +63,32 @@ function fixture(t) {
     fs.rmSync(path.join(project, item), { recursive: true });
   }
   process.env.LUDORY_STUDIO_TRUST_DIR = path.join(root, 'new-host');
+  if (newHostExists) fs.mkdirSync(process.env.LUDORY_STUDIO_TRUST_DIR, { mode: 0o700 });
   return { project, fromCommit, toCommit, catalog };
 }
+
+test('CLI recovery reports how to initialize a missing host-registry before a fresh preview', t => {
+  const f = fixture(t, { newHostExists: false });
+  const registry = process.env.LUDORY_STUDIO_TRUST_DIR;
+  const args = ['--project', f.project, '--from-commit', f.fromCommit,
+    '--to-commit', f.toCommit, '--json'];
+  const missing = cli('components', 'recover', ...args);
+  assert.equal(missing.code, 2);
+  assert.equal(missing.json.status, 'BLOCKED');
+  assert.equal(missing.json.hostRegistryPath, registry);
+  assert.match(missing.json.nextAction, /create|preview/i);
+  assert.equal(missing.json.recoverySha256, undefined, 'do not offer an owner approval digest');
+  assert.equal(fs.existsSync(registry), false);
+  const human = cli('components', 'recover', '--project', f.project,
+    '--from-commit', f.fromCommit, '--to-commit', f.toCommit);
+  assert.equal(human.code, 2);
+  assert.match(human.stdout, /host registry to initialize:/i);
+  assert.ok(human.stdout.includes(registry));
+  fs.mkdirSync(registry, { mode: 0o700 });
+  const fresh = cli('components', 'recover', ...args);
+  assert.equal(fresh.json.status, 'NEEDS_USER_ACTION');
+  assert.match(fresh.json.recoverySha256, /^[a-f0-9]{64}$/);
+});
 
 test('CLI recover is read-only by default and requires exact owner confirmation to create host record', t => {
   const f = fixture(t);

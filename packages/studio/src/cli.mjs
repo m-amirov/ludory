@@ -619,6 +619,8 @@ function display(result, json, out) {
     if (result.fromCommit) out(`  source Git commit: ${result.fromCommit}\n`);
     if (result.toCommit) out(`  current Git commit: ${result.toCommit}\n`);
     if (result.recoverySha256) out(`  owner recovery SHA-256: ${result.recoverySha256}\n`);
+    if (result.hostRegistryPath) out(`  host registry to initialize: ${result.hostRegistryPath}\n`);
+    if (result.nextAction) out(`  next action: ${result.nextAction}\n`);
     for (const name of result.managedPaths ?? []) out(`  managed path to review: ${name}\n`);
     for (const transition of result.transitions ?? []) {
       out(`  history: ${transition.fromVersion} → ${transition.toVersion} (${transition.fromCommit} → ${transition.toCommit})\n`);

@@ -81,7 +81,7 @@ test('Windows root pin prevents replacement and no checkpoint may appear in a su
   } finally { store.close(); }
 });
 
-test('Windows registry first created at apply remains pinned through native lock acquisition', t => {
+test('Windows recovery refuses an absent registry before native checkpoint acquisition', t => {
   if (process.platform !== 'win32') return t.skip('Real Windows NTFS RootDirectory required');
   const f = fixture(t);
   const project = path.join(f.dir, 'game');
@@ -99,40 +99,22 @@ test('Windows registry first created at apply remains pinned through native lock
   const details = { rootIdentity: '1:2', receiptSha256: hash('a'), manifestSha256: hash('b'),
     stateSha256: hash('c'), recoverySha256: hash('d'),
     fromCommit: '1'.repeat(40), toCommit: '2'.repeat(40) };
-  let intercepted = false;
-  let rootRenamed = false;
-  const factory = root => {
-    const pinned = openProtectedDirectory(root);
-    return { ...pinned,
-      createRecoveryLock(name) {
-        intercepted = true;
-        try {
-          fs.renameSync(root, `${root}-detached`);
-          rootRenamed = true;
-          fs.mkdirSync(root);
-        } catch (error) {
-          assert.match(String(error), /EPERM|EBUSY|EACCES|permission|access|resource|denied/i);
-        }
-        return pinned.createRecoveryLock(name);
-      } };
-  };
-  if (rootRenamed) assert.fail('root must not have been renamed before the test hook');
-  let failed = false;
-  try {
-    registerComponentRecoveryCheckpoint(project, details, binding, { windowsPin: factory });
-  } catch (error) {
-    failed = true;
-    assert.match(error.message, /registry|host|changed|identity/i);
-  }
-  assert.equal(intercepted, true, 'native lock creation must be intercepted');
-  if (rootRenamed) {
-    assert.equal(failed, true, 'a changed visible registry cannot be acknowledged');
-    assert.equal(readComponentRecoveryCheckpoint(project, { windowsPin: openProtectedDirectory }), null);
-  } else {
-    assert.equal(failed, false, 'held NTFS root denies rename and permits normal recovery');
-    assert.deepEqual(readComponentRecoveryCheckpoint(project, { windowsPin: openProtectedDirectory }),
-      { schemaVersion: 1, project: path.resolve(project), ...details });
-  }
+  let opened = false;
+  assert.throws(() => registerComponentRecoveryCheckpoint(project, details, binding, {
+    windowsPin: root => { opened = true; return openProtectedDirectory(root); },
+  }), /initializ|exist|registry/i);
+  assert.equal(opened, false, 'missing-root recovery must not reach the native pin writer');
+  assert.equal(fs.existsSync(selectedHost), false, 'apply must not create the host registry');
+  assert.equal(readComponentRecoveryCheckpoint(project, { windowsPin: openProtectedDirectory }), null);
+  fs.mkdirSync(selectedHost, { mode: 0o700 });
+  assert.throws(() => registerComponentRecoveryCheckpoint(project, details, binding,
+    { windowsPin: openProtectedDirectory }), /registry|changed|preview|identity/i,
+    'an approval made before registry creation cannot be replayed afterwards');
+  const fresh = componentHostRegistryBinding(project);
+  assert.equal(fresh.rootExists, true);
+  assert.deepEqual(registerComponentRecoveryCheckpoint(project, details, fresh,
+    { windowsPin: openProtectedDirectory }),
+  { schemaVersion: 1, project: path.resolve(project), ...details });
 });
 
 test('Windows post-delete close failure cannot roll back a committed checkpoint', t => {

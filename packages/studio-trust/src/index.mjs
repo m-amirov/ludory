@@ -189,8 +189,8 @@ export function isMissingHostTrust(error) { return error?.code === 'TRUST_MISSIN
 const recoveryKeys = ['schemaVersion', 'project', 'rootIdentity', 'receiptSha256',
   'manifestSha256', 'stateSha256', 'recoverySha256', 'fromCommit', 'toCommit'];
 
-/** Bind owner consent to an existing registry inode or to an absent directory's
- * nearest existing physical ancestor. Preview does not create host directories. */
+/** Report the selected host registry's physical identity without creating it.
+ * Recovery requires rootExists=true before an owner preview can be approved. */
 export function componentHostRegistryBinding(project) {
   const root = trustedRoot(project);
   let ancestor = root;
@@ -310,17 +310,21 @@ export function assertComponentRecoveryCheckpoint(project, expected) {
 export function registerComponentRecoveryCheckpoint(project, details,
   expectedHostBinding = componentHostRegistryBinding(project), options = {}) {
   if (!validRecoveryDetails(details)) throw trustError('invalid component recovery checkpoint details');
+  // A missing root needs its own initialization step and a *new* owner
+  // preview. Never turn approval of an absent parent into write authority for
+  // a directory created between preview and checkpoint publication.
+  if (!expectedHostBinding?.rootExists) {
+    throw trustError('host registry must exist before recovery preview; initialize it and preview again');
+  }
   assertHostRegistryBinding(project, expectedHostBinding);
-  const location = recoveryPath(project, true);
-  // A registry absent during preview is created here. Pin its *new* inode as
-  // well: the original ancestor anchor alone cannot detect substitution of
-  // this directory between mkdir and the exclusive checkpoint lock.
+  const location = recoveryPath(project);
+  // Root already existed at owner preview. Check its generation before the
+  // physical rooted writer begins; recovery never initializes directories.
   const createdRootBinding = componentHostRegistryBinding(project);
   if (!createdRootBinding.rootExists || createdRootBinding.root !== location.root) {
-    throw trustError('created host registry destination differs from expected path');
+    throw trustError('host registry destination differs from expected path');
   }
-  if (expectedHostBinding.rootExists &&
-      createdRootBinding.ancestorCtimeNs !== expectedHostBinding.ancestorCtimeNs) {
+  if (createdRootBinding.ancestorCtimeNs !== expectedHostBinding.ancestorCtimeNs) {
     throw trustError('host registry directory generation changed since owner preview');
   }
   const basename = hash(Buffer.from(path.resolve(project)));

@@ -357,6 +357,22 @@ locally configured grafts. Every referenced commit, tree and managed blob is
 checked against its Git object SHA; missing promisor blobs fail closed instead
 of triggering lazy remote fetch. A partial clone is not sufficient evidence.
 
+The selected **host registry must already exist before the recovery preview**.
+If it does not, the command returns `BLOCKED`, with `hostRegistryPath` and
+`nextAction` in `--json`, and **no confirmation digest**. Initialize that
+specific directory as a separate host setup step, outside the game, with
+private owner permissions (and an appropriate Windows ACL). For example:
+
+```sh
+# Use the exact absolute hostRegistryPath reported by BLOCKED (not the game path).
+node -e "require('node:fs').mkdirSync(process.argv[1], { recursive: true, mode: 0o700 })" "<hostRegistryPath>"
+```
+
+Then run `components recover` **again without `--apply`**, review the new
+`hostRegistry` identity and `recoverySha256`, and only then confirm that digest.
+An old blocked/absent-registry preview is never valid approval for a new root.
+Recovery apply never creates host directories, including on Windows.
+
 ```sh
 # Inspect two genuine full commit SHAs in the project's local Git history:
 # FROM = original Studio creation state; TO = committed current component state.

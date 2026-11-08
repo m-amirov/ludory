@@ -22,7 +22,7 @@
 ## Review Focus
 
 1. Root renamed or replaced **in `openSync` immediately before checkpoint open**: no usable checkpoint in substituted root, no false `RECOVERED`.
-2. Root absent at preview, first created during apply, then replaced after lock acquisition: both newly created and existing-root cases fail closed.
+2. **Option A (2026-11-08):** root absent at preview is `BLOCKED` and not created during apply; owner initializes it separately and reviews a new digest. Existing-root substitutions remain fail-closed.
 3. Existing host trust pin or partial checkpoint in the *pinned physical root* cannot be bypassed by showing an empty substituted path to the public API.
 4. Failure after writing but before final root-identity confirmation cleans up only the newly created checkpoint via a pinned file/directory handle; lock cleanup also stays pinned.
 5. Missing/stale Windows N-API contract and unmounted Linux procfs cause explicit blocked results without path-based fallback; Linux tests cannot assert Windows OS guarantees.
@@ -85,3 +85,11 @@
 ## Acceptance
 
 The original post-check checkpoint-publication race must be reproduced as RED and blocked as GREEN. A cross-platform PR is Ready only when exact-head Windows native behavior and Linux gates pass, independent review has no outstanding Critical/Important issues, and owner separately authorizes the next PR state change. If this cannot be established, keep Draft with an explicit blocker; never make up a Windows PASS.
+
+## Owner-approved Option A follow-up (2026-11-08)
+
+- [x] RED regression: absent-root recovery preview previously offered `NEEDS_USER_ACTION` and could create a root during accept.
+- [x] Require an existing host registry in preview and direct checkpoint registration; remove recovery's `recordPath(..., { create:true })` call.
+- [x] Test the separate initialization + fresh preview flow and reject replay of a pre-initialization binding; preserve existing-root substitution tests.
+- [ ] Re-run Linux-focused checks and full gates; verify Windows Node 22/24 on the exact new commit, including two preexisting Windows test failures found on HEAD `bf44ecf` (hidden-file rewrite and noncanonical-path conflict fixture).
+- [ ] Independent security review, publish exact verified tree as Draft PR #94; no merge.
