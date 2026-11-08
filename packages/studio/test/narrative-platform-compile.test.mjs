@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { verifyStudioOrigin } from '@ludory/studio-trust';
 import { planNarrativePlatformExport, materializeNarrativePlatformProjects } from '@ludory/studio/narrative-platform-export';
@@ -11,6 +12,13 @@ import { compileNarrativePlatformEntrypoint } from '../src/narrative-platform-co
 import { buildYandexCandidate } from '../../../scripts/build-yandex-candidate.mjs';
 import { buildVkCandidate } from '../../../scripts/build-vk-candidate.mjs';
 import { inspectYandexArchive, inspectVkArchive } from '@ludory/release';
+
+function refreshStoryProof(project) {
+  const filename = path.join(project, 'narrative-assets.json');
+  const proof = JSON.parse(fs.readFileSync(filename, 'utf8'));
+  proof.storySha256 = createHash('sha256').update(fs.readFileSync(path.join(project, 'src/story.js'))).digest('hex');
+  fs.writeFileSync(filename, `${JSON.stringify(proof, null, 2)}\n`);
+}
 
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-f5b2-compile-'));
@@ -24,6 +32,7 @@ function fixture(t) {
   assert.equal(applyCreatePlan(create).status, 'APPLIED');
   const story = path.join(project, 'src/story.js');
   fs.writeFileSync(story, fs.readFileSync(story, 'utf8').replace('Маяк мигнул трижды.', 'F5B2_CUSTOM_STORY_214'));
+  refreshStoryProof(project);
   const html = path.join(project, 'index.html');
   fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace('Интерактивная история · Ludory', 'F5B2_CUSTOM_TITLE_214'));
   return { dir, project };
@@ -42,6 +51,20 @@ test('F5b2 compiles actual authored story and HTML into distinct platform SDK en
     assert.ok(js.includes(target === 'yandex-games' ? '../assets/ludory-yandex.js' : '../assets/ludory-vk.js'));
     if (target === 'yandex-games') assert.doesNotMatch(js, /vk-bridge\.js|createVkConnector/);
     else assert.doesNotMatch(js, /ludory-yandex\.js|YaGames/);
+  }
+});
+
+test('F5b2 compiles legacy authored stories without optional presentationData export', t => {
+  const { project } = fixture(t);
+  const filename = path.join(project, 'src/story.js');
+  const current = fs.readFileSync(filename, 'utf8');
+  const legacy = current.replace(/^export const presentationData = undefined;?\n/m, '');
+  assert.notEqual(legacy, current, 'fixture must remove the optional export');
+  fs.writeFileSync(filename, legacy);
+  refreshStoryProof(project);
+  for (const target of ['yandex-games', 'vk-games']) {
+    const output = compileNarrativePlatformEntrypoint({ sourceRoot: project, target });
+    assert.match(output.entryBytes.toString('utf8'), /F5B2_CUSTOM_STORY_214/);
   }
 });
 
@@ -88,8 +111,8 @@ test('F5b2 blocks authored HTML resources that cannot be safely packaged for bot
     { name: 'escaped CSS url function', html: '<style>body{background:u\\72l(//example.invalid/leak.png)}</style>' },
     { name: 'inline style remote image', html: '<div style="background:url(//example.invalid/leak.png)"></div>' },
     { name: 'mixed local and remote srcset',
-      html: '<img srcset="assets/lighthouse.svg 1x, //example.invalid/leak.png 2x">',
-      files: { 'assets/lighthouse.svg': '<svg xmlns="http://www.w3.org/2000/svg"></svg>' } },
+      html: '<img srcset="assets/author-test-image.svg 1x, //example.invalid/leak.png 2x">',
+      files: { 'assets/author-test-image.svg': '<svg xmlns="http://www.w3.org/2000/svg"></svg>' } },
     { name: 'remote video poster', html: '<video poster="//example.invalid/leak.png"></video>' },
     { name: 'unpackaged local stylesheet', html: '<link rel="stylesheet" href="src/custom.css">',
       files: { 'src/custom.css': 'body { color: red; }' } },

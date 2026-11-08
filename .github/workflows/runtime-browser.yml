@@ -27,7 +27,9 @@ on:
   workflow_dispatch:
 jobs:
   browser:
-    runs-on: ubuntu-latest
+    # Playwright 1.56.1 has browser binaries for Ubuntu 24.04, not 26.04.
+    # Keep the runner pinned until the browser toolchain supports a newer image.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -84,6 +86,18 @@ jobs:
         working-directory: packages/runtime-narrative/test/browser
         env:
           LUDORY_N3_ARTIFACT_DIR: artifacts/n3
+      - name: M4 native presentation geometry smoke (synthetic art only)
+        run: npm run smoke:m4
+        working-directory: packages/runtime-narrative/test/browser
+        env:
+          LUDORY_M4_ARTIFACT_DIR: artifacts/m4
+      - name: Upload M4 synthetic browser geometry evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: narrative-m4-visual-geometry
+          path: packages/runtime-narrative/test/browser/artifacts/m4/
+          if-no-files-found: ignore
       - name: E5 opt-in economy browser simulation (not portal acceptance)
         run: npm run smoke:economy-e5
         working-directory: packages/runtime-narrative/test/browser

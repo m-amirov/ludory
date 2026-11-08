@@ -16,6 +16,13 @@ import { isF5b3DirectInvocation } from '../../runtime-narrative/test/browser/f5b
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 
+function refreshStoryProof(project) {
+  const filename = path.join(project, 'narrative-assets.json');
+  const proof = JSON.parse(fs.readFileSync(filename, 'utf8'));
+  proof.storySha256 = sha(fs.readFileSync(path.join(project, 'src/story.js')));
+  fs.writeFileSync(filename, `${JSON.stringify(proof, null, 2)}\n`);
+}
+
 function newProject(t, { template = 'narrative-interactive', profile = 'narrative-game',
   targets = ['yandex-games', 'vk-games'] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-f5b1-'));
@@ -90,6 +97,7 @@ test('F5b1 refuses copied, symlinked, or source-modified projects', t => {
   const plan = planNarrativePlatformExport(project);
   assert.equal(plan.status, 'READY_TO_DERIVE');
   fs.appendFileSync(path.join(project, 'src/story.js'), '\n// author changed the story after planning\n');
+  refreshStoryProof(project);
   const stale = materializeNarrativePlatformSource(plan);
   assert.equal(stale.status, 'BLOCKED');
   assert.equal(stale.writes.length, 0);
@@ -159,6 +167,7 @@ test('F5b2 builds two source-linked local ZIPs and verifies the actual archive/m
   const storyFile = path.join(project, 'src/story.js');
   const story = fs.readFileSync(storyFile, 'utf8').replace('Маяк мигнул трижды.', 'F5B2_CUSTOM_STORY_214');
   fs.writeFileSync(storyFile, story);
+  refreshStoryProof(project);
   const plan = planNarrativePlatformExport(project);
   assert.equal(plan.status, 'READY_TO_DERIVE');
   const paths = destinations(root);
@@ -230,6 +239,7 @@ test('F5b2 rejects stale F5b1 plans and output paths inside the author source', 
   assert.equal(rejected.status, 'BLOCKED');
   assert.equal(fs.existsSync(inside.yandexZip), false);
   fs.appendFileSync(path.join(project, 'src/story.js'), '\n// changed after planning');
+  refreshStoryProof(project);
   const stale = await buildNarrativePlatformCandidates(plan, destinations(root));
   assert.equal(stale.status, 'BLOCKED');
   assert.equal(fs.existsSync(path.join(root, 'vk.zip')), false);
@@ -273,6 +283,7 @@ test('F5b2 blocks authored images outside the package media root instead of sile
   fs.writeFileSync(path.join(project, 'images/custom.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
   const story = path.join(project, 'src/story.js');
   fs.writeFileSync(story, fs.readFileSync(story, 'utf8').replace('./assets/lighthouse.svg', './images/custom.svg'));
+  refreshStoryProof(project);
   const plan = planNarrativePlatformExport(project);
   assert.equal(plan.status, 'READY_TO_DERIVE');
   const result = await buildNarrativePlatformCandidates(plan, destinations(root));
