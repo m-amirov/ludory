@@ -458,6 +458,10 @@ test('a canonical checkpoint is not trusted while its stable publication lock ex
   const registry = process.env.LUDORY_STUDIO_TRUST_DIR;
   const checkpoints = fs.readdirSync(registry).filter(name => name.endsWith('.recovery.json'));
   assert.equal(checkpoints.length, 1);
+  assert.equal(checkpoints[0], `${hash(Buffer.from(projectRoot(f.project)))}.recovery.json`,
+    'the published record must be indexed by the canonical physical project path');
+  assert.equal(readComponentRecoveryCheckpoint(f.project)?.recoverySha256, preview.recoverySha256,
+    'a caller alias must resolve to the registered physical project identity');
   const lock = path.join(registry, checkpoints[0].replace('.recovery.json', '.json.lock'));
   fs.writeFileSync(lock, 'interrupted\n', { flag: 'wx', mode: 0o600 });
   assert.equal(fs.readFileSync(lock, 'utf8'), 'interrupted\n');

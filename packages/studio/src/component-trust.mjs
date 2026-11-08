@@ -6,6 +6,7 @@ export { assertComponentTrust, registerComponentTrust, advanceComponentTrust,
 import { registerComponentRecoveryCheckpoint as registerRecovery,
   readComponentRecoveryCheckpoint as readRecovery } from '@ludory/studio-trust';
 import { openProtectedDirectory } from './windows-directory-pin.mjs';
+import { projectRoot } from './projects.mjs';
 
 const nativeRecoveryOptions = () => process.platform === 'win32'
   ? { windowsPin: openProtectedDirectory } : {};
@@ -15,7 +16,10 @@ export function registerComponentRecoveryCheckpoint(project, details, expectedBi
 }
 
 export function readComponentRecoveryCheckpoint(project) {
-  return readRecovery(project, nativeRecoveryOptions());
+  // Registration receives Studio's canonical physical project path. On
+  // Windows the caller may use a different drive-letter/path casing, which
+  // must not derive a different checkpoint or lock digest during reads.
+  return readRecovery(projectRoot(project), nativeRecoveryOptions());
 }
 
 export function assertComponentRecoveryCheckpoint(project, expected) {
