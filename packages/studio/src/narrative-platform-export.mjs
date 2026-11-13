@@ -97,11 +97,63 @@ export function materializeNarrativePlatformSource(plan) {
 }
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
-const mediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2']);
+const mediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2', '.ttf', '.css']);
 const targetSpecs = Object.freeze({
   yandex: { target: 'yandex-games', template: 'yandex-runtime' },
   vk: { target: 'vk-games', template: 'vk-runtime' },
 });
+
+const safeExportPart = /^[a-z0-9][a-z0-9._-]*$/i;
+
+function validateExportPath(filename) {
+  const parts = filename.split('/');
+  if (!parts.length || parts.some(part => !safeExportPart.test(part) || part === '.' || part === '..' || /[. ]$/.test(part))) {
+    throw new Error(`F5B_UNSUPPORTED_AUTHOR_MEDIA: ${filename}`);
+  }
+  return filename;
+}
+
+function exportAssetPath(sourcePath) {
+  const fontRenames = new Map([
+    ['assets/fonts/CormorantGaramond[wght].ttf', 'assets/fonts/CormorantGaramond-wght.ttf'],
+    ['assets/fonts/Manrope[wght].ttf', 'assets/fonts/Manrope-wght.ttf'],
+  ]);
+  if (fontRenames.has(sourcePath)) return fontRenames.get(sourcePath);
+  if (sourcePath.startsWith('src/ui/') && path.posix.extname(sourcePath).toLowerCase() === '.css') {
+    return `assets/ui/${sourcePath.slice('src/ui/'.length)}`;
+  }
+  return sourcePath;
+}
+
+function rewriteCssDependencies(bytes, sourcePath, targetPath, assetPathMap) {
+  const source = bytes.toString('utf8');
+  const rewrite = (full, quote, specifier) => {
+    if (!specifier || specifier.startsWith('#') || /^(?:https?:|data:|blob:|\/\/)/i.test(specifier)) return full;
+    const split = specifier.match(/^([^?#]*)([?#].*)?$/);
+    const clean = split?.[1] ?? specifier;
+    const suffix = split?.[2] ?? '';
+    let decoded;
+    try { decoded = decodeURIComponent(clean); }
+    catch { throw new Error(`F5B_CSS_DEPENDENCY_UNSAFE: ${sourcePath} -> ${specifier}`); }
+    if (/%2f|%5c|(?:^|\/)%2e(?:%2e)?(?=\/|$)/i.test(clean) || decoded.includes('\\') || decoded.includes('\0') ||
+        /[\x00-\x1f\x7f]/.test(decoded) || decoded.startsWith('//')) {
+      throw new Error(`F5B_CSS_DEPENDENCY_UNSAFE: ${sourcePath} -> ${specifier}`);
+    }
+    const resolved = path.posix.normalize(decoded.startsWith('/')
+      ? decoded.slice(1) : path.posix.join(path.posix.dirname(sourcePath), decoded));
+    const exported = assetPathMap.get(resolved);
+    if (!exported) throw new Error(`F5B_CSS_DEPENDENCY_UNPACKAGED: ${sourcePath} -> ${resolved}`);
+    const relative = path.posix.relative(path.posix.dirname(targetPath), exported);
+    if (!relative || relative.startsWith('/') || relative === '..' || relative.startsWith('../')) {
+      return full.replace(specifier, `${relative || path.posix.basename(exported)}${suffix}`);
+    }
+    return full.replace(specifier, `${relative}${suffix}`);
+  };
+  const rewritten = source
+    .replace(/\burl\s*\(\s*(['"]?)([^)'"\s]+)\1\s*\)/gi, rewrite)
+    .replace(/@import\s+(['"])([^'"\r\n]+)\1/gi, rewrite);
+  return Buffer.from(rewritten);
+}
 
 function scanDerivedFiles(root, relative = '') {
   const found = [];
@@ -153,21 +205,31 @@ export function materializeNarrativePlatformProjects(plan) {
     const projects = {};
     const seenMedia = new Set();
     const media = [];
+    const assetPathMap = new Map();
     for (const file of pin.files) {
       if (/^(?:images|media|audio|sounds|fonts)\//.test(file.path)) {
         throw new Error(`F5B_UNSUPPORTED_AUTHOR_MEDIA_ROOT: ${file.path}`);
       }
-      if (!file.path.startsWith('assets/') || file.path === 'assets/ludory-narrative.js') continue;
       const extension = path.posix.extname(file.path).toLowerCase();
-      const segments = file.path.split('/');
-      if (!mediaExtensions.has(extension) || segments.some(segment => !/^[a-z0-9][a-z0-9._-]*$/i.test(segment) ||
-          segment === '.' || segment === '..' || /[. ]$/.test(segment))) {
+      if (file.path.startsWith('src/ui/') && extension === '.css') {
+        const targetPath = validateExportPath(exportAssetPath(file.path));
+        const folded = targetPath.toLowerCase();
+        if (seenMedia.has(folded)) throw new Error(`F5B_CASE_COLLIDING_AUTHOR_MEDIA: ${file.path}`);
+        seenMedia.add(folded);
+        assetPathMap.set(file.path, targetPath);
+        media.push({ sourcePath: file.path, targetPath });
+        continue;
+      }
+      if (!file.path.startsWith('assets/') || file.path === 'assets/ludory-narrative.js') continue;
+      const targetPath = validateExportPath(exportAssetPath(file.path));
+      if (!mediaExtensions.has(extension)) {
         throw new Error(`F5B_UNSUPPORTED_AUTHOR_MEDIA: ${file.path}`);
       }
-      const folded = file.path.toLowerCase();
+      const folded = targetPath.toLowerCase();
       if (seenMedia.has(folded)) throw new Error(`F5B_CASE_COLLIDING_AUTHOR_MEDIA: ${file.path}`);
       seenMedia.add(folded);
-      media.push(file.path);
+      assetPathMap.set(file.path, targetPath);
+      media.push({ sourcePath: file.path, targetPath });
     }
     for (const [key, spec] of Object.entries(targetSpecs)) {
       const root = path.join(derived, key);
@@ -177,13 +239,16 @@ export function materializeNarrativePlatformProjects(plan) {
         template: spec.template, targets: [spec.target] });
       if (create.status !== 'READY') throw new Error(`F5B_TARGET_SCAFFOLD_${create.conflicts.join(';')}`);
       if (applyCreatePlan(create).status !== 'APPLIED') throw new Error('F5B_TARGET_SCAFFOLD_FAILED');
-      const compiled = compileNarrativePlatformEntrypoint({ sourceRoot: pin.root, target: spec.target });
+      const compiled = compileNarrativePlatformEntrypoint({ sourceRoot: pin.root, target: spec.target, assetPathMap });
       fs.writeFileSync(path.join(root, 'index.html'), compiled.htmlBytes);
       fs.writeFileSync(path.join(root, 'src/main.js'), compiled.entryBytes);
-      for (const filename of media) {
-        const target = path.join(root, filename);
+      for (const { sourcePath, targetPath } of media) {
+        const target = path.join(root, targetPath);
         fs.mkdirSync(path.dirname(target), { recursive: true });
-        fs.copyFileSync(path.join(pin.root, filename), target, fs.constants.COPYFILE_EXCL);
+        const bytes = fs.readFileSync(path.join(pin.root, sourcePath));
+        const output = path.posix.extname(sourcePath).toLowerCase() === '.css'
+          ? rewriteCssDependencies(bytes, sourcePath, targetPath, assetPathMap) : bytes;
+        fs.writeFileSync(target, output, { flag: 'wx' });
       }
       const origin = verifyStudioOrigin(root);
       if (!origin.ok || origin.project !== canonicalPhysicalDirectory(root)) {

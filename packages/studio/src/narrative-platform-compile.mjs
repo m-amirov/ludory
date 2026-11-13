@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { buildSync, transformSync } from 'esbuild';
@@ -70,7 +71,7 @@ function regular(root, relative) {
 
 // F5b2 copies only supported assets/ media, not arbitrary authored HTML
 // dependencies. Reject unsupported references before producing either ZIP.
-const htmlMediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2']);
+const htmlMediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2', '.ttf', '.css']);
 const htmlUrlAttributes = new Set([
   'href', 'src', 'srcset', 'poster', 'action', 'formaction', 'data', 'xlink:href',
   'ping', 'background', 'cite', 'manifest',
@@ -152,8 +153,86 @@ function originalHtml(root, target) {
   return Buffer.from(serialize(document));
 }
 
+function normalizedSourcePath(value) {
+  return value.replaceAll('\\', '/');
+}
+
+function resolveSourceDependency(owner, specifier) {
+  const split = specifier.match(/^([^?#]*)([?#].*)?$/);
+  const rawPath = split?.[1] ?? specifier;
+  const suffix = split?.[2] ?? '';
+  if (!rawPath || /^(?:[a-z][\w+.-]*:|\/\/)/i.test(rawPath)) return null;
+  let decoded;
+  try { decoded = decodeURIComponent(rawPath); }
+  catch { return null; }
+  if (/%2f|%5c/i.test(rawPath) || decoded.includes('\\') || decoded.includes('\0') ||
+      /[\x00-\x1f\x7f]/.test(decoded) || /^(?:[a-z][\w+.-]*:|\/\/)/i.test(decoded)) return null;
+  const resolved = path.posix.normalize(decoded.startsWith('/')
+    ? decoded.slice(1) : path.posix.join(path.posix.dirname(owner), decoded));
+  if (resolved === '..' || resolved.startsWith('../') || resolved.startsWith('/')) return null;
+  return { path: resolved, suffix };
+}
+
+function outputAssetSpecifier(target) {
+  const relative = path.posix.relative('src', target);
+  if (!relative || relative.startsWith('/') || relative === '..' || relative.startsWith('../')) {
+    return relative || path.posix.basename(target);
+  }
+  return relative;
+}
+
+function rewriteSourceModuleAssetUrls(source, owner, assetPathMap) {
+  const mappings = assetPathMap instanceof Map ? assetPathMap : new Map();
+  const rewriteSpecifier = (full, specifier) => {
+    const resolved = resolveSourceDependency(owner, specifier);
+    const target = mappings.get(resolved?.path);
+    return target ? full.replace(specifier, `${outputAssetSpecifier(target)}${resolved.suffix}`) : full;
+  };
+  let output = source.replace(/new\s+URL\s*\(\s*(['"])([^'"\n]+)\1\s*,\s*import\.meta\.url\s*,?\s*\)/g,
+    (full, _quote, specifier) => rewriteSpecifier(full, specifier));
+  output = output.replace(/new\s+URL\s*\(\s*`([^`$]*)`\s*,\s*import\.meta\.url\s*,?\s*\)/g,
+    (full, specifier) => rewriteSpecifier(full, specifier));
+  output = output.replace(/new\s+URL\s*\(\s*`([^`$]*)\$\{([^}]*)\}`\s*,\s*import\.meta\.url\s*,?\s*\)/g,
+    (full, prefix, expression) => {
+      const resolved = resolveSourceDependency(owner, prefix);
+      const sourceDirectory = resolved?.path?.replace(/\/+$/, '');
+      if (!sourceDirectory) return full;
+      const mapping = [...mappings.entries()].find(([from]) => from.startsWith(`${sourceDirectory}/`));
+      if (!mapping) return full;
+      const sourceParts = sourceDirectory.split('/');
+      const mappedSourceParts = mapping[0].split('/');
+      const sourceSuffixLength = mappedSourceParts.length - sourceParts.length;
+      const targetParts = mapping[1].split('/');
+      if (sourceSuffixLength < 1 || targetParts.length <= sourceSuffixLength) return full;
+      const targetDirectory = targetParts.slice(0, -sourceSuffixLength).join('/');
+      return full.replace(prefix, `${outputAssetSpecifier(targetDirectory)}/`);
+    });
+  return output;
+}
+
+function stagedCompileRoot(root, inputs, assetPathMap) {
+  const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-f5b2-compile-'));
+  try {
+    for (const name of inputs) {
+      if (name === '<stdin>' || name === 'src/f5b2-platform-entry.js') continue;
+      const relative = normalizedSourcePath(name);
+      const destination = path.join(staging, ...relative.split('/'));
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      const bytes = regular(root, relative);
+      const transformed = /\.(?:js|mjs)$/i.test(relative)
+        ? Buffer.from(rewriteSourceModuleAssetUrls(bytes.toString('utf8'), relative, assetPathMap))
+        : bytes;
+      fs.writeFileSync(destination, transformed);
+    }
+    return staging;
+  } catch (error) {
+    fs.rmSync(staging, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 /** Compile exact pinned author JS into a single SDK entry, excluding other executable ZIP members. */
-export function compileNarrativePlatformEntrypoint({ sourceRoot, target } = {}) {
+export function compileNarrativePlatformEntrypoint({ sourceRoot, target, assetPathMap } = {}) {
   if (!Object.hasOwn(SDK, target)) throw new Error('F5B_INVALID_TARGET');
   const root = fs.realpathSync.native(sourceRoot);
   if (!fs.lstatSync(root).isDirectory()) throw new Error('F5B_SOURCE_NOT_DIRECTORY');
@@ -164,15 +243,16 @@ export function compileNarrativePlatformEntrypoint({ sourceRoot, target } = {}) 
   // editable; an altered launcher is blocked rather than silently rebuilt.
   const templateEntry = loadCatalog().templates.get('narrative-interactive').assets.get('src/main.js').bytes;
   if (!entry.equals(templateEntry)) throw new Error('F5B_AUTHOR_ENTRY_CONTRACT_UNVERIFIED');
-  // Build with a canonical root so all resolved authored JS can be audited.
-  const built = buildSync({
-    stdin: { contents: bootstraps[target], resolveDir: path.join(root, 'src'), sourcefile: 'f5b2-platform-entry.js', loader: 'js' },
+  const build = buildRoot => buildSync({
+    stdin: { contents: bootstraps[target], resolveDir: path.join(buildRoot, 'src'), sourcefile: 'f5b2-platform-entry.js', loader: 'js' },
     bundle: true, platform: 'browser', target: 'es2022', format: 'esm', write: false,
     external: target === 'yandex-games' ? [SDK[target]] : [SDK[target], '../assets/vk-bridge.js'],
-    absWorkingDir: root, metafile: true, minify: false, logLevel: 'silent',
+    absWorkingDir: buildRoot, metafile: true, minify: false, logLevel: 'silent',
   });
+  let built = build(root);
   if (built.warnings.length) throw new Error(`F5B_AUTHOR_ENTRY_EXPORT_REQUIRED: ${built.warnings[0].text}`);
-  for (const name of Object.keys(built.metafile.inputs)) {
+  const originalInputs = Object.keys(built.metafile.inputs);
+  for (const name of originalInputs) {
     // esbuild records its virtual stdin as the declared sourcefile under resolveDir.
     if (name === '<stdin>' || name === 'src/f5b2-platform-entry.js') continue;
     const full = path.resolve(root, name);
@@ -192,13 +272,26 @@ export function compileNarrativePlatformEntrypoint({ sourceRoot, target } = {}) 
     }
   }
   if (built.outputFiles.length !== 1) throw new Error('F5B_UNEXPECTED_BUNDLE_OUTPUT');
-  const compiled = Buffer.from(built.outputFiles[0].contents);
-  const imports = Object.values(built.metafile.outputs).flatMap(output => output.imports)
-    .filter(item => item.external).map(item => item.path).sort();
-  const allowed = (target === 'yandex-games' ? [SDK[target]] : [SDK[target], '../assets/vk-bridge.js']).sort();
-  if (JSON.stringify(imports) !== JSON.stringify(allowed)) {
-    throw new Error('F5B_FOREIGN_OR_DYNAMIC_AUTHOR_IMPORT');
+  let staging;
+  try {
+    if (assetPathMap instanceof Map && assetPathMap.size) {
+      staging = stagedCompileRoot(root, originalInputs, assetPathMap);
+      built = build(staging);
+      if (built.warnings.length) throw new Error(`F5B_AUTHOR_ENTRY_EXPORT_REQUIRED: ${built.warnings[0].text}`);
+      if (JSON.stringify(Object.keys(built.metafile.inputs).sort()) !== JSON.stringify([...originalInputs].sort())) {
+        throw new Error('F5B_AUTHOR_ENTRY_EXPORT_GRAPH_CHANGED');
+      }
+    }
+    const compiled = Buffer.from(built.outputFiles[0].contents);
+    const imports = Object.values(built.metafile.outputs).flatMap(output => output.imports)
+      .filter(item => item.external).map(item => item.path).sort();
+    const allowed = (target === 'yandex-games' ? [SDK[target]] : [SDK[target], '../assets/vk-bridge.js']).sort();
+    if (JSON.stringify(imports) !== JSON.stringify(allowed)) {
+      throw new Error('F5B_FOREIGN_OR_DYNAMIC_AUTHOR_IMPORT');
+    }
+    return { entryBytes: compiled, htmlBytes: originalHtml(root, target),
+      authorEntrySha256: digest(entry), authorStorySha256: digest(story) };
+  } finally {
+    if (staging) fs.rmSync(staging, { recursive: true, force: true });
   }
-  return { entryBytes: compiled, htmlBytes: originalHtml(root, target),
-    authorEntrySha256: digest(entry), authorStorySha256: digest(story) };
 }

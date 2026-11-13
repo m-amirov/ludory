@@ -10,7 +10,7 @@ const MAX_FILES = 10_000;
 const YANDEX_REQUIRED = ['assets/ludory-yandex.js', 'index.html', 'ludory.project.json', 'src/main.js'];
 const VK_REQUIRED = ['assets/ludory-vk.js', 'assets/vk-bridge.js', 'index.html',
   'licenses/swc-helpers.txt', 'licenses/vk-bridge.txt', 'ludory.project.json', 'src/main.js'];
-const MEDIA = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2']);
+const MEDIA = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2', '.ttf', '.css']);
 const VALID_PART = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const DEVICE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

@@ -11,6 +11,7 @@ const mime = new Map(Object.entries({
   '.webp': 'image/webp', '.avif': 'image/avif', '.gif': 'image/gif',
   '.ico': 'image/x-icon', '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav', '.woff': 'font/woff', '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
   '.webm': 'video/webm', '.mp4': 'video/mp4',
 }));
 const maxFileBytes = 25 * 1024 * 1024;

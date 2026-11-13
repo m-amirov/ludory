@@ -166,6 +166,168 @@ test('F5b2 keeps supported local HTML media in each derived project', t => {
   } finally { derived.cleanup(); }
 });
 
+test('F5b2 packages an authored CSS skin and local TTF dependencies for both targets', t => {
+  const { project } = fixture(t);
+  const ui = path.join(project, 'src', 'ui');
+  const fonts = path.join(project, 'assets', 'fonts');
+  fs.mkdirSync(ui, { recursive: true });
+  fs.mkdirSync(fonts, { recursive: true });
+  const cormorant = Buffer.from('original-cormorant-ttf-bytes');
+  const manrope = Buffer.from('original-manrope-ttf-bytes');
+  fs.writeFileSync(path.join(fonts, 'CormorantGaramond[wght].ttf'), cormorant);
+  fs.writeFileSync(path.join(fonts, 'Manrope[wght].ttf'), manrope);
+  fs.writeFileSync(path.join(ui, 'original-game.css'), `@font-face {
+  font-family: 'Cinematic Cormorant';
+  src: url('../../assets/fonts/CormorantGaramond[wght].ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Cinematic Manrope';
+  src: url('../../assets/fonts/Manrope[wght].ttf') format('truetype');
+}
+body { font-family: 'Cinematic Manrope'; }
+`);
+  fs.writeFileSync(path.join(ui, 'original-game-ui.js'),
+    "export const theme = new URL('./original-game.css', import.meta.url);\n");
+  const story = path.join(project, 'src', 'story.js');
+  fs.appendFileSync(story, "\nimport './ui/original-game-ui.js';\n");
+  refreshStoryProof(project);
+
+  const plan = planNarrativePlatformExport(project);
+  assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
+  const derived = materializeNarrativePlatformProjects(plan);
+  assert.equal(derived.status, 'DERIVED_LOCAL', derived.reasonCode);
+  try {
+    for (const name of ['yandex', 'vk']) {
+      const root = derived.projects[name].root;
+      const css = path.join(root, 'assets', 'ui', 'original-game.css');
+      assert.equal(fs.readFileSync(css, 'utf8').includes('../fonts/CormorantGaramond-wght.ttf'), true);
+      assert.equal(fs.readFileSync(css, 'utf8').includes('../fonts/Manrope-wght.ttf'), true);
+      assert.equal(fs.readFileSync(path.join(root, 'assets', 'fonts', 'CormorantGaramond-wght.ttf')).equals(cormorant), true);
+      assert.equal(fs.readFileSync(path.join(root, 'assets', 'fonts', 'Manrope-wght.ttf')).equals(manrope), true);
+      assert.match(fs.readFileSync(path.join(root, 'src', 'main.js'), 'utf8'),
+        /\.\.\/assets\/ui\/original-game\.css/);
+      assert.equal(fs.existsSync(path.join(root, 'assets', 'fonts', 'CormorantGaramond[wght].ttf')), false);
+      assert.equal(fs.existsSync(path.join(root, 'assets', 'fonts', 'Manrope[wght].ttf')), false);
+    }
+  } finally { derived.cleanup(); }
+});
+
+test('F5b2 rebases identical module-relative URLs according to each source module', t => {
+  const { project } = fixture(t);
+  const directories = ['a', 'b'].map(name => path.join(project, 'src', 'ui', name));
+  for (const directory of directories) fs.mkdirSync(directory, { recursive: true });
+  fs.mkdirSync(path.join(project, 'assets', 'fonts'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'assets', 'fonts', 'Manrope[wght].ttf'), 'manrope-query-font');
+  fs.writeFileSync(path.join(directories[0], 'theme.css'), 'body { color: red; }\n');
+  fs.writeFileSync(path.join(directories[1], 'theme.css'), 'body { color: blue; }\n');
+  fs.writeFileSync(path.join(directories[0], 'theme.js'),
+    "export const themeA = new URL('./theme.css', import.meta.url);\n");
+  fs.writeFileSync(path.join(directories[1], 'theme.js'),
+    "export const themeB = new URL('./theme.css', import.meta.url);\n");
+  fs.writeFileSync(path.join(directories[0], 'query.js'),
+    "export const queriedTheme = new URL('./theme.css?v=1#theme', import.meta.url);\n" +
+    "export const queriedFont = new URL('../../../assets/fonts/Manrope%5Bwght%5D.ttf?v=1#font', import.meta.url);\n");
+  fs.writeFileSync(path.join(directories[0], 'dynamic.js'),
+    "export const dynamicTheme = new URL(`./${'theme.css'}`, import.meta.url);\n");
+  fs.writeFileSync(path.join(directories[0], 'plain.js'),
+    "export const plainTheme = new URL(`./theme.css`, import.meta.url);\n");
+  fs.writeFileSync(path.join(directories[0], 'trailing-comma.js'),
+    "export const commaTheme = new URL('./theme.css', import.meta.url,);\n" +
+    "export const multilineTheme = new URL(\n" +
+    "  './theme.css',\n" +
+    "  import.meta.url,\n" +
+    ");\n" +
+    "export const multilineDynamicTheme = new URL(\n" +
+    "  `./${'theme.css'}`,\n" +
+    "  import.meta.url,\n" +
+    ");\n");
+  fs.writeFileSync(path.join(project, 'src', 'ui', 'parent.js'),
+    "export const nestedTheme = new URL(`./${'a/theme.css'}`, import.meta.url);\n");
+  fs.appendFileSync(path.join(project, 'src', 'story.js'), `\nimport { themeA } from './ui/a/theme.js';
+import { themeB } from './ui/b/theme.js';
+import { queriedTheme, queriedFont } from './ui/a/query.js';
+import { dynamicTheme } from './ui/a/dynamic.js';
+import { plainTheme } from './ui/a/plain.js';
+import { commaTheme, multilineTheme, multilineDynamicTheme } from './ui/a/trailing-comma.js';
+import { nestedTheme } from './ui/parent.js';
+export const dynamicFont = new URL(\`../assets/fonts/\${'Manrope[wght].ttf'}\`, import.meta.url);
+export const moduleThemes = [themeA.href, themeB.href, queriedTheme.href, queriedFont.href, dynamicTheme.href, plainTheme.href, commaTheme.href, multilineTheme.href, multilineDynamicTheme.href, nestedTheme.href, dynamicFont.href];\n`);
+  refreshStoryProof(project);
+
+  const plan = planNarrativePlatformExport(project);
+  assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
+  const derived = materializeNarrativePlatformProjects(plan);
+  assert.equal(derived.status, 'DERIVED_LOCAL', derived.reasonCode);
+  try {
+    for (const item of Object.values(derived.projects)) {
+      const js = fs.readFileSync(path.join(item.root, 'src', 'main.js'), 'utf8');
+      assert.match(js, /\.\.\/assets\/ui\/a\/theme\.css/);
+      assert.match(js, /\.\.\/assets\/ui\/b\/theme\.css/);
+      assert.match(js, /\.\.\/assets\/ui\/a\/theme\.css\?v=1#theme/);
+      assert.match(js, /\.\.\/assets\/fonts\/Manrope-wght\.ttf\?v=1#font/);
+      assert.match(js, /`\.\.\/assets\/ui\/a\/\$\{["']theme\.css["']\}`/);
+      assert.match(js, /new URL\("\.\.\/assets\/ui\/a\/theme\.css", import\.meta\.url\)/);
+      assert.match(js, /var commaTheme = new URL\("\.\.\/assets\/ui\/a\/theme\.css", import\.meta\.url\)/);
+      assert.match(js, /var multilineTheme = new URL\(\s*"\.\.\/assets\/ui\/a\/theme\.css",\s*import\.meta\.url\s*,?\s*\)/);
+      assert.match(js, /var multilineDynamicTheme = new URL\(\s*`\.\.\/assets\/ui\/a\/\$\{["']theme\.css["']\}`,\s*import\.meta\.url\s*,?\s*\)/);
+      assert.match(js, /`\.\.\/assets\/fonts\/\$\{["']Manrope\[wght\]\.ttf["']\}`/);
+      assert.match(js, /`\.\.\/assets\/ui\/\$\{["']a\/theme\.css["']\}`/);
+      assert.doesNotMatch(js, /`\.\.\/assets\/ui\/a\/\$\{["']a\/theme\.css["']\}`/);
+      assert.equal(js.match(/\.\.\/assets\/ui\/a\/theme\.css/g)?.length, 5);
+      assert.equal(js.match(/\.\.\/assets\/ui\/b\/theme\.css/g)?.length, 1);
+    }
+  } finally { derived.cleanup(); }
+});
+
+test('F5b2 resolves percent-encoded and root-relative CSS dependencies without weakening traversal checks', t => {
+  const { project } = fixture(t);
+  const ui = path.join(project, 'src', 'ui');
+  const fonts = path.join(project, 'assets', 'fonts');
+  fs.mkdirSync(ui, { recursive: true });
+  fs.mkdirSync(fonts, { recursive: true });
+  fs.writeFileSync(path.join(fonts, 'CormorantGaramond[wght].ttf'), 'cormorant');
+  fs.writeFileSync(path.join(fonts, 'Manrope[wght].ttf'), 'manrope');
+  fs.writeFileSync(path.join(ui, 'theme.css'), `@font-face {
+  font-family: 'Cinematic Cormorant';
+  src: url('../../assets/fonts/CormorantGaramond%5Bwght%5D.ttf');
+}
+@font-face {
+  font-family: 'Cinematic Manrope';
+  src: url('/assets/fonts/Manrope%5Bwght%5D.ttf');
+}
+@import './base.css';
+`);
+  fs.writeFileSync(path.join(ui, 'base.css'), '.theme-base { color: inherit; }\n');
+  fs.writeFileSync(path.join(ui, 'theme.js'),
+    "export const theme = new URL('./theme.css', import.meta.url);\n");
+  fs.appendFileSync(path.join(project, 'src', 'story.js'), "\nimport './ui/theme.js';\n");
+  refreshStoryProof(project);
+
+  const plan = planNarrativePlatformExport(project);
+  assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
+  const derived = materializeNarrativePlatformProjects(plan);
+  assert.equal(derived.status, 'DERIVED_LOCAL', derived.reasonCode);
+  try {
+    for (const item of Object.values(derived.projects)) {
+      const css = fs.readFileSync(path.join(item.root, 'assets', 'ui', 'theme.css'), 'utf8');
+      assert.match(css, /\.\.\/fonts\/CormorantGaramond-wght\.ttf/);
+      assert.match(css, /\.\.\/fonts\/Manrope-wght\.ttf/);
+      assert.match(css, /@import ['"]base\.css['"]/);
+      assert.doesNotMatch(css, /%5B|%5D|\/assets\/fonts/);
+    }
+  } finally { derived.cleanup(); }
+
+  fs.writeFileSync(path.join(project, 'assets', 'escape.ttf'), 'escape');
+  fs.writeFileSync(path.join(ui, 'theme.css'), 'body { background: url(/assets/%2e%2e/assets/escape.ttf); }\n');
+  refreshStoryProof(project);
+  const unsafePlan = planNarrativePlatformExport(project);
+  assert.equal(unsafePlan.status, 'READY_TO_DERIVE', unsafePlan.reasonCode);
+  const unsafe = materializeNarrativePlatformProjects(unsafePlan);
+  assert.equal(unsafe.status, 'BLOCKED');
+  assert.match(unsafe.reasonCode, /F5B_CSS_DEPENDENCY_UNPACKAGED|F5B_CSS_DEPENDENCY_UNSAFE/);
+  unsafe.cleanup?.();
+});
+
 test('F5b2 derived manifests preserve all authored title locales', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-f5b2-titles-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

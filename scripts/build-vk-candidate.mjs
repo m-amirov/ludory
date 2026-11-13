@@ -17,7 +17,7 @@ const managed = [
   'assets/ludory-vk.js', 'assets/vk-bridge.js',
   'licenses/swc-helpers.txt', 'licenses/vk-bridge.txt',
 ];
-const media = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2']);
+const media = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2', '.ttf', '.css']);
 const maxFileBytes = 25 * 1024 * 1024;
 const maxArchiveBytes = 100 * 1024 * 1024;
 const maxArchiveFiles = 10_000;

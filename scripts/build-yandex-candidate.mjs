@@ -9,7 +9,7 @@ import { verifyStudioOrigin } from '@ludory/studio-trust';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const required = ['assets/ludory-yandex.js', 'index.html', 'ludory.project.json', 'src/main.js'];
-const mediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2']);
+const mediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2', '.ttf', '.css']);
 const maxFileBytes = 25 * 1024 * 1024;
 const maxArchiveBytes = 100 * 1024 * 1024;
 const maxPrettyReceiptBytes = 1024 * 1024;
