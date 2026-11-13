@@ -265,6 +265,7 @@ function rewriteSvgImageReferences(text, filePath, imagePathMap) {
 
 function rewritePlatformFullImageReferences(text, replacements) {
   let rewritten = text;
+  const quoted = /(["'\x60])([^"'\x60]+)\1/g;
   for (const [from, to] of replacements) {
     const variants = from.startsWith('assets/')
       ? [from, `./${from}`, `../${from}`, `/${from}`]
@@ -277,6 +278,19 @@ function rewritePlatformFullImageReferences(text, replacements) {
       rewritten = rewritten.replace(new RegExp(`${quote}${escaped}${suffix}\\1`, 'g'),
         (full, quoteMark, query = '') => `${quoteMark}${replacement}${query}${quoteMark}`);
     }
+    rewritten = rewritten.replace(quoted, (full, quoteMark, specifier) => {
+      const split = specifier.match(/^([^?#]*)([?#].*)?$/);
+      const clean = split?.[1] ?? specifier;
+      const suffix = split?.[2] ?? '';
+      if (/%2f|%5c|(?:^|\/)%2e(?:%2e)?(?=\/|$)/i.test(clean)) return full;
+      let decoded;
+      try { decoded = decodeURIComponent(clean); }
+      catch { return full; }
+      const variant = variants.find(item => item === decoded);
+      if (!variant) return full;
+      const replacement = `${variant.slice(0, -from.length)}${to}${suffix}`;
+      return `${quoteMark}${replacement}${quoteMark}`;
+    });
   }
   return rewritten;
 }
@@ -301,9 +315,9 @@ function hasPlatformPngReference(text, resourcePath) {
   const variants = resourcePath.startsWith('assets/')
     ? [resourcePath, `./${resourcePath}`, `../${resourcePath}`, `/${resourcePath}`]
     : [resourcePath];
+  const bare = !resourcePath.startsWith('assets/');
   for (const variant of variants) {
     const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const bare = !resourcePath.startsWith('assets/');
     const exactQuoted = new RegExp(`(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1`);
     const url = new RegExp(`\\burl\\s*\\(\\s*(["']?)${escaped}(?:[?#][^)'"\\s]*)?\\1\\s*\\)`, 'i');
     const objectKey = new RegExp(`(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1\\s*:\\s*Object\\.freeze\\s*\\(`);
@@ -313,6 +327,24 @@ function hasPlatformPngReference(text, resourcePath) {
         (bare && (objectKey.test(text) || namedProperty.test(text) || newUrl.test(text)))) {
       return true;
     }
+  }
+  const quoted = /(["'\x60])([^"'\x60]+)\1/g;
+  let match;
+  while ((match = quoted.exec(text))) {
+    const specifier = match[2];
+    const split = specifier.match(/^([^?#]*)([?#].*)?$/);
+    const clean = split?.[1] ?? specifier;
+    if (/%2f|%5c|(?:^|\/)%2e(?:%2e)?(?=\/|$)/i.test(clean)) continue;
+    let decoded;
+    try { decoded = decodeURIComponent(clean); }
+    catch { continue; }
+    if (!variants.includes(decoded)) continue;
+    if (!bare) return true;
+    const before = text.slice(Math.max(0, match.index - 120), match.index);
+    const after = text.slice(match.index + match[0].length, match.index + match[0].length + 80);
+    if (/\b(?:portrait|background|src|href|path|file|url|image|media|asset|cover|icon|photo|desktop|mobile)(?:[A-Z][A-Za-z0-9]*)?\s*:\s*$/.test(before) ||
+        /\bnew\s+URL\s*\(\s*$/.test(before) ||
+        /^\s*:\s*Object\.freeze\s*\(/.test(after)) return true;
   }
   return false;
 }

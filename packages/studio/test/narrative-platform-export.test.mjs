@@ -275,6 +275,7 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
     "\nexport const dynamicPortrait = new URL(`./assets/portraits/${'alice'}.png`, import.meta.url);\n" +
     "export const rootRelativePortrait = '/assets/first/portrait.png';\n" +
     "export const portraitAsset = { portrait: 'alice.png' };\n" +
+    "export const encodedAsset = { src: './assets/portraits/%61lice.png' };\n" +
     "export const byFilename = { 'alice.png': './assets/portraits/alice.png' };\n" +
     "export const lookedUp = byFilename['alice.png'];\n" +
     "export const narrativeText = 'Open alice.png in the gallery.';\n" +
@@ -307,6 +308,7 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   assert.match(main, /['\"]alice\.webp['\"]/);
   assert.doesNotMatch(main, /portrait:\s*['\"]alice\.png['\"]/);
   assert.match(main, /['\"]alice\.png['\"]\s*:\s*['\"]\.\/assets\/portraits\/alice\.webp['\"]/);
+  assert.match(main, /src:\s*['\"]\.\/assets\/portraits\/alice\.webp['\"]/);
   assert.match(main, /lookedUp\s*=\s*byFilename\[['\"]alice\.png['\"]\]/);
   assert.match(main, /Open alice\.png in the gallery/);
   assert.match(main, /narrativeExact\s*=\s*["']alice\.png["']/);
