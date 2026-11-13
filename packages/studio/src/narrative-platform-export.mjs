@@ -232,13 +232,22 @@ function rewriteSvgImageReferences(text, filePath, imagePathMap) {
     });
 }
 
-function replacePlatformResourceToken(text, from, to) {
-  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const boundary = from.startsWith('assets/')
-    ? '(^|[^A-Za-z0-9._/-])(?:/|(?:\\.\\.?/)*)'
-    : '(^|[^A-Za-z0-9._-])';
-  return text.replace(new RegExp(`${boundary}${escaped}(?=$|[^A-Za-z0-9._-])`, 'g'),
-    full => full.replace(from, to));
+function rewritePlatformFullImageReferences(text, replacements) {
+  let rewritten = text;
+  for (const [from, to] of replacements) {
+    const variants = from.startsWith('assets/')
+      ? [from, `./${from}`, `../${from}`, `/${from}`]
+      : [from];
+    for (const variant of variants) {
+      const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const replacement = `${variant.slice(0, -from.length)}${to}`;
+      const quote = '(["\\x27\\x60])';
+      const suffix = '([?#][^"\\x27\\x60]*)?';
+      rewritten = rewritten.replace(new RegExp(`${quote}${escaped}${suffix}\\1`, 'g'),
+        (full, quoteMark, query = '') => `${quoteMark}${replacement}${query}${quoteMark}`);
+    }
+  }
+  return rewritten;
 }
 
 function rewritePlatformBareImageReferences(text, basenameReplacements) {
@@ -308,7 +317,7 @@ function rewritePlatformImageReferences(root, replacements, imagePathMap, imageD
       text = rewriteSvgImageReferences(text, file.path, imagePathMap);
     }
     text = rewritePlatformDynamicImageReferences(text, file.path, imageDirectories);
-    for (const [from, to] of replacements) text = replacePlatformResourceToken(text, from, to);
+    text = rewritePlatformFullImageReferences(text, replacements);
     text = rewritePlatformBareImageReferences(text, basenameReplacements);
     if (text !== original) fs.writeFileSync(filename, text);
   }
