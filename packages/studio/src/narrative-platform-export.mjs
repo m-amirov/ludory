@@ -190,12 +190,36 @@ function assertPlatformWebpSource(file, root) {
   return bytes;
 }
 
-function rewritePlatformImageReferences(root, replacements) {
+function rewriteCssImageReferences(text, filePath, imagePathMap) {
+  return text.replace(/\burl\s*\(\s*(['"]?)([^)'"\s]+)\1\s*\)/gi,
+    (full, quote, specifier) => {
+      const split = specifier.match(/^([^?#]*)([?#].*)?$/);
+      const clean = split?.[1] ?? specifier;
+      const suffix = split?.[2] ?? '';
+      let decoded;
+      try { decoded = decodeURIComponent(clean); }
+      catch { throw new Error(`F5B_CSS_DEPENDENCY_UNSAFE: ${filePath} -> ${specifier}`); }
+      if (!decoded || decoded.startsWith('#') || /^(?:https?:|data:|blob:|\/\/)/i.test(decoded) ||
+          decoded.includes('\\') || decoded.includes('\0') || /[\x00-\x1f\x7f]/.test(decoded)) return full;
+      const resolved = path.posix.normalize(decoded.startsWith('/')
+        ? decoded.slice(1) : path.posix.join(path.posix.dirname(filePath), decoded));
+      const replacement = imagePathMap.get(resolved);
+      if (!replacement) return full;
+      const relative = path.posix.relative(path.posix.dirname(filePath), replacement) ||
+        path.posix.basename(replacement);
+      return full.replace(specifier, `${relative}${suffix}`);
+    });
+}
+
+function rewritePlatformImageReferences(root, replacements, imagePathMap) {
   for (const file of scanDerivedFiles(root)) {
     if (!isTextResource(file.path)) continue;
     const filename = path.join(root, file.path);
     let text = fs.readFileSync(filename, 'utf8');
     const original = text;
+    if (path.posix.extname(file.path).toLowerCase() === '.css') {
+      text = rewriteCssImageReferences(text, file.path, imagePathMap);
+    }
     for (const [from, to] of replacements) text = text.replaceAll(from, to);
     if (text !== original) fs.writeFileSync(filename, text);
   }
@@ -212,6 +236,7 @@ async function materializePlatformWebp(project) {
   }
   const derivations = [];
   const replacements = [];
+  const imagePathMap = new Map();
   for (const source of pngs) {
     const derivedPath = source.path.replace(/\.png$/i, '.webp');
     if (targetPaths.has(derivedPath)) throw new Error(`F5B_PLATFORM_WEBP_COLLISION: ${derivedPath}`);
@@ -225,13 +250,14 @@ async function materializePlatformWebp(project) {
     derivations.push({ sourcePath: source.path, derivedPath, sourceSha256: source.sha256,
       sourceSize: source.size, derivedSha256: sha(derivedBytes), derivedSize: derivedBytes.length,
       width: metadata.width, height: metadata.height, quality: platformWebpQuality });
+    imagePathMap.set(source.path, derivedPath);
     replacements.push([source.path, derivedPath]);
     const basename = path.posix.basename(source.path);
     if (basenameCounts.get(basename) === 1) {
       replacements.push([basename, path.posix.basename(derivedPath)]);
     }
   }
-  rewritePlatformImageReferences(project.root, replacements);
+  rewritePlatformImageReferences(project.root, replacements, imagePathMap);
   for (const source of pngs) fs.unlinkSync(path.join(project.root, source.path));
   const files = scanDerivedFiles(project.root);
   if (files.some(file => file.path.startsWith('assets/') &&
@@ -253,18 +279,23 @@ async function materializeNarrativePlatformPlatformExport(plan) {
   const derived = materializeNarrativePlatformProjects(plan);
   if (derived.status !== 'DERIVED_LOCAL') return derived;
   try {
-    for (const project of Object.values(derived.projects)) {
-      const optimized = await materializePlatformWebp(project);
-      project.files = optimized.files;
-      project.sha256 = optimized.sha256;
-      project.assetDerivations = optimized.assetDerivations;
-    }
+    await optimizeNarrativePlatformProjects(derived);
     return derived;
   } catch (error) {
     derived.cleanup();
     return { ...blocked(plan?.project ?? null, error.message || 'F5B_PLATFORM_WEBP_FAILED'),
       releaseReady: false, publicationAllowed: false };
   }
+}
+
+async function optimizeNarrativePlatformProjects(derived) {
+  for (const project of Object.values(derived.projects)) {
+    const optimized = await materializePlatformWebp(project);
+    project.files = optimized.files;
+    project.sha256 = optimized.sha256;
+    project.assetDerivations = optimized.assetDerivations;
+  }
+  return derived;
 }
 
 function ownedCleanup(directory) {
@@ -503,9 +534,8 @@ function assertPlatformWebpDerivations(sourcePlan, assetDerivations, derivedFile
 }
 
 /** Re-check stored ZIP/member bytes against a live host-trusted F5b1 plan. */
-export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
+export async function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
   let rederived;
-  let sourcePinned;
   let result;
   try {
     const issued = sourcePlan && typeof sourcePlan === 'object' ? issuedPlans.get(sourcePlan) : null;
@@ -533,8 +563,9 @@ export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
       rederived = materializeNarrativePlatformProjects(sourcePlan);
       if (rederived.status !== 'DERIVED_LOCAL') throw new Error(rederived.reasonCode || 'F5B_SOURCE_REDERIVATION_FAILED');
     } else {
-      sourcePinned = materializeNarrativePlatformSource(sourcePlan);
-      if (sourcePinned.status !== 'SOURCE_PINNED') throw new Error(sourcePinned.reasonCode || 'F5B_SOURCE_REPIN_FAILED');
+      rederived = materializeNarrativePlatformProjects(sourcePlan);
+      if (rederived.status !== 'DERIVED_LOCAL') throw new Error(rederived.reasonCode || 'F5B_SOURCE_REDERIVATION_FAILED');
+      await optimizeNarrativePlatformProjects(rederived);
     }
     for (const [index, key] of ['yandex', 'vk'].entries()) {
       const candidate = linked.candidates[index];
@@ -560,6 +591,10 @@ export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
       if (optimized) {
         assertPlatformWebpDerivations(sourcePlan, candidate.assetDerivations,
           candidate.derivedFiles, archived.files);
+        if (candidate.derivedProjectSha256 !== rederived.projects[key].sha256) {
+          throw new Error('F5B_DERIVED_SOURCE_BINDING_MISMATCH');
+        }
+        sameFiles(candidate.derivedFiles, rederived.projects[key].files);
       } else {
         sameFiles(candidate.derivedFiles, rederived.projects[key].files);
       }
@@ -578,9 +613,6 @@ export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
       releaseReady: false, publicationAllowed: false };
   } finally {
     try { rederived?.cleanup?.(); }
-    catch (error) { result = { mode, status: 'BLOCKED', reasonCode: error.message,
-      releaseReady: false, publicationAllowed: false }; }
-    try { sourcePinned?.cleanup?.(); }
     catch (error) { result = { mode, status: 'BLOCKED', reasonCode: error.message,
       releaseReady: false, publicationAllowed: false }; }
   }
@@ -626,7 +658,7 @@ export async function buildNarrativePlatformCandidates(plan, paths = {}) {
           archiveSha256: vk.sha256, files: vk.files },
       ],
     }, partialOutputs, outputs._parentPins.exportReceipt);
-    const verified = verifyNarrativePlatformCandidates(outputs, plan);
+    const verified = await verifyNarrativePlatformCandidates(outputs, plan);
     if (verified.status !== 'LOCAL_ARCHIVES_VERIFIED' || verified.sourceDigest !== derived.sourceDigest) {
       throw new Error(verified.reasonCode ?? 'F5B_PAIR_VERIFICATION_FAILED');
     }

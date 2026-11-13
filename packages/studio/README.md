@@ -50,7 +50,7 @@ const outputs = {
 };
 const result = await buildNarrativePlatformCandidates(plan, outputs);
 if (result.status !== 'CANDIDATES_BUILT_LOCAL') throw new Error(result.reasonCode);
-const check = verifyNarrativePlatformCandidates(outputs, plan);
+const check = await verifyNarrativePlatformCandidates(outputs, plan);
 if (check.status !== 'LOCAL_ARCHIVES_VERIFIED') throw new Error(check.reasonCode);
 ```
 
