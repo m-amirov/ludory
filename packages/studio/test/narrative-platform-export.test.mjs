@@ -257,6 +257,8 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   fs.writeFileSync(path.join(project, 'assets', 'portraits', 'alice.png'), dynamic);
   fs.writeFileSync(path.join(project, 'assets', 'portrait.png.svg'),
     '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>\n');
+  fs.writeFileSync(path.join(project, 'assets', 'frame.svg'),
+    '<svg xmlns="http://www.w3.org/2000/svg"><image href="first/portrait.png" /></svg>\n');
   fs.writeFileSync(path.join(project, 'assets', 'theme.css'),
     '.first{background-image:url(first/portrait.png)}.second{background-image:url(second/portrait.png)}' +
     '.svg{background-image:url(portrait.png.svg)}\n');
@@ -281,6 +283,9 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   assert.match(css, /url\(second\/portrait\.webp\)/);
   assert.match(css, /url\(portrait\.png\.svg\)/);
   assert.doesNotMatch(css, /url\((?:first|second)\/portrait\.png\)/);
+  const frame = Buffer.from(entries['assets/frame.svg']).toString('utf8');
+  assert.match(frame, /href="first\/portrait\.webp"/);
+  assert.doesNotMatch(frame, /href="first\/portrait\.png"/);
   const main = Buffer.from(entries['src/main.js']).toString('utf8');
   assert.match(main, /\.\.?\/assets\/portraits\/\$\{[^}]+\}\.webp/);
   assert.doesNotMatch(main, /\.\.?\/assets\/portraits\/\$\{[^}]+\}\.png/);

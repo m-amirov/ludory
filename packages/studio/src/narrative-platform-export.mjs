@@ -211,6 +211,27 @@ function rewriteCssImageReferences(text, filePath, imagePathMap) {
     });
 }
 
+function rewriteSvgImageReferences(text, filePath, imagePathMap) {
+  return text.replace(/\b(?:href|xlink:href)\s*=\s*(['"])([^'"]+)\1/gi,
+    (full, quote, specifier) => {
+      const split = specifier.match(/^([^?#]*)([?#].*)?$/);
+      const clean = split?.[1] ?? specifier;
+      const suffix = split?.[2] ?? '';
+      let decoded;
+      try { decoded = decodeURIComponent(clean); }
+      catch { throw new Error(`F5B_SVG_DEPENDENCY_UNSAFE: ${filePath} -> ${specifier}`); }
+      if (!decoded || decoded.startsWith('#') || /^(?:https?:|data:|blob:|\/\/)/i.test(decoded) ||
+          decoded.includes('\\') || decoded.includes('\0') || /[\x00-\x1f\x7f]/.test(decoded)) return full;
+      const resolved = path.posix.normalize(decoded.startsWith('/')
+        ? decoded.slice(1) : path.posix.join(path.posix.dirname(filePath), decoded));
+      const replacement = imagePathMap.get(resolved);
+      if (!replacement) return full;
+      const relative = path.posix.relative(path.posix.dirname(filePath), replacement) ||
+        path.posix.basename(replacement);
+      return full.replace(specifier, `${relative}${suffix}`);
+    });
+}
+
 function replacePlatformResourceToken(text, from, to) {
   const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const boundary = from.startsWith('assets/')
@@ -246,6 +267,9 @@ function rewritePlatformImageReferences(root, replacements, imagePathMap, imageD
     const original = text;
     if (path.posix.extname(file.path).toLowerCase() === '.css') {
       text = rewriteCssImageReferences(text, file.path, imagePathMap);
+    }
+    if (path.posix.extname(file.path).toLowerCase() === '.svg') {
+      text = rewriteSvgImageReferences(text, file.path, imagePathMap);
     }
     text = rewritePlatformDynamicImageReferences(text, file.path, imageDirectories);
     for (const [from, to] of replacements) text = replacePlatformResourceToken(text, from, to);
