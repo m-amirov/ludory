@@ -183,12 +183,15 @@ function outputAssetSpecifier(target) {
 
 function rewriteSourceModuleAssetUrls(source, owner, assetPathMap) {
   const mappings = assetPathMap instanceof Map ? assetPathMap : new Map();
+  const rewriteSpecifier = (full, specifier) => {
+    const resolved = resolveSourceDependency(owner, specifier);
+    const target = mappings.get(resolved?.path);
+    return target ? full.replace(specifier, `${outputAssetSpecifier(target)}${resolved.suffix}`) : full;
+  };
   let output = source.replace(/new\s+URL\s*\(\s*(['"])([^'"\n]+)\1\s*,\s*import\.meta\.url\s*\)/g,
-    (full, quote, specifier) => {
-      const resolved = resolveSourceDependency(owner, specifier);
-      const target = mappings.get(resolved?.path);
-      return target ? full.replace(specifier, `${outputAssetSpecifier(target)}${resolved.suffix}`) : full;
-    });
+    (full, _quote, specifier) => rewriteSpecifier(full, specifier));
+  output = output.replace(/new\s+URL\s*\(\s*`([^`$]*)`\s*,\s*import\.meta\.url\s*\)/g,
+    (full, specifier) => rewriteSpecifier(full, specifier));
   output = output.replace(/new\s+URL\s*\(\s*`([^`$]*)\$\{([^}]*)\}`\s*,\s*import\.meta\.url\s*\)/g,
     (full, prefix, expression) => {
       const resolved = resolveSourceDependency(owner, prefix);
@@ -196,8 +199,7 @@ function rewriteSourceModuleAssetUrls(source, owner, assetPathMap) {
       if (!sourceDirectory) return full;
       const mapping = [...mappings.entries()].find(([from]) => from.startsWith(`${sourceDirectory}/`));
       if (!mapping) return full;
-      const sourceSuffix = mapping[0].slice(sourceDirectory.length + 1);
-      const targetDirectory = mapping[1].slice(0, -(sourceSuffix.length + 1));
+      const targetDirectory = path.posix.dirname(mapping[1]);
       return full.replace(prefix, `${outputAssetSpecifier(targetDirectory)}/`);
     });
   return output;

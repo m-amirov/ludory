@@ -229,11 +229,15 @@ test('F5b2 rebases identical module-relative URLs according to each source modul
     "export const queriedFont = new URL('../../../assets/fonts/Manrope%5Bwght%5D.ttf?v=1#font', import.meta.url);\n");
   fs.writeFileSync(path.join(directories[0], 'dynamic.js'),
     "export const dynamicTheme = new URL(`./${'theme.css'}`, import.meta.url);\n");
+  fs.writeFileSync(path.join(directories[0], 'plain.js'),
+    "export const plainTheme = new URL(`./theme.css`, import.meta.url);\n");
   fs.appendFileSync(path.join(project, 'src', 'story.js'), `\nimport { themeA } from './ui/a/theme.js';
 import { themeB } from './ui/b/theme.js';
 import { queriedTheme, queriedFont } from './ui/a/query.js';
 import { dynamicTheme } from './ui/a/dynamic.js';
-export const moduleThemes = [themeA.href, themeB.href, queriedTheme.href, queriedFont.href, dynamicTheme.href];\n`);
+import { plainTheme } from './ui/a/plain.js';
+export const dynamicFont = new URL(\`../assets/fonts/\${'Manrope[wght].ttf'}\`, import.meta.url);
+export const moduleThemes = [themeA.href, themeB.href, queriedTheme.href, queriedFont.href, dynamicTheme.href, plainTheme.href, dynamicFont.href];\n`);
   refreshStoryProof(project);
 
   const plan = planNarrativePlatformExport(project);
@@ -248,7 +252,9 @@ export const moduleThemes = [themeA.href, themeB.href, queriedTheme.href, querie
       assert.match(js, /\.\.\/assets\/ui\/a\/theme\.css\?v=1#theme/);
       assert.match(js, /\.\.\/assets\/fonts\/Manrope-wght\.ttf\?v=1#font/);
       assert.match(js, /`\.\.\/assets\/ui\/a\/\$\{["']theme\.css["']\}`/);
-      assert.equal(js.match(/\.\.\/assets\/ui\/a\/theme\.css/g)?.length, 2);
+      assert.match(js, /new URL\("\.\.\/assets\/ui\/a\/theme\.css", import\.meta\.url\)/);
+      assert.match(js, /`\.\.\/assets\/fonts\/\$\{["']Manrope\[wght\]\.ttf["']\}`/);
+      assert.equal(js.match(/\.\.\/assets\/ui\/a\/theme\.css/g)?.length, 3);
       assert.equal(js.match(/\.\.\/assets\/ui\/b\/theme\.css/g)?.length, 1);
     }
   } finally { derived.cleanup(); }
