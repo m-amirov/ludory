@@ -8,7 +8,7 @@ const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const publicRoots = new Set(['src', 'assets', 'media', 'images', 'audio', 'sounds', 'fonts']);
 const publicExt = new Set([
   '.js', '.mjs', '.css', '.json', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.avif',
-  '.gif', '.ico', '.ogg', '.mp3', '.wav', '.woff', '.woff2', '.webm', '.mp4',
+  '.gif', '.ico', '.ogg', '.mp3', '.wav', '.woff', '.woff2', '.ttf', '.webm', '.mp4',
 ]);
 const maxFiles = 10_000;
 const maxFileSize = 25 * 1024 * 1024;
@@ -202,7 +202,7 @@ function validateDependencies(files, read, { requireNarrativeProof = false } = {
       // Game artwork paths are resolved relative to document URL by img.src,
       // even when the literal appears in a JS module under src/.
       if (name.startsWith('src/')) {
-        for (const match of source.matchAll(/['"]((?:\.\/)?(?:assets|media|images|audio|sounds|fonts)\/[^'"\s]+\.(?:json|svg|png|jpg|jpeg|webp|avif|gif|ogg|mp3|wav|webm|mp4|woff2?))['"]/gi)) {
+        for (const match of source.matchAll(/['"]((?:\.\/)?(?:assets|media|images|audio|sounds|fonts)\/[^'"\s]+\.(?:json|svg|png|jpg|jpeg|webp|avif|gif|ogg|mp3|wav|webm|mp4|woff2?|ttf))['"]/gi)) {
           if (!moduleRelativeLiterals.has(match.index)) localDependency(match[1], 'index.html', known);
         }
       }

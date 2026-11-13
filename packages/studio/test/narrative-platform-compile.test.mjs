@@ -166,6 +166,52 @@ test('F5b2 keeps supported local HTML media in each derived project', t => {
   } finally { derived.cleanup(); }
 });
 
+test('F5b2 packages an authored CSS skin and local TTF dependencies for both targets', t => {
+  const { project } = fixture(t);
+  const ui = path.join(project, 'src', 'ui');
+  const fonts = path.join(project, 'assets', 'fonts');
+  fs.mkdirSync(ui, { recursive: true });
+  fs.mkdirSync(fonts, { recursive: true });
+  const cormorant = Buffer.from('original-cormorant-ttf-bytes');
+  const manrope = Buffer.from('original-manrope-ttf-bytes');
+  fs.writeFileSync(path.join(fonts, 'CormorantGaramond[wght].ttf'), cormorant);
+  fs.writeFileSync(path.join(fonts, 'Manrope[wght].ttf'), manrope);
+  fs.writeFileSync(path.join(ui, 'original-game.css'), `@font-face {
+  font-family: 'Cinematic Cormorant';
+  src: url('../../assets/fonts/CormorantGaramond[wght].ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Cinematic Manrope';
+  src: url('../../assets/fonts/Manrope[wght].ttf') format('truetype');
+}
+body { font-family: 'Cinematic Manrope'; }
+`);
+  fs.writeFileSync(path.join(ui, 'original-game-ui.js'),
+    "export const theme = new URL('./original-game.css', import.meta.url);\n");
+  const story = path.join(project, 'src', 'story.js');
+  fs.appendFileSync(story, "\nimport './ui/original-game-ui.js';\n");
+  refreshStoryProof(project);
+
+  const plan = planNarrativePlatformExport(project);
+  assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
+  const derived = materializeNarrativePlatformProjects(plan);
+  assert.equal(derived.status, 'DERIVED_LOCAL', derived.reasonCode);
+  try {
+    for (const name of ['yandex', 'vk']) {
+      const root = derived.projects[name].root;
+      const css = path.join(root, 'assets', 'ui', 'original-game.css');
+      assert.equal(fs.readFileSync(css, 'utf8').includes('../fonts/CormorantGaramond-wght.ttf'), true);
+      assert.equal(fs.readFileSync(css, 'utf8').includes('../fonts/Manrope-wght.ttf'), true);
+      assert.equal(fs.readFileSync(path.join(root, 'assets', 'fonts', 'CormorantGaramond-wght.ttf')).equals(cormorant), true);
+      assert.equal(fs.readFileSync(path.join(root, 'assets', 'fonts', 'Manrope-wght.ttf')).equals(manrope), true);
+      assert.match(fs.readFileSync(path.join(root, 'src', 'main.js'), 'utf8'),
+        /\.\.\/assets\/ui\/original-game\.css/);
+      assert.equal(fs.existsSync(path.join(root, 'assets', 'fonts', 'CormorantGaramond[wght].ttf')), false);
+      assert.equal(fs.existsSync(path.join(root, 'assets', 'fonts', 'Manrope[wght].ttf')), false);
+    }
+  } finally { derived.cleanup(); }
+});
+
 test('F5b2 derived manifests preserve all authored title locales', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-f5b2-titles-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

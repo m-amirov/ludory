@@ -70,7 +70,7 @@ function regular(root, relative) {
 
 // F5b2 copies only supported assets/ media, not arbitrary authored HTML
 // dependencies. Reject unsupported references before producing either ZIP.
-const htmlMediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2']);
+const htmlMediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2', '.ttf', '.css']);
 const htmlUrlAttributes = new Set([
   'href', 'src', 'srcset', 'poster', 'action', 'formaction', 'data', 'xlink:href',
   'ping', 'background', 'cite', 'manifest',
@@ -152,8 +152,68 @@ function originalHtml(root, target) {
   return Buffer.from(serialize(document));
 }
 
+function normalizedSourcePath(value) {
+  return value.replaceAll('\\', '/');
+}
+
+function resolveSourceDependency(owner, specifier) {
+  const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(owner), specifier));
+  if (resolved === '..' || resolved.startsWith('../') || resolved.startsWith('/')) return null;
+  return resolved;
+}
+
+function outputAssetSpecifier(target) {
+  const relative = path.posix.relative('src', target);
+  if (!relative || relative.startsWith('/') || relative === '..' || relative.startsWith('../')) {
+    return relative || path.posix.basename(target);
+  }
+  return relative;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function rebaseBundledAssetUrls(compiled, { root, inputs, assetPathMap } = {}) {
+  if (!(assetPathMap instanceof Map) || !assetPathMap.size) return compiled;
+  let output = compiled.toString('utf8');
+  const mappings = [...assetPathMap.entries()].map(([source, target]) => [
+    normalizedSourcePath(source), normalizedSourcePath(target),
+  ]);
+  for (const input of inputs) {
+    const owner = normalizedSourcePath(input);
+    if (owner === '<stdin>' || owner === 'src/f5b2-platform-entry.js' ||
+        !/\.(?:js|mjs)$/i.test(owner)) continue;
+    const source = regular(root, owner).toString('utf8');
+    for (const match of source.matchAll(/new\s+URL\s*\(\s*(['"])([^'"\n]+)\1\s*,\s*import\.meta\.url\s*\)/g)) {
+      const resolved = resolveSourceDependency(owner, match[2]);
+      const target = mappings.find(([from]) => from === resolved)?.[1];
+      if (!target) continue;
+      const replacement = outputAssetSpecifier(target);
+      const expression = new RegExp(`(new\\s+URL\\s*\\(\\s*)(['"])${escapeRegExp(match[2])}\\2(\\s*,\\s*import\\.meta\\.url\\s*\\))`, 'g');
+      output = output.replace(expression, (_full, prefix, quote, suffix) =>
+        `${prefix}${quote}${replacement}${quote}${suffix}`);
+    }
+    for (const match of source.matchAll(/new\s+URL\s*\(\s*`([^`$]*)\$\{([^}]*)\}`\s*,\s*import\.meta\.url\s*\)/g)) {
+      const sourceDirectory = resolveSourceDependency(owner, match[1]);
+      if (!sourceDirectory) continue;
+      const mapping = mappings.find(([from]) => from.startsWith(`${sourceDirectory}/`));
+      if (!mapping) continue;
+      const sourceSuffix = mapping[0].slice(sourceDirectory.length + 1);
+      const targetDirectory = mapping[1].slice(0, -(sourceSuffix.length + 1));
+      const replacement = `${outputAssetSpecifier(targetDirectory)}/`;
+      const expression = new RegExp(
+        '(new\\s+URL\\s*\\(\\s*)`' + escapeRegExp(match[1]) +
+        '(\\$\\{[^`]*\\})`(\\s*,\\s*import\\.meta\\.url\\s*\\))', 'g');
+      output = output.replace(expression, (_full, prefix, expressionBody, suffix) =>
+        `${prefix}\`${replacement}${expressionBody}\`${suffix}`);
+    }
+  }
+  return Buffer.from(output);
+}
+
 /** Compile exact pinned author JS into a single SDK entry, excluding other executable ZIP members. */
-export function compileNarrativePlatformEntrypoint({ sourceRoot, target } = {}) {
+export function compileNarrativePlatformEntrypoint({ sourceRoot, target, assetPathMap } = {}) {
   if (!Object.hasOwn(SDK, target)) throw new Error('F5B_INVALID_TARGET');
   const root = fs.realpathSync.native(sourceRoot);
   if (!fs.lstatSync(root).isDirectory()) throw new Error('F5B_SOURCE_NOT_DIRECTORY');
@@ -192,7 +252,9 @@ export function compileNarrativePlatformEntrypoint({ sourceRoot, target } = {}) 
     }
   }
   if (built.outputFiles.length !== 1) throw new Error('F5B_UNEXPECTED_BUNDLE_OUTPUT');
-  const compiled = Buffer.from(built.outputFiles[0].contents);
+  const compiled = rebaseBundledAssetUrls(Buffer.from(built.outputFiles[0].contents), {
+    root, inputs: Object.keys(built.metafile.inputs), assetPathMap,
+  });
   const imports = Object.values(built.metafile.outputs).flatMap(output => output.imports)
     .filter(item => item.external).map(item => item.path).sort();
   const allowed = (target === 'yandex-games' ? [SDK[target]] : [SDK[target], '../assets/vk-bridge.js']).sort();
