@@ -89,7 +89,7 @@ const paths = {
 };
 const result = await buildNarrativePlatformCandidates(plan, paths);
 if (result.status !== 'CANDIDATES_BUILT_LOCAL') throw new Error(result.reasonCode ?? result.status);
-const check = verifyNarrativePlatformCandidates(paths, plan);
+const check = await verifyNarrativePlatformCandidates(paths, plan);
 if (check.status !== 'LOCAL_ARCHIVES_VERIFIED') throw new Error(check.reasonCode ?? check.status);
 console.log(JSON.stringify({ sourceDigest: plan.sourceDigest,
   yandexSha256: result.candidates.yandex.sha256,

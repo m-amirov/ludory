@@ -45,10 +45,10 @@ test('F5b3 refuses source drift and a modified or swapped archive before browser
   t.after(() => fixture.cleanup());
   const original = fs.readFileSync(fixture.outputs.yandexZip);
   fs.appendFileSync(fixture.outputs.yandexZip, 'tamper');
-  assert.equal(verifyNarrativePlatformCandidates(fixture.outputs, fixture.sourcePlan).status, 'BLOCKED');
+  assert.equal((await verifyNarrativePlatformCandidates(fixture.outputs, fixture.sourcePlan)).status, 'BLOCKED');
   fs.writeFileSync(fixture.outputs.yandexZip, original);
   const swapped = { ...fixture.outputs, yandexZip: fixture.outputs.vkZip, vkZip: fixture.outputs.yandexZip };
-  assert.equal(verifyNarrativePlatformCandidates(swapped, fixture.sourcePlan).status, 'BLOCKED');
+  assert.equal((await verifyNarrativePlatformCandidates(swapped, fixture.sourcePlan)).status, 'BLOCKED');
   const repeated = await buildNarrativePlatformCandidates(fixture.sourcePlan, fixture.outputs);
   assert.equal(repeated.status, 'BLOCKED', 'existing destinations must not be overwritten');
   assert.deepEqual(fs.readFileSync(fixture.outputs.yandexZip), original);

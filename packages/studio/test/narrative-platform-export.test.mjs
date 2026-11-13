@@ -5,6 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import sharp from 'sharp';
+import { unzipSync, zipSync } from 'fflate';
 import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { planPreviewBuild } from '../src/preview-build.mjs';
 import { planNarrativePlatformExport, materializeNarrativePlatformSource,
@@ -188,12 +190,153 @@ test('F5b2 builds two source-linked local ZIPs and verifies the actual archive/m
   assert.equal(paired.candidates.length, 2);
   assert.equal(paired.candidates[0].target, 'yandex-games');
   assert.equal(paired.candidates[1].target, 'vk-games');
-  assert.equal(verifyNarrativePlatformCandidates(paths).status, 'BLOCKED',
+  assert.equal((await verifyNarrativePlatformCandidates(paths)).status, 'BLOCKED',
     'standalone editable receipts are not an authenticated source identity');
-  const verified = verifyNarrativePlatformCandidates(paths, plan);
+  const verified = await verifyNarrativePlatformCandidates(paths, plan);
   assert.equal(verified.status, 'LOCAL_ARCHIVES_VERIFIED', verified.reasonCode);
   assert.equal(verified.sourceDigest, plan.sourceDigest);
   assert.equal(fs.readFileSync(storyFile, 'utf8'), story);
+});
+
+test('F5b2 uses verified q95 WebP derivatives without retaining PNGs or stale references', async t => {
+  const { root, project } = newProject(t);
+  const sourceImage = path.join(project, 'assets', 'portrait.png');
+  const sourceBytes = await sharp({ create: { width: 4, height: 3, channels: 4,
+    background: { r: 36, g: 18, b: 52, alpha: 0.75 } } }).png().toBuffer();
+  fs.writeFileSync(sourceImage, sourceBytes);
+  const proofFile = path.join(project, 'narrative-assets.json');
+  const proof = JSON.parse(fs.readFileSync(proofFile, 'utf8'));
+  proof.assets.portrait = { path: 'assets/portrait.png', sha256: sha(sourceBytes) };
+  fs.writeFileSync(proofFile, `${JSON.stringify(proof, null, 2)}\n`);
+  const storyFile = path.join(project, 'src/story.js');
+  fs.writeFileSync(storyFile, fs.readFileSync(storyFile, 'utf8')
+    .replace('./assets/lighthouse.svg', './assets/portrait.png'));
+  refreshStoryProof(project);
+  const sourceSha256 = sha(sourceBytes);
+  const plan = planNarrativePlatformExport(project);
+  assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
+  const paths = destinations(root);
+  const built = await buildNarrativePlatformCandidates(plan, paths);
+  assert.equal(built.status, 'CANDIDATES_BUILT_LOCAL', built.reasonCode);
+  const paired = JSON.parse(fs.readFileSync(paths.exportReceipt));
+  for (const [key, inspect] of [['yandex', inspectYandexArchive], ['vk', inspectVkArchive]]) {
+    const derivations = paired.candidates.find(candidate => candidate.target ===
+      (key === 'yandex' ? 'yandex-games' : 'vk-games')).assetDerivations;
+    assert.equal(derivations.length, 1);
+    assert.equal(derivations[0].sourcePath, 'assets/portrait.png');
+    assert.equal(derivations[0].derivedPath, 'assets/portrait.webp');
+    assert.equal(derivations[0].sourceSha256, sourceSha256);
+    assert.equal(derivations[0].quality, 95);
+    const entries = unzipSync(new Uint8Array(fs.readFileSync(paths[`${key}Zip`])));
+    assert.equal(Object.hasOwn(entries, 'assets/portrait.png'), false);
+    assert.equal(Object.hasOwn(entries, 'assets/portrait.webp'), true);
+    const main = Buffer.from(entries['src/main.js']).toString('utf8');
+    assert.match(main, /portrait\.webp/);
+    assert.doesNotMatch(main, /portrait\.png/);
+    assert.equal(inspect(paths[`${key}Zip`]).files.some(file => file.path === 'assets/portrait.png'), false);
+  }
+  assert.equal((await verifyNarrativePlatformCandidates(paths, plan)).status, 'LOCAL_ARCHIVES_VERIFIED');
+  assert.equal(sha(fs.readFileSync(sourceImage)), sourceSha256);
+  fs.appendFileSync(sourceImage, Buffer.from([0]));
+  assert.equal((await verifyNarrativePlatformCandidates(paths, plan)).status, 'BLOCKED');
+});
+
+test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS image basenames', async t => {
+  const { root, project } = newProject(t);
+  const first = await sharp({ create: { width: 5, height: 4, channels: 4,
+    background: { r: 210, g: 80, b: 30, alpha: 1 } } }).png().toBuffer();
+  const second = await sharp({ create: { width: 5, height: 4, channels: 4,
+    background: { r: 30, g: 80, b: 210, alpha: 1 } } }).png().toBuffer();
+  const dynamic = await sharp({ create: { width: 5, height: 4, channels: 4,
+    background: { r: 120, g: 40, b: 180, alpha: 1 } } }).png().toBuffer();
+  fs.mkdirSync(path.join(project, 'assets', 'first'), { recursive: true });
+  fs.mkdirSync(path.join(project, 'assets', 'second'), { recursive: true });
+  fs.mkdirSync(path.join(project, 'assets', 'portraits'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'assets', 'first', 'portrait.png'), first);
+  fs.writeFileSync(path.join(project, 'assets', 'second', 'portrait.png'), second);
+  fs.writeFileSync(path.join(project, 'assets', 'portraits', 'alice.png'), dynamic);
+  fs.writeFileSync(path.join(project, 'assets', 'portrait.png.svg'),
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>\n');
+  fs.writeFileSync(path.join(project, 'assets', 'frame.svg'),
+    '<svg xmlns="http://www.w3.org/2000/svg"><image href="first/portrait.png" /></svg>\n');
+  fs.writeFileSync(path.join(project, 'assets', 'theme.css'),
+    '.first{background-image:url(first/portrait.png)}.second{background-image:url(second/portrait.png)}' +
+    '.svg{background-image:url(portrait.png.svg)}' +
+    '.set{background-image:image-set("first/portrait.png" 1x)}' +
+    '.nested{background-image:image-set("second/portrait.png" type("image/png") 1x)}\n');
+  const proofFile = path.join(project, 'narrative-assets.json');
+  const proof = JSON.parse(fs.readFileSync(proofFile, 'utf8'));
+  proof.assets.first_portrait = { path: 'assets/first/portrait.png', sha256: sha(first) };
+  proof.assets.second_portrait = { path: 'assets/second/portrait.png', sha256: sha(second) };
+  proof.assets.dynamic_portrait = { path: 'assets/portraits/alice.png', sha256: sha(dynamic) };
+  fs.writeFileSync(proofFile, `${JSON.stringify(proof, null, 2)}\n`);
+  const storyFile = path.join(project, 'src/story.js');
+  fs.appendFileSync(storyFile,
+    "\nexport const dynamicPortrait = new URL(`./assets/portraits/${'alice'}.png`, import.meta.url);\n" +
+    "export const rootRelativePortrait = '/assets/first/portrait.png';\n" +
+    "export const portraitAsset = { portrait: 'alice.png' };\n" +
+    "export const encodedAsset = { src: './assets/portraits/%61lice.png' };\n" +
+    "export const byFilename = { 'alice.png': './assets/portraits/alice.png' };\n" +
+    "export const lookedUp = byFilename['alice.png'];\n" +
+    "export const narrativeText = 'Open alice.png in the gallery.';\n" +
+    "export const narrativeExact = 'alice.png';\n" +
+    "export const narrativeFull = 'Open assets/portraits/alice.png in the gallery.';\n");
+  refreshStoryProof(project);
+  const plan = planNarrativePlatformExport(project);
+  assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
+  const paths = destinations(root);
+  const built = await buildNarrativePlatformCandidates(plan, paths);
+  assert.equal(built.status, 'CANDIDATES_BUILT_LOCAL', built.reasonCode);
+  const entries = unzipSync(new Uint8Array(fs.readFileSync(paths.yandexZip)));
+  const css = Buffer.from(entries['assets/theme.css']).toString('utf8');
+  assert.match(css, /url\(first\/portrait\.webp\)/);
+  assert.match(css, /url\(second\/portrait\.webp\)/);
+  assert.match(css, /url\(portrait\.png\.svg\)/);
+  assert.match(css, /image-set\("first\/portrait\.webp" 1x\)/);
+  assert.match(css, /image-set\("second\/portrait\.webp" type\("image\/png"\) 1x\)/);
+  assert.doesNotMatch(css, /url\((?:first|second)\/portrait\.png\)/);
+  assert.doesNotMatch(css, /image-set\("first\/portrait\.png" 1x\)/);
+  assert.doesNotMatch(css, /image-set\("second\/portrait\.png" type/);
+  const frame = Buffer.from(entries['assets/frame.svg']).toString('utf8');
+  assert.match(frame, /href="first\/portrait\.webp"/);
+  assert.doesNotMatch(frame, /href="first\/portrait\.png"/);
+  const main = Buffer.from(entries['src/main.js']).toString('utf8');
+  assert.match(main, /\.\.?\/assets\/portraits\/\$\{[^}]+\}\.webp/);
+  assert.doesNotMatch(main, /\.\.?\/assets\/portraits\/\$\{[^}]+\}\.png/);
+  assert.match(main, /['\"]\/assets\/first\/portrait\.webp['\"]/);
+  assert.doesNotMatch(main, /['\"]\/assets\/first\/portrait\.png['\"]/);
+  assert.match(main, /['\"]alice\.webp['\"]/);
+  assert.doesNotMatch(main, /portrait:\s*['\"]alice\.png['\"]/);
+  assert.match(main, /['\"]alice\.png['\"]\s*:\s*['\"]\.\/assets\/portraits\/alice\.webp['\"]/);
+  assert.match(main, /src:\s*['\"]\.\/assets\/portraits\/alice\.webp['\"]/);
+  assert.match(main, /lookedUp\s*=\s*byFilename\[['\"]alice\.png['\"]\]/);
+  assert.match(main, /Open alice\.png in the gallery/);
+  assert.match(main, /narrativeExact\s*=\s*["']alice\.png["']/);
+  assert.match(main, /Open assets\/portraits\/alice\.png in the gallery/);
+
+  const tampered = { ...entries };
+  tampered['assets/first/portrait.webp'] = await sharp({ create: { width: 5, height: 4, channels: 4,
+    background: { r: 20, g: 220, b: 60, alpha: 1 } } }).webp({ quality: 95 }).toBuffer();
+  fs.writeFileSync(paths.yandexZip, Buffer.from(zipSync(tampered,
+    { level: 0, mtime: new Date(1980, 0, 1) })));
+  const archive = inspectYandexArchive(paths.yandexZip);
+  const paired = JSON.parse(fs.readFileSync(paths.exportReceipt, 'utf8'));
+  const candidate = paired.candidates.find(item => item.target === 'yandex-games');
+  candidate.files = archive.files;
+  candidate.archiveSha256 = archive.sha256;
+  candidate.derivedFiles = archive.files;
+  candidate.derivedProjectSha256 = sha(Buffer.from(JSON.stringify(archive.files)));
+  const derivation = candidate.assetDerivations.find(item => item.derivedPath === 'assets/first/portrait.webp');
+  const tamperedMember = archive.files.find(item => item.path === derivation.derivedPath);
+  derivation.derivedSha256 = tamperedMember.sha256;
+  derivation.derivedSize = tamperedMember.size;
+  fs.writeFileSync(paths.exportReceipt, `${JSON.stringify(paired)}\n`);
+  const buildReceipt = JSON.parse(fs.readFileSync(paths.yandexBuildReceipt, 'utf8'));
+  buildReceipt.sha256 = archive.sha256;
+  buildReceipt.files = archive.files;
+  fs.writeFileSync(paths.yandexBuildReceipt, `${JSON.stringify(buildReceipt)}\n`);
+  assert.equal((await verifyNarrativePlatformCandidates(paths, plan)).status, 'BLOCKED',
+    'updated ZIP and receipts must still fail source-derived verification');
 });
 
 test('F5b2 rejects existing outputs without overwrite or unrelated candidate files', async t => {
@@ -224,11 +367,11 @@ test('F5b2 refuses tampered ZIP, paired source digest, target or member receipt'
     const value = JSON.parse(clean);
     mutate(value);
     fs.writeFileSync(paths.exportReceipt, JSON.stringify(value));
-    assert.equal(verifyNarrativePlatformCandidates(paths, plan).status, 'BLOCKED');
+    assert.equal((await verifyNarrativePlatformCandidates(paths, plan)).status, 'BLOCKED');
   }
   fs.writeFileSync(paths.exportReceipt, clean);
   fs.appendFileSync(paths.vkZip, 'tamper');
-  assert.equal(verifyNarrativePlatformCandidates(paths, plan).status, 'BLOCKED');
+  assert.equal((await verifyNarrativePlatformCandidates(paths, plan)).status, 'BLOCKED');
 });
 
 test('F5b2 rejects stale F5b1 plans and output paths inside the author source', async t => {
@@ -302,7 +445,7 @@ test('F5b2 rejects coordinated source file and digest forgery using the trusted 
   value.sourceFiles.find(file => file.path === 'src/story.js').sha256 = 'f'.repeat(64);
   value.sourceDigest = sha(Buffer.from(JSON.stringify(value.sourceFiles)));
   fs.writeFileSync(paths.exportReceipt, JSON.stringify(value));
-  assert.equal(verifyNarrativePlatformCandidates(paths, plan).status, 'BLOCKED');
+  assert.equal((await verifyNarrativePlatformCandidates(paths, plan)).status, 'BLOCKED');
 });
 
 test('F5b2 does not create SDK ZIP in the author source after output parent becomes a symlink', async t => {

@@ -133,7 +133,7 @@ async function playAuthoredStory(page, target, device) {
 }
 
 export async function runNarrativeCandidate(fixture, entry, target) {
-  fixture.assertVerified();
+  await fixture.assertVerified();
   const server = await fixture.serve(target);
   let browser;
   let context;
@@ -171,7 +171,7 @@ export async function runNarrativeCandidate(fixture, entry, target) {
     }
     assert.deepEqual(browserErrors, [], 'runtime generated uncaught browser errors');
     assert.deepEqual(external, [], 'browser attempted to request a non-local resource');
-    fixture.assertVerified();
+    await fixture.assertVerified();
     return {
       target, browser: entry.browser, device: entry.device, viewport: entry.options.viewport,
       status: 'PASS', archiveSha256: fixture.candidates[target].archiveSha256,
@@ -285,7 +285,7 @@ export async function runAdverseCandidate(fixture, target, mode) {
     }
     assert.deepEqual(external, [], `${target}/${mode} requested external network`);
     assert.deepEqual(errors, [], `${target}/${mode} had an unhandled page error`);
-    fixture.assertVerified();
+    await fixture.assertVerified();
     return { target, browser: 'chromium', device: 'desktop', scenario: mode, status: 'PASS',
       archiveSha256: fixture.candidates[target].archiveSha256, sourceDigest: fixture.sourceDigest,
       externalRequests: external.length, mockSdkOnly: true };

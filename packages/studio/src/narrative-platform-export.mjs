@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
+import sharp from 'sharp';
 import { canonicalPhysicalDirectory } from '@ludory/core';
 import { verifyStudioOrigin, assertComponentTrust, hostTrustDigest } from '@ludory/studio-trust';
 import { readRegular } from './profile-state.mjs';
@@ -97,6 +98,7 @@ export function materializeNarrativePlatformSource(plan) {
 }
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+const platformWebpQuality = 95;
 const mediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2', '.ttf', '.css']);
 const targetSpecs = Object.freeze({
   yandex: { target: 'yandex-games', template: 'yandex-runtime' },
@@ -169,6 +171,295 @@ function scanDerivedFiles(root, relative = '') {
     } else throw new Error(`F5B_DERIVED_SPECIAL_FILE: ${local}`);
   }
   return found;
+}
+
+const textResourceExtensions = new Set(['.css', '.html', '.js', '.json', '.mjs', '.svg']);
+
+function isTextResource(filename) {
+  return textResourceExtensions.has(path.posix.extname(filename).toLowerCase());
+}
+
+function assertPlatformWebpSource(file, root) {
+  const filename = path.join(root, file.path);
+  const stat = fs.lstatSync(filename);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`F5B_PLATFORM_IMAGE_UNSAFE: ${file.path}`);
+  const bytes = fs.readFileSync(filename);
+  if (bytes.length !== file.size || sha(bytes) !== file.sha256) {
+    throw new Error(`F5B_PLATFORM_IMAGE_SOURCE_CHANGED: ${file.path}`);
+  }
+  return bytes;
+}
+
+function rewriteCssImageReferences(text, filePath, imagePathMap) {
+  const rewrite = (full, quote, specifier) => {
+      const split = specifier.match(/^([^?#]*)([?#].*)?$/);
+      const clean = split?.[1] ?? specifier;
+      const suffix = split?.[2] ?? '';
+      let decoded;
+      try { decoded = decodeURIComponent(clean); }
+      catch { throw new Error(`F5B_CSS_DEPENDENCY_UNSAFE: ${filePath} -> ${specifier}`); }
+      if (!decoded || decoded.startsWith('#') || /^(?:https?:|data:|blob:|\/\/)/i.test(decoded) ||
+          decoded.includes('\\') || decoded.includes('\0') || /[\x00-\x1f\x7f]/.test(decoded)) return full;
+      const resolved = path.posix.normalize(decoded.startsWith('/')
+        ? decoded.slice(1) : path.posix.join(path.posix.dirname(filePath), decoded));
+      const replacement = imagePathMap.get(resolved);
+      if (!replacement) return full;
+      const relative = path.posix.relative(path.posix.dirname(filePath), replacement) ||
+        path.posix.basename(replacement);
+      return full.replace(specifier, `${relative}${suffix}`);
+    };
+  const rewritten = text
+    .replace(/\burl\s*\(\s*(['"]?)([^)'"\s]+)\1\s*\)/gi, rewrite)
+    .replace(/@import\s+(['"])([^'"\r\n]+)\1/gi, rewrite);
+  const imageSet = /\b(?:-webkit-)?image-set\s*\(/gi;
+  let output = '';
+  let cursor = 0;
+  let match;
+  while ((match = imageSet.exec(rewritten))) {
+    let depth = 1;
+    let quote = null;
+    let escaped = false;
+    let end = imageSet.lastIndex;
+    for (; end < rewritten.length; end += 1) {
+      const character = rewritten[end];
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (character === '\\') escaped = true;
+        else if (character === quote) quote = null;
+      } else if (character === '"' || character === "'") quote = character;
+      else if (character === '(') depth += 1;
+      else if (character === ')' && --depth === 0) break;
+    }
+    if (depth !== 0 || quote) throw new Error(`F5B_CSS_IMAGE_SET_UNSAFE: ${filePath}`);
+    const contentsStart = imageSet.lastIndex;
+    const contents = rewritten.slice(contentsStart, end);
+    const replacedContents = contents.replace(/(['"])([^'"]+)\1/g,
+      (candidate, quoteMark, specifier) => rewrite(candidate, quoteMark, specifier));
+    output += rewritten.slice(cursor, contentsStart) + replacedContents + ')';
+    cursor = end + 1;
+    imageSet.lastIndex = cursor;
+  }
+  return output + rewritten.slice(cursor);
+}
+
+function rewriteSvgImageReferences(text, filePath, imagePathMap) {
+  return text.replace(/\b(?:href|xlink:href)\s*=\s*(['"])([^'"]+)\1/gi,
+    (full, quote, specifier) => {
+      const split = specifier.match(/^([^?#]*)([?#].*)?$/);
+      const clean = split?.[1] ?? specifier;
+      const suffix = split?.[2] ?? '';
+      let decoded;
+      try { decoded = decodeURIComponent(clean); }
+      catch { throw new Error(`F5B_SVG_DEPENDENCY_UNSAFE: ${filePath} -> ${specifier}`); }
+      if (!decoded || decoded.startsWith('#') || /^(?:https?:|data:|blob:|\/\/)/i.test(decoded) ||
+          decoded.includes('\\') || decoded.includes('\0') || /[\x00-\x1f\x7f]/.test(decoded)) return full;
+      const resolved = path.posix.normalize(decoded.startsWith('/')
+        ? decoded.slice(1) : path.posix.join(path.posix.dirname(filePath), decoded));
+      const replacement = imagePathMap.get(resolved);
+      if (!replacement) return full;
+      const relative = path.posix.relative(path.posix.dirname(filePath), replacement) ||
+        path.posix.basename(replacement);
+      return full.replace(specifier, `${relative}${suffix}`);
+    });
+}
+
+function rewritePlatformFullImageReferences(text, replacements) {
+  let rewritten = text;
+  const quoted = /(["'\x60])([^"'\x60]+)\1/g;
+  for (const [from, to] of replacements) {
+    const variants = from.startsWith('assets/')
+      ? [from, `./${from}`, `../${from}`, `/${from}`]
+      : [from];
+    for (const variant of variants) {
+      const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const replacement = `${variant.slice(0, -from.length)}${to}`;
+      const quote = '(["\\x27\\x60])';
+      const suffix = '([?#][^"\\x27\\x60]*)?';
+      rewritten = rewritten.replace(new RegExp(`${quote}${escaped}${suffix}\\1`, 'g'),
+        (full, quoteMark, query = '') => `${quoteMark}${replacement}${query}${quoteMark}`);
+    }
+    rewritten = rewritten.replace(quoted, (full, quoteMark, specifier) => {
+      const split = specifier.match(/^([^?#]*)([?#].*)?$/);
+      const clean = split?.[1] ?? specifier;
+      const suffix = split?.[2] ?? '';
+      if (/%2f|%5c|(?:^|\/)%2e(?:%2e)?(?=\/|$)/i.test(clean)) return full;
+      let decoded;
+      try { decoded = decodeURIComponent(clean); }
+      catch { return full; }
+      const variant = variants.find(item => item === decoded);
+      if (!variant) return full;
+      const replacement = `${variant.slice(0, -from.length)}${to}${suffix}`;
+      return `${quoteMark}${replacement}${quoteMark}`;
+    });
+  }
+  return rewritten;
+}
+
+function rewritePlatformBareImageReferences(text, basenameReplacements) {
+  let rewritten = text;
+  for (const [from, to] of basenameReplacements) {
+    const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const quote = '(["\\x27\\x60])';
+    const suffix = '([?#][^"\\x27\\x60]*)?';
+    rewritten = rewritten.replace(new RegExp(`${quote}${escaped}${suffix}\\1(?=\\s*:\\s*Object\\.freeze\\s*\\()`, 'g'),
+      (full, quoteMark, query = '') => `${quoteMark}${to}${query}${quoteMark}`);
+    rewritten = rewritten.replace(new RegExp(`(\\b(?:portrait|background|src|href|path|file|url|image|media|asset|cover|icon|photo|desktop|mobile)(?:[A-Z][A-Za-z0-9]*)?\\s*:\\s*)${quote}${escaped}${suffix}\\2`, 'g'),
+      (full, prefix, quoteMark, query = '') => `${prefix}${quoteMark}${to}${query}${quoteMark}`);
+    rewritten = rewritten.replace(new RegExp(`(\\bnew\\s+URL\\s*\\(\\s*)${quote}${escaped}${suffix}\\2`, 'g'),
+      (full, prefix, quoteMark, query = '') => `${prefix}${quoteMark}${to}${query}${quoteMark}`);
+  }
+  return rewritten;
+}
+
+function hasPlatformPngReference(text, resourcePath) {
+  const variants = resourcePath.startsWith('assets/')
+    ? [resourcePath, `./${resourcePath}`, `../${resourcePath}`, `/${resourcePath}`]
+    : [resourcePath];
+  const bare = !resourcePath.startsWith('assets/');
+  for (const variant of variants) {
+    const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const exactQuoted = new RegExp(`(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1`);
+    const url = new RegExp(`\\burl\\s*\\(\\s*(["']?)${escaped}(?:[?#][^)'"\\s]*)?\\1\\s*\\)`, 'i');
+    const objectKey = new RegExp(`(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1\\s*:\\s*Object\\.freeze\\s*\\(`);
+    const namedProperty = new RegExp(`\\b(?:portrait|background|src|href|path|file|url|image|media|asset|cover|icon|photo|desktop|mobile)(?:[A-Z][A-Za-z0-9]*)?\\s*:\\s*(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1`);
+    const newUrl = new RegExp(`\\bnew\\s+URL\\s*\\(\\s*(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1`);
+    if (url.test(text) || (!bare && exactQuoted.test(text)) ||
+        (bare && (objectKey.test(text) || namedProperty.test(text) || newUrl.test(text)))) {
+      return true;
+    }
+  }
+  const quoted = /(["'\x60])([^"'\x60]+)\1/g;
+  let match;
+  while ((match = quoted.exec(text))) {
+    const specifier = match[2];
+    const split = specifier.match(/^([^?#]*)([?#].*)?$/);
+    const clean = split?.[1] ?? specifier;
+    if (/%2f|%5c|(?:^|\/)%2e(?:%2e)?(?=\/|$)/i.test(clean)) continue;
+    let decoded;
+    try { decoded = decodeURIComponent(clean); }
+    catch { continue; }
+    if (!variants.includes(decoded)) continue;
+    if (!bare) return true;
+    const before = text.slice(Math.max(0, match.index - 120), match.index);
+    const after = text.slice(match.index + match[0].length, match.index + match[0].length + 80);
+    if (/\b(?:portrait|background|src|href|path|file|url|image|media|asset|cover|icon|photo|desktop|mobile)(?:[A-Z][A-Za-z0-9]*)?\s*:\s*$/.test(before) ||
+        /\bnew\s+URL\s*\(\s*$/.test(before) ||
+        /^\s*:\s*Object\.freeze\s*\(/.test(after)) return true;
+  }
+  return false;
+}
+
+function rewritePlatformDynamicImageReferences(text, filePath, imageDirectories) {
+  const ownerDirectory = path.posix.dirname(filePath);
+  let rewritten = text;
+  for (const directory of imageDirectories) {
+    const relative = path.posix.relative(ownerDirectory, directory);
+    const prefixes = new Set([directory, `./${directory}`]);
+    if (relative && relative !== '.') prefixes.add(relative);
+    if (relative && !relative.startsWith('./')) prefixes.add(`./${relative}`);
+    for (const prefix of prefixes) {
+      const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(`(^|[^A-Za-z0-9._/-])${escaped}/(\\$\\{[^}]*\\})\\.png(?=$|[^A-Za-z0-9._-])`, 'g');
+      rewritten = rewritten.replace(pattern, (full, boundary, expression) =>
+        `${boundary}${prefix}/${expression}.webp`);
+    }
+  }
+  return rewritten;
+}
+
+function rewritePlatformImageReferences(root, replacements, imagePathMap, imageDirectories, basenameReplacements) {
+  for (const file of scanDerivedFiles(root)) {
+    if (!isTextResource(file.path)) continue;
+    const filename = path.join(root, file.path);
+    let text = fs.readFileSync(filename, 'utf8');
+    const original = text;
+    if (path.posix.extname(file.path).toLowerCase() === '.css') {
+      text = rewriteCssImageReferences(text, file.path, imagePathMap);
+    }
+    if (path.posix.extname(file.path).toLowerCase() === '.svg') {
+      text = rewriteSvgImageReferences(text, file.path, imagePathMap);
+    }
+    text = rewritePlatformDynamicImageReferences(text, file.path, imageDirectories);
+    text = rewritePlatformFullImageReferences(text, replacements);
+    text = rewritePlatformBareImageReferences(text, basenameReplacements);
+    if (text !== original) fs.writeFileSync(filename, text);
+  }
+}
+
+async function materializePlatformWebp(project) {
+  const pngs = project.files.filter(file => file.path.startsWith('assets/') &&
+    path.posix.extname(file.path).toLowerCase() === '.png');
+  const targetPaths = new Set(project.files.map(file => file.path));
+  const derivations = [];
+  const replacements = [];
+  const imagePathMap = new Map();
+  const imageDirectories = new Set(pngs.map(file => path.posix.dirname(file.path)));
+  const basenameCounts = new Map();
+  for (const source of pngs) {
+    const basename = path.posix.basename(source.path);
+    basenameCounts.set(basename, (basenameCounts.get(basename) ?? 0) + 1);
+  }
+  const basenameReplacements = new Map([...basenameCounts]
+    .filter(([, count]) => count === 1)
+    .map(([basename]) => [basename, basename.replace(/\.png$/i, '.webp')]));
+  for (const source of pngs) {
+    const derivedPath = source.path.replace(/\.png$/i, '.webp');
+    if (targetPaths.has(derivedPath)) throw new Error(`F5B_PLATFORM_WEBP_COLLISION: ${derivedPath}`);
+    const sourceBytes = assertPlatformWebpSource(source, project.root);
+    const metadata = await sharp(sourceBytes, { failOn: 'error', limitInputPixels: 64 * 1024 * 1024 }).metadata();
+    const derivedBytes = await sharp(sourceBytes, { failOn: 'error', limitInputPixels: 64 * 1024 * 1024 })
+      .webp({ quality: platformWebpQuality, effort: 6 }).toBuffer();
+    const output = path.join(project.root, derivedPath);
+    fs.mkdirSync(path.dirname(output), { recursive: true });
+    fs.writeFileSync(output, derivedBytes, { flag: 'wx' });
+    derivations.push({ sourcePath: source.path, derivedPath, sourceSha256: source.sha256,
+      sourceSize: source.size, derivedSha256: sha(derivedBytes), derivedSize: derivedBytes.length,
+      width: metadata.width, height: metadata.height, quality: platformWebpQuality });
+    imagePathMap.set(source.path, derivedPath);
+    replacements.push([source.path, derivedPath]);
+  }
+  rewritePlatformImageReferences(project.root, replacements, imagePathMap, imageDirectories, basenameReplacements);
+  for (const source of pngs) fs.unlinkSync(path.join(project.root, source.path));
+  const files = scanDerivedFiles(project.root);
+  if (files.some(file => file.path.startsWith('assets/') &&
+      path.posix.extname(file.path).toLowerCase() === '.png')) {
+    throw new Error('F5B_PLATFORM_PNG_RETAINED');
+  }
+  for (const source of pngs) {
+    const basename = path.posix.basename(source.path);
+    const textFiles = files.filter(file => isTextResource(file.path));
+    if (files.some(file => file.path.endsWith(`/${basename}`) || file.path === basename) ||
+        textFiles.some(file => {
+          const text = fs.readFileSync(path.join(project.root, file.path), 'utf8');
+          return hasPlatformPngReference(text, source.path) || hasPlatformPngReference(text, basename);
+        })) {
+      throw new Error(`F5B_PLATFORM_PNG_REFERENCE_RETAINED: ${basename}`);
+    }
+  }
+  return { files, sha256: sha(Buffer.from(JSON.stringify(files))), assetDerivations: derivations };
+}
+
+async function materializeNarrativePlatformPlatformExport(plan) {
+  const derived = materializeNarrativePlatformProjects(plan);
+  if (derived.status !== 'DERIVED_LOCAL') return derived;
+  try {
+    await optimizeNarrativePlatformProjects(derived);
+    return derived;
+  } catch (error) {
+    derived.cleanup();
+    return { ...blocked(plan?.project ?? null, error.message || 'F5B_PLATFORM_WEBP_FAILED'),
+      releaseReady: false, publicationAllowed: false };
+  }
+}
+
+async function optimizeNarrativePlatformProjects(derived) {
+  for (const project of Object.values(derived.projects)) {
+    const optimized = await materializePlatformWebp(project);
+    project.files = optimized.files;
+    project.sha256 = optimized.sha256;
+    project.assetDerivations = optimized.assetDerivations;
+  }
+  return derived;
 }
 
 function ownedCleanup(directory) {
@@ -255,7 +546,8 @@ export function materializeNarrativePlatformProjects(plan) {
         throw new Error(`F5B_TARGET_ORIGIN_${origin.code}`);
       }
       const files = scanDerivedFiles(root);
-      projects[key] = { root, target: spec.target, files, sha256: sha(Buffer.from(JSON.stringify(files))) };
+      projects[key] = { root, target: spec.target, files, sha256: sha(Buffer.from(JSON.stringify(files))),
+        assetDerivations: [] };
     }
     return { mode, status: 'DERIVED_LOCAL', sourceDigest: pin.sourceDigest, projects,
       cleanup, releaseReady: false, publicationAllowed: false };
@@ -364,15 +656,54 @@ function readReceipt(filename) {
   return JSON.parse(readRegularBytes(filename, 1024 * 1024).toString('utf8'));
 }
 
+function assertPlatformWebpDerivations(sourcePlan, assetDerivations, derivedFiles, archiveFiles) {
+  const sourcePngs = sourcePlan.files.filter(file => file.path.startsWith('assets/') &&
+    path.posix.extname(file.path).toLowerCase() === '.png');
+  if (!Array.isArray(assetDerivations) || assetDerivations.length !== sourcePngs.length) {
+    throw new Error('F5B_PLATFORM_WEBP_DERIVATION_LIST_INVALID');
+  }
+  const sources = new Map(sourcePngs.map(file => [file.path, file]));
+  const derived = new Map(derivedFiles.map(file => [file.path, file]));
+  const seenSources = new Set();
+  const seenDerived = new Set();
+  for (const item of assetDerivations) {
+    if (!exact(item, ['sourcePath', 'derivedPath', 'sourceSha256', 'sourceSize',
+      'derivedSha256', 'derivedSize', 'width', 'height', 'quality']) ||
+        typeof item.sourcePath !== 'string' || typeof item.derivedPath !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(item.sourceSha256) || !Number.isSafeInteger(item.sourceSize) ||
+        !/^[a-f0-9]{64}$/.test(item.derivedSha256) || !Number.isSafeInteger(item.derivedSize) ||
+        !Number.isSafeInteger(item.width) || item.width < 1 || !Number.isSafeInteger(item.height) || item.height < 1 ||
+        item.quality !== platformWebpQuality || seenSources.has(item.sourcePath) || seenDerived.has(item.derivedPath)) {
+      throw new Error('F5B_PLATFORM_WEBP_DERIVATION_INVALID');
+    }
+    const source = sources.get(item.sourcePath);
+    const outputPath = item.sourcePath.replace(/\.png$/i, '.webp');
+    const output = derived.get(item.derivedPath);
+    const archived = new Map(archiveFiles.map(file => [file.path, file])).get(item.derivedPath);
+    if (!source || item.derivedPath !== outputPath || !output || !archived ||
+        item.sourceSha256 !== source.sha256 || item.sourceSize !== source.size ||
+        item.derivedSha256 !== output.sha256 || item.derivedSize !== output.size ||
+        archived.sha256 !== output.sha256 || archived.size !== output.size ||
+        path.posix.extname(item.derivedPath).toLowerCase() !== '.webp') {
+      throw new Error('F5B_PLATFORM_WEBP_DERIVATION_MISMATCH');
+    }
+    seenSources.add(item.sourcePath);
+    seenDerived.add(item.derivedPath);
+  }
+  if (seenSources.size !== sources.size || seenDerived.size !== assetDerivations.length ||
+      derivedFiles.some(file => file.path.startsWith('assets/') &&
+        path.posix.extname(file.path).toLowerCase() === '.png')) {
+      throw new Error('F5B_PLATFORM_WEBP_SOURCE_RETAINED');
+  }
+}
+
 /** Re-check stored ZIP/member bytes against a live host-trusted F5b1 plan. */
-export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
+export async function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
   let rederived;
   let result;
   try {
     const issued = sourcePlan && typeof sourcePlan === 'object' ? issuedPlans.get(sourcePlan) : null;
     if (!issued || shape(sourcePlan) !== issued.shape) throw new Error('F5B_TRUSTED_SOURCE_PLAN_REQUIRED');
-    rederived = materializeNarrativePlatformProjects(sourcePlan);
-    if (rederived.status !== 'DERIVED_LOCAL') throw new Error(rederived.reasonCode || 'F5B_SOURCE_REDERIVATION_FAILED');
     const linked = readReceipt(paths.exportReceipt);
     if (!exact(linked, ['schemaVersion', 'sourceDigest', 'sourceFiles', 'candidates']) ||
         linked.schemaVersion !== 1 || !Array.isArray(linked.candidates) || linked.candidates.length !== 2) {
@@ -386,13 +717,28 @@ export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
         JSON.stringify(linked.sourceFiles) !== JSON.stringify(sourcePlan.files)) {
       throw new Error('F5B_SOURCE_BINDING_MISMATCH');
     }
+    const optimized = linked.candidates.some(candidate => Array.isArray(candidate.assetDerivations) &&
+      candidate.assetDerivations.length > 0);
+    if (sourcePlan.files.some(file => file.path.startsWith('assets/') &&
+        path.posix.extname(file.path).toLowerCase() === '.png') && !optimized) {
+      throw new Error('F5B_PLATFORM_WEBP_REQUIRED');
+    }
+    if (!optimized) {
+      rederived = materializeNarrativePlatformProjects(sourcePlan);
+      if (rederived.status !== 'DERIVED_LOCAL') throw new Error(rederived.reasonCode || 'F5B_SOURCE_REDERIVATION_FAILED');
+    } else {
+      rederived = materializeNarrativePlatformProjects(sourcePlan);
+      if (rederived.status !== 'DERIVED_LOCAL') throw new Error(rederived.reasonCode || 'F5B_SOURCE_REDERIVATION_FAILED');
+      await optimizeNarrativePlatformProjects(rederived);
+    }
     for (const [index, key] of ['yandex', 'vk'].entries()) {
       const candidate = linked.candidates[index];
       const target = targetSpecs[key].target;
       const archivePath = path.resolve(paths[`${key}Zip`]);
       const receipt = readReceipt(paths[`${key}BuildReceipt`]);
       const archived = key === 'yandex' ? inspectYandexArchive(archivePath) : inspectVkArchive(archivePath);
-      if (!exact(candidate, ['target', 'derivedProjectSha256', 'derivedFiles', 'archivePath', 'archiveSha256', 'files']) ||
+      if (!exact(candidate, ['target', 'derivedProjectSha256', 'derivedFiles', 'assetDerivations',
+        'archivePath', 'archiveSha256', 'files']) ||
           !exact(receipt, ['archivePath', 'sha256', 'files']) ||
           candidate.target !== target || candidate.archivePath !== archivePath ||
           receipt.archivePath !== archivePath || candidate.archiveSha256 !== archived.sha256 ||
@@ -403,10 +749,19 @@ export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
       if (sha(Buffer.from(JSON.stringify(candidate.derivedFiles))) !== candidate.derivedProjectSha256) {
         throw new Error('F5B_DERIVED_HASH_MISMATCH');
       }
-      if (candidate.derivedProjectSha256 !== rederived.projects[key].sha256) {
+      if (!optimized && candidate.derivedProjectSha256 !== rederived.projects[key].sha256) {
         throw new Error('F5B_DERIVED_SOURCE_BINDING_MISMATCH');
       }
-      sameFiles(candidate.derivedFiles, rederived.projects[key].files);
+      if (optimized) {
+        assertPlatformWebpDerivations(sourcePlan, candidate.assetDerivations,
+          candidate.derivedFiles, archived.files);
+        if (candidate.derivedProjectSha256 !== rederived.projects[key].sha256) {
+          throw new Error('F5B_DERIVED_SOURCE_BINDING_MISMATCH');
+        }
+        sameFiles(candidate.derivedFiles, rederived.projects[key].files);
+      } else {
+        sameFiles(candidate.derivedFiles, rederived.projects[key].files);
+      }
       const derived = new Map(candidate.derivedFiles.map(file => [file.path, file]));
       for (const file of archived.files) {
         const original = derived.get(file.path);
@@ -430,7 +785,7 @@ export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
 
 /** Create two exclusive target ZIPs and external receipts from one authenticated F5b1 plan. */
 export async function buildNarrativePlatformCandidates(plan, paths = {}) {
-  const derived = materializeNarrativePlatformProjects(plan);
+  const derived = await materializeNarrativePlatformPlatformExport(plan);
   if (derived.status !== 'DERIVED_LOCAL') return { ...derived, partialOutputs: [],
     releaseReady: false, publicationAllowed: false };
   const partialOutputs = [];
@@ -458,14 +813,16 @@ export async function buildNarrativePlatformCandidates(plan, paths = {}) {
       sourceDigest: derived.sourceDigest, sourceFiles: plan.files,
       candidates: [
         { target: 'yandex-games', derivedProjectSha256: derived.projects.yandex.sha256,
-          derivedFiles: derived.projects.yandex.files, archivePath: outputs.yandexZip,
+          derivedFiles: derived.projects.yandex.files, assetDerivations: derived.projects.yandex.assetDerivations,
+          archivePath: outputs.yandexZip,
           archiveSha256: yandex.sha256, files: yandex.files },
         { target: 'vk-games', derivedProjectSha256: derived.projects.vk.sha256,
-          derivedFiles: derived.projects.vk.files, archivePath: outputs.vkZip,
+          derivedFiles: derived.projects.vk.files, assetDerivations: derived.projects.vk.assetDerivations,
+          archivePath: outputs.vkZip,
           archiveSha256: vk.sha256, files: vk.files },
       ],
     }, partialOutputs, outputs._parentPins.exportReceipt);
-    const verified = verifyNarrativePlatformCandidates(outputs, plan);
+    const verified = await verifyNarrativePlatformCandidates(outputs, plan);
     if (verified.status !== 'LOCAL_ARCHIVES_VERIFIED' || verified.sourceDigest !== derived.sourceDigest) {
       throw new Error(verified.reasonCode ?? 'F5B_PAIR_VERIFICATION_FAILED');
     }

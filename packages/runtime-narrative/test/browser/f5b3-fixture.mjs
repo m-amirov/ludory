@@ -215,7 +215,7 @@ export async function createF5b3Fixture() {
     ].map(([key, name]) => [key, path.join(root, name)]));
     const result = await buildNarrativePlatformCandidates(sourcePlan, outputs);
     if (result.status !== 'CANDIDATES_BUILT_LOCAL') throw new Error(result.reasonCode ?? result.status);
-    const verification = verifyNarrativePlatformCandidates(outputs, sourcePlan);
+    const verification = await verifyNarrativePlatformCandidates(outputs, sourcePlan);
     if (verification.status !== 'LOCAL_ARCHIVES_VERIFIED') throw new Error(verification.reasonCode);
     const trustedMembers = {};
     const candidates = Object.fromEntries([['yandex', inspectYandexArchive], ['vk', inspectVkArchive]]
@@ -227,8 +227,8 @@ export async function createF5b3Fixture() {
           entries: unzipSync(new Uint8Array(fs.readFileSync(outputs[`${key}Zip`]))),
         }];
       }));
-    const assertVerified = () => {
-      if (verifyNarrativePlatformCandidates(outputs, sourcePlan).status !== 'LOCAL_ARCHIVES_VERIFIED') {
+    const assertVerified = async () => {
+      if ((await verifyNarrativePlatformCandidates(outputs, sourcePlan)).status !== 'LOCAL_ARCHIVES_VERIFIED') {
         throw new Error('F5B3_SOURCE_OR_ARCHIVE_CHANGED');
       }
       for (const [key, candidate] of Object.entries(candidates)) {
@@ -245,7 +245,7 @@ export async function createF5b3Fixture() {
       assertVerified,
       async serve(target, options) {
         if (!Object.hasOwn(candidates, target)) throw new Error('F5B3_INVALID_TARGET');
-        assertVerified();
+        await assertVerified();
         const server = await serveZip(candidates[target], target, trustedMembers[target], options);
         servers.push(server);
         return server;

@@ -21,7 +21,7 @@ export const isStudioComponentPath = filename => {
 /** Author content may be replaced by a game author, but bootstrap/runtime files must stay managed. */
 export const isStudioAuthorPath = filename => filename === 'src/story.js' ||
   filename === 'narrative-assets.json' ||
-  /^assets\/[A-Za-z0-9._-]+\.(?:svg|png|webp|jpg|jpeg|ogg|mp3|wav|woff2)$/i.test(filename);
+  /^assets\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.(?:svg|png|webp|jpg|jpeg|ogg|mp3|wav|woff2)$/i.test(filename);
 const digest = value => crypto.createHash('sha256').update(value).digest('hex');
 
 function exactKeys(obj, fields, label) {
@@ -135,7 +135,7 @@ export function validateNarrativeAuthorProof(assets, { templateId } = {}) {
     token(id, 'narrative asset ID');
     exactKeys(image, ['path', 'sha256'], `narrative image ${id}`);
     const filename = safeFileName(image.path);
-    if (!/^assets\/[a-z0-9_-]+\.(?:svg|png|webp|jpg|jpeg)$/.test(filename)) {
+    if (!/^assets\/(?:[a-z0-9._-]+\/)*[a-z0-9._-]+\.(?:svg|png|webp|jpg|jpeg)$/.test(filename)) {
       throw new Error(`Narrative image path is unsafe: ${filename}`);
     }
     if (!assets.has(filename) || assets.get(filename).sha256 !== image.sha256) {
