@@ -12,7 +12,7 @@ const publicExt = new Set([
 ]);
 const maxFiles = 10_000;
 const maxFileSize = 25 * 1024 * 1024;
-const maxBytes = 150 * 1024 * 1024;
+const maxBytes = 160 * 1024 * 1024;
 const privateName = name => !name || name.startsWith('.') || name.endsWith('~') ||
   /[\\:\0]/.test(name) || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name);
 

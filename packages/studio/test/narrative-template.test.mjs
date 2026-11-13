@@ -136,6 +136,37 @@ test('narrative preview refuses missing asset proof and unproved visual files', 
   assert.equal(planPreviewBuild(dir).status, 'READY');
 });
 
+test('narrative preview accepts the 160 MiB source limit and blocks the first byte above it', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-preview-limit-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.equal(applyCreatePlan(planCreate(dir, { id: 'preview-limit', title: 'Limit', lang: 'ru',
+    profile: 'narrative-game', template: 'narrative-interactive', targets: ['yandex-games', 'vk-games'] })).status,
+  'APPLIED');
+
+  const baseline = planPreviewBuild(dir);
+  assert.equal(baseline.status, 'READY', baseline.reasonCode);
+  const maxBytes = 160 * 1024 * 1024;
+  const baselineBytes = baseline.files.reduce((total, file) => total + file.size, 0);
+  let remaining = maxBytes - baselineBytes;
+  let index = 0;
+  const padding = [];
+  while (remaining > 0) {
+    const size = Math.min(24 * 1024 * 1024, remaining);
+    const filename = path.join(dir, 'src', `preview-limit-padding-${index}.js`);
+    fs.writeFileSync(filename, Buffer.alloc(size));
+    padding.push(filename);
+    remaining -= size;
+    index += 1;
+  }
+
+  const atLimit = planPreviewBuild(dir);
+  assert.equal(atLimit.status, 'READY', atLimit.reasonCode);
+  fs.appendFileSync(padding.at(-1), Buffer.from([0]));
+  const aboveLimit = planPreviewBuild(dir);
+  assert.equal(aboveLimit.status, 'BLOCKED');
+  assert.equal(aboveLimit.reasonCode, 'PREVIEW_SOURCE_TOO_LARGE');
+});
+
 test('story validates as a canonical graph with complete authored delayed echoes and local images', () => {
   const result = verifyStoryAssets({ templateDir: originalTemplate, graphData, catalogData, assets });
   assert.ok(result.assetIds.includes('lighthouse'));
