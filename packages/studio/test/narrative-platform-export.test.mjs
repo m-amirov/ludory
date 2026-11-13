@@ -261,7 +261,8 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
     '<svg xmlns="http://www.w3.org/2000/svg"><image href="first/portrait.png" /></svg>\n');
   fs.writeFileSync(path.join(project, 'assets', 'theme.css'),
     '.first{background-image:url(first/portrait.png)}.second{background-image:url(second/portrait.png)}' +
-    '.svg{background-image:url(portrait.png.svg)}\n');
+    '.svg{background-image:url(portrait.png.svg)}' +
+    '.set{background-image:image-set("first/portrait.png" 1x)}\n');
   const proofFile = path.join(project, 'narrative-assets.json');
   const proof = JSON.parse(fs.readFileSync(proofFile, 'utf8'));
   proof.assets.first_portrait = { path: 'assets/first/portrait.png', sha256: sha(first) };
@@ -287,7 +288,9 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   assert.match(css, /url\(first\/portrait\.webp\)/);
   assert.match(css, /url\(second\/portrait\.webp\)/);
   assert.match(css, /url\(portrait\.png\.svg\)/);
+  assert.match(css, /image-set\("first\/portrait\.webp" 1x\)/);
   assert.doesNotMatch(css, /url\((?:first|second)\/portrait\.png\)/);
+  assert.doesNotMatch(css, /image-set\("first\/portrait\.png" 1x\)/);
   const frame = Buffer.from(entries['assets/frame.svg']).toString('utf8');
   assert.match(frame, /href="first\/portrait\.webp"/);
   assert.doesNotMatch(frame, /href="first\/portrait\.png"/);

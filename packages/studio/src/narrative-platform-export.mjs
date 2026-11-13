@@ -191,8 +191,7 @@ function assertPlatformWebpSource(file, root) {
 }
 
 function rewriteCssImageReferences(text, filePath, imagePathMap) {
-  return text.replace(/\burl\s*\(\s*(['"]?)([^)'"\s]+)\1\s*\)/gi,
-    (full, quote, specifier) => {
+  const rewrite = (full, quote, specifier) => {
       const split = specifier.match(/^([^?#]*)([?#].*)?$/);
       const clean = split?.[1] ?? specifier;
       const suffix = split?.[2] ?? '';
@@ -208,7 +207,14 @@ function rewriteCssImageReferences(text, filePath, imagePathMap) {
       const relative = path.posix.relative(path.posix.dirname(filePath), replacement) ||
         path.posix.basename(replacement);
       return full.replace(specifier, `${relative}${suffix}`);
-    });
+    };
+  return text
+    .replace(/\burl\s*\(\s*(['"]?)([^)'"\s]+)\1\s*\)/gi, rewrite)
+    .replace(/@import\s+(['"])([^'"\r\n]+)\1/gi, rewrite)
+    .replace(/\b(?:-webkit-)?image-set\s*\(([^()]*)\)/gi,
+      (full, contents) => full.replace(contents,
+        contents.replace(/(['"])([^'"]+)\1/g, (candidate, quote, specifier) =>
+          rewrite(candidate, quote, specifier))));
 }
 
 function rewriteSvgImageReferences(text, filePath, imagePathMap) {
