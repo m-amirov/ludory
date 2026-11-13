@@ -245,8 +245,14 @@ function rewritePlatformBareImageReferences(text, basenameReplacements) {
   let rewritten = text;
   for (const [from, to] of basenameReplacements) {
     const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    rewritten = rewritten.replace(new RegExp(`(["'\\x60])${escaped}([?#][^"'\\x60]*)?\\1`, 'g'),
-      (full, quote, suffix = '') => `${quote}${to}${suffix}${quote}`);
+    const quote = '(["\\x27\\x60])';
+    const suffix = '([?#][^"\\x27\\x60]*)?';
+    rewritten = rewritten.replace(new RegExp(`${quote}${escaped}${suffix}\\1(?=\\s*:)`, 'g'),
+      (full, quoteMark, query = '') => `${quoteMark}${to}${query}${quoteMark}`);
+    rewritten = rewritten.replace(new RegExp(`(\\b(?:portrait|background|src|href|path|file|url|image|media|asset|cover|icon|photo|desktop|mobile)(?:[A-Z][A-Za-z0-9]*)?\\s*:\\s*)${quote}${escaped}${suffix}\\2`, 'g'),
+      (full, prefix, quoteMark, query = '') => `${prefix}${quoteMark}${to}${query}${quoteMark}`);
+    rewritten = rewritten.replace(new RegExp(`(\\bnew\\s+URL\\s*\\(\\s*)${quote}${escaped}${suffix}\\2`, 'g'),
+      (full, prefix, quoteMark, query = '') => `${prefix}${quoteMark}${to}${query}${quoteMark}`);
   }
   return rewritten;
 }
@@ -257,8 +263,14 @@ function hasPlatformPngReference(text, resourcePath) {
     : [resourcePath];
   for (const variant of variants) {
     const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (new RegExp(`(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1`).test(text) ||
-        new RegExp(`\\burl\\s*\\(\\s*(["']?)${escaped}(?:[?#][^)'"\\s]*)?\\1\\s*\\)`, 'i').test(text)) {
+    const bare = !resourcePath.startsWith('assets/');
+    const exactQuoted = new RegExp(`(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1`);
+    const url = new RegExp(`\\burl\\s*\\(\\s*(["']?)${escaped}(?:[?#][^)'"\\s]*)?\\1\\s*\\)`, 'i');
+    const objectKey = new RegExp(`(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1\\s*:`);
+    const namedProperty = new RegExp(`\\b(?:portrait|background|src|href|path|file|url|image|media|asset|cover|icon|photo|desktop|mobile)(?:[A-Z][A-Za-z0-9]*)?\\s*:\\s*(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1`);
+    const newUrl = new RegExp(`\\bnew\\s+URL\\s*\\(\\s*(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1`);
+    if (url.test(text) || (!bare && exactQuoted.test(text)) ||
+        (bare && (objectKey.test(text) || namedProperty.test(text) || newUrl.test(text)))) {
       return true;
     }
   }
@@ -347,7 +359,7 @@ async function materializePlatformWebp(project) {
     if (files.some(file => file.path.endsWith(`/${basename}`) || file.path === basename) ||
         textFiles.some(file => {
           const text = fs.readFileSync(path.join(project.root, file.path), 'utf8');
-          return hasPlatformPngReference(text, basename);
+          return hasPlatformPngReference(text, source.path) || hasPlatformPngReference(text, basename);
         })) {
       throw new Error(`F5B_PLATFORM_PNG_REFERENCE_RETAINED: ${basename}`);
     }

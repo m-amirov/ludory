@@ -272,8 +272,9 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   fs.appendFileSync(storyFile,
     "\nexport const dynamicPortrait = new URL(`./assets/portraits/${'alice'}.png`, import.meta.url);\n" +
     "export const rootRelativePortrait = '/assets/first/portrait.png';\n" +
-    "export const basenamePortrait = 'alice.png';\n" +
-    "export const narrativeText = 'Open alice.png in the gallery.';\n");
+    "export const portraitAsset = { portrait: 'alice.png' };\n" +
+    "export const narrativeText = 'Open alice.png in the gallery.';\n" +
+    "export const narrativeExact = 'alice.png';\n");
   refreshStoryProof(project);
   const plan = planNarrativePlatformExport(project);
   assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
@@ -295,8 +296,9 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   assert.match(main, /['\"]\/assets\/first\/portrait\.webp['\"]/);
   assert.doesNotMatch(main, /['\"]\/assets\/first\/portrait\.png['\"]/);
   assert.match(main, /['\"]alice\.webp['\"]/);
-  assert.doesNotMatch(main, /['\"]alice\.png['\"]/);
+  assert.doesNotMatch(main, /portrait:\s*['\"]alice\.png['\"]/);
   assert.match(main, /Open alice\.png in the gallery/);
+  assert.match(main, /narrativeExact\s*=\s*["']alice\.png["']/);
 
   const tampered = { ...entries };
   tampered['assets/first/portrait.webp'] = await sharp({ create: { width: 5, height: 4, channels: 4,
