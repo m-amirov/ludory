@@ -231,6 +231,16 @@ test('F5b2 rebases identical module-relative URLs according to each source modul
     "export const dynamicTheme = new URL(`./${'theme.css'}`, import.meta.url);\n");
   fs.writeFileSync(path.join(directories[0], 'plain.js'),
     "export const plainTheme = new URL(`./theme.css`, import.meta.url);\n");
+  fs.writeFileSync(path.join(directories[0], 'trailing-comma.js'),
+    "export const commaTheme = new URL('./theme.css', import.meta.url,);\n" +
+    "export const multilineTheme = new URL(\n" +
+    "  './theme.css',\n" +
+    "  import.meta.url,\n" +
+    ");\n" +
+    "export const multilineDynamicTheme = new URL(\n" +
+    "  `./${'theme.css'}`,\n" +
+    "  import.meta.url,\n" +
+    ");\n");
   fs.writeFileSync(path.join(project, 'src', 'ui', 'parent.js'),
     "export const nestedTheme = new URL(`./${'a/theme.css'}`, import.meta.url);\n");
   fs.appendFileSync(path.join(project, 'src', 'story.js'), `\nimport { themeA } from './ui/a/theme.js';
@@ -238,9 +248,10 @@ import { themeB } from './ui/b/theme.js';
 import { queriedTheme, queriedFont } from './ui/a/query.js';
 import { dynamicTheme } from './ui/a/dynamic.js';
 import { plainTheme } from './ui/a/plain.js';
+import { commaTheme, multilineTheme, multilineDynamicTheme } from './ui/a/trailing-comma.js';
 import { nestedTheme } from './ui/parent.js';
 export const dynamicFont = new URL(\`../assets/fonts/\${'Manrope[wght].ttf'}\`, import.meta.url);
-export const moduleThemes = [themeA.href, themeB.href, queriedTheme.href, queriedFont.href, dynamicTheme.href, plainTheme.href, nestedTheme.href, dynamicFont.href];\n`);
+export const moduleThemes = [themeA.href, themeB.href, queriedTheme.href, queriedFont.href, dynamicTheme.href, plainTheme.href, commaTheme.href, multilineTheme.href, multilineDynamicTheme.href, nestedTheme.href, dynamicFont.href];\n`);
   refreshStoryProof(project);
 
   const plan = planNarrativePlatformExport(project);
@@ -256,10 +267,13 @@ export const moduleThemes = [themeA.href, themeB.href, queriedTheme.href, querie
       assert.match(js, /\.\.\/assets\/fonts\/Manrope-wght\.ttf\?v=1#font/);
       assert.match(js, /`\.\.\/assets\/ui\/a\/\$\{["']theme\.css["']\}`/);
       assert.match(js, /new URL\("\.\.\/assets\/ui\/a\/theme\.css", import\.meta\.url\)/);
+      assert.match(js, /var commaTheme = new URL\("\.\.\/assets\/ui\/a\/theme\.css", import\.meta\.url\)/);
+      assert.match(js, /var multilineTheme = new URL\(\s*"\.\.\/assets\/ui\/a\/theme\.css",\s*import\.meta\.url\s*,?\s*\)/);
+      assert.match(js, /var multilineDynamicTheme = new URL\(\s*`\.\.\/assets\/ui\/a\/\$\{["']theme\.css["']\}`,\s*import\.meta\.url\s*,?\s*\)/);
       assert.match(js, /`\.\.\/assets\/fonts\/\$\{["']Manrope\[wght\]\.ttf["']\}`/);
       assert.match(js, /`\.\.\/assets\/ui\/\$\{["']a\/theme\.css["']\}`/);
       assert.doesNotMatch(js, /`\.\.\/assets\/ui\/a\/\$\{["']a\/theme\.css["']\}`/);
-      assert.equal(js.match(/\.\.\/assets\/ui\/a\/theme\.css/g)?.length, 3);
+      assert.equal(js.match(/\.\.\/assets\/ui\/a\/theme\.css/g)?.length, 5);
       assert.equal(js.match(/\.\.\/assets\/ui\/b\/theme\.css/g)?.length, 1);
     }
   } finally { derived.cleanup(); }

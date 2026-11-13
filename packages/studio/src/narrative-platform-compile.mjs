@@ -188,11 +188,11 @@ function rewriteSourceModuleAssetUrls(source, owner, assetPathMap) {
     const target = mappings.get(resolved?.path);
     return target ? full.replace(specifier, `${outputAssetSpecifier(target)}${resolved.suffix}`) : full;
   };
-  let output = source.replace(/new\s+URL\s*\(\s*(['"])([^'"\n]+)\1\s*,\s*import\.meta\.url\s*\)/g,
+  let output = source.replace(/new\s+URL\s*\(\s*(['"])([^'"\n]+)\1\s*,\s*import\.meta\.url\s*,?\s*\)/g,
     (full, _quote, specifier) => rewriteSpecifier(full, specifier));
-  output = output.replace(/new\s+URL\s*\(\s*`([^`$]*)`\s*,\s*import\.meta\.url\s*\)/g,
+  output = output.replace(/new\s+URL\s*\(\s*`([^`$]*)`\s*,\s*import\.meta\.url\s*,?\s*\)/g,
     (full, specifier) => rewriteSpecifier(full, specifier));
-  output = output.replace(/new\s+URL\s*\(\s*`([^`$]*)\$\{([^}]*)\}`\s*,\s*import\.meta\.url\s*\)/g,
+  output = output.replace(/new\s+URL\s*\(\s*`([^`$]*)\$\{([^}]*)\}`\s*,\s*import\.meta\.url\s*,?\s*\)/g,
     (full, prefix, expression) => {
       const resolved = resolveSourceDependency(owner, prefix);
       const sourceDirectory = resolved?.path?.replace(/\/+$/, '');
