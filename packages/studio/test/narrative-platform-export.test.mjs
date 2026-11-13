@@ -272,7 +272,8 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   fs.appendFileSync(storyFile,
     "\nexport const dynamicPortrait = new URL(`./assets/portraits/${'alice'}.png`, import.meta.url);\n" +
     "export const rootRelativePortrait = '/assets/first/portrait.png';\n" +
-    "export const basenamePortrait = 'alice.png';\n");
+    "export const basenamePortrait = 'alice.png';\n" +
+    "export const narrativeText = 'Open alice.png in the gallery.';\n");
   refreshStoryProof(project);
   const plan = planNarrativePlatformExport(project);
   assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
@@ -295,6 +296,7 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   assert.doesNotMatch(main, /['\"]\/assets\/first\/portrait\.png['\"]/);
   assert.match(main, /['\"]alice\.webp['\"]/);
   assert.doesNotMatch(main, /['\"]alice\.png['\"]/);
+  assert.match(main, /Open alice\.png in the gallery/);
 
   const tampered = { ...entries };
   tampered['assets/first/portrait.webp'] = await sharp({ create: { width: 5, height: 4, channels: 4,

@@ -241,6 +241,30 @@ function replacePlatformResourceToken(text, from, to) {
     full => full.replace(from, to));
 }
 
+function rewritePlatformBareImageReferences(text, basenameReplacements) {
+  let rewritten = text;
+  for (const [from, to] of basenameReplacements) {
+    const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    rewritten = rewritten.replace(new RegExp(`(["'\\x60])${escaped}([?#][^"'\\x60]*)?\\1`, 'g'),
+      (full, quote, suffix = '') => `${quote}${to}${suffix}${quote}`);
+  }
+  return rewritten;
+}
+
+function hasPlatformPngReference(text, resourcePath) {
+  const variants = resourcePath.startsWith('assets/')
+    ? [resourcePath, `./${resourcePath}`, `../${resourcePath}`, `/${resourcePath}`]
+    : [resourcePath];
+  for (const variant of variants) {
+    const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1`).test(text) ||
+        new RegExp(`\\burl\\s*\\(\\s*(["']?)${escaped}(?:[?#][^)'"\\s]*)?\\1\\s*\\)`, 'i').test(text)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function rewritePlatformDynamicImageReferences(text, filePath, imageDirectories) {
   const ownerDirectory = path.posix.dirname(filePath);
   let rewritten = text;
@@ -273,7 +297,7 @@ function rewritePlatformImageReferences(root, replacements, imagePathMap, imageD
     }
     text = rewritePlatformDynamicImageReferences(text, file.path, imageDirectories);
     for (const [from, to] of replacements) text = replacePlatformResourceToken(text, from, to);
-    for (const [from, to] of basenameReplacements) text = replacePlatformResourceToken(text, from, to);
+    text = rewritePlatformBareImageReferences(text, basenameReplacements);
     if (text !== original) fs.writeFileSync(filename, text);
   }
 }
@@ -323,7 +347,7 @@ async function materializePlatformWebp(project) {
     if (files.some(file => file.path.endsWith(`/${basename}`) || file.path === basename) ||
         textFiles.some(file => {
           const text = fs.readFileSync(path.join(project.root, file.path), 'utf8');
-          return replacePlatformResourceToken(text, basename, '__stale_png_reference__') !== text;
+          return hasPlatformPngReference(text, basename);
         })) {
       throw new Error(`F5B_PLATFORM_PNG_REFERENCE_RETAINED: ${basename}`);
     }
