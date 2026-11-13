@@ -262,7 +262,8 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   fs.writeFileSync(path.join(project, 'assets', 'theme.css'),
     '.first{background-image:url(first/portrait.png)}.second{background-image:url(second/portrait.png)}' +
     '.svg{background-image:url(portrait.png.svg)}' +
-    '.set{background-image:image-set("first/portrait.png" 1x)}\n');
+    '.set{background-image:image-set("first/portrait.png" 1x)}' +
+    '.nested{background-image:image-set("second/portrait.png" type("image/png") 1x)}\n');
   const proofFile = path.join(project, 'narrative-assets.json');
   const proof = JSON.parse(fs.readFileSync(proofFile, 'utf8'));
   proof.assets.first_portrait = { path: 'assets/first/portrait.png', sha256: sha(first) };
@@ -274,6 +275,8 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
     "\nexport const dynamicPortrait = new URL(`./assets/portraits/${'alice'}.png`, import.meta.url);\n" +
     "export const rootRelativePortrait = '/assets/first/portrait.png';\n" +
     "export const portraitAsset = { portrait: 'alice.png' };\n" +
+    "export const byFilename = { 'alice.png': './assets/portraits/alice.png' };\n" +
+    "export const lookedUp = byFilename['alice.png'];\n" +
     "export const narrativeText = 'Open alice.png in the gallery.';\n" +
     "export const narrativeExact = 'alice.png';\n" +
     "export const narrativeFull = 'Open assets/portraits/alice.png in the gallery.';\n");
@@ -289,8 +292,10 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   assert.match(css, /url\(second\/portrait\.webp\)/);
   assert.match(css, /url\(portrait\.png\.svg\)/);
   assert.match(css, /image-set\("first\/portrait\.webp" 1x\)/);
+  assert.match(css, /image-set\("second\/portrait\.webp" type\("image\/png"\) 1x\)/);
   assert.doesNotMatch(css, /url\((?:first|second)\/portrait\.png\)/);
   assert.doesNotMatch(css, /image-set\("first\/portrait\.png" 1x\)/);
+  assert.doesNotMatch(css, /image-set\("second\/portrait\.png" type/);
   const frame = Buffer.from(entries['assets/frame.svg']).toString('utf8');
   assert.match(frame, /href="first\/portrait\.webp"/);
   assert.doesNotMatch(frame, /href="first\/portrait\.png"/);
@@ -301,6 +306,8 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   assert.doesNotMatch(main, /['\"]\/assets\/first\/portrait\.png['\"]/);
   assert.match(main, /['\"]alice\.webp['\"]/);
   assert.doesNotMatch(main, /portrait:\s*['\"]alice\.png['\"]/);
+  assert.match(main, /['\"]alice\.png['\"]\s*:\s*['\"]\.\/assets\/portraits\/alice\.webp['\"]/);
+  assert.match(main, /lookedUp\s*=\s*byFilename\[['\"]alice\.png['\"]\]/);
   assert.match(main, /Open alice\.png in the gallery/);
   assert.match(main, /narrativeExact\s*=\s*["']alice\.png["']/);
   assert.match(main, /Open assets\/portraits\/alice\.png in the gallery/);

@@ -208,13 +208,38 @@ function rewriteCssImageReferences(text, filePath, imagePathMap) {
         path.posix.basename(replacement);
       return full.replace(specifier, `${relative}${suffix}`);
     };
-  return text
+  const rewritten = text
     .replace(/\burl\s*\(\s*(['"]?)([^)'"\s]+)\1\s*\)/gi, rewrite)
-    .replace(/@import\s+(['"])([^'"\r\n]+)\1/gi, rewrite)
-    .replace(/\b(?:-webkit-)?image-set\s*\(([^()]*)\)/gi,
-      (full, contents) => full.replace(contents,
-        contents.replace(/(['"])([^'"]+)\1/g, (candidate, quote, specifier) =>
-          rewrite(candidate, quote, specifier))));
+    .replace(/@import\s+(['"])([^'"\r\n]+)\1/gi, rewrite);
+  const imageSet = /\b(?:-webkit-)?image-set\s*\(/gi;
+  let output = '';
+  let cursor = 0;
+  let match;
+  while ((match = imageSet.exec(rewritten))) {
+    let depth = 1;
+    let quote = null;
+    let escaped = false;
+    let end = imageSet.lastIndex;
+    for (; end < rewritten.length; end += 1) {
+      const character = rewritten[end];
+      if (quote) {
+        if (escaped) escaped = false;
+        else if (character === '\\') escaped = true;
+        else if (character === quote) quote = null;
+      } else if (character === '"' || character === "'") quote = character;
+      else if (character === '(') depth += 1;
+      else if (character === ')' && --depth === 0) break;
+    }
+    if (depth !== 0 || quote) throw new Error(`F5B_CSS_IMAGE_SET_UNSAFE: ${filePath}`);
+    const contentsStart = imageSet.lastIndex;
+    const contents = rewritten.slice(contentsStart, end);
+    const replacedContents = contents.replace(/(['"])([^'"]+)\1/g,
+      (candidate, quoteMark, specifier) => rewrite(candidate, quoteMark, specifier));
+    output += rewritten.slice(cursor, contentsStart) + replacedContents + ')';
+    cursor = end + 1;
+    imageSet.lastIndex = cursor;
+  }
+  return output + rewritten.slice(cursor);
 }
 
 function rewriteSvgImageReferences(text, filePath, imagePathMap) {
@@ -262,7 +287,7 @@ function rewritePlatformBareImageReferences(text, basenameReplacements) {
     const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const quote = '(["\\x27\\x60])';
     const suffix = '([?#][^"\\x27\\x60]*)?';
-    rewritten = rewritten.replace(new RegExp(`${quote}${escaped}${suffix}\\1(?=\\s*:)`, 'g'),
+    rewritten = rewritten.replace(new RegExp(`${quote}${escaped}${suffix}\\1(?=\\s*:\\s*Object\\.freeze\\s*\\()`, 'g'),
       (full, quoteMark, query = '') => `${quoteMark}${to}${query}${quoteMark}`);
     rewritten = rewritten.replace(new RegExp(`(\\b(?:portrait|background|src|href|path|file|url|image|media|asset|cover|icon|photo|desktop|mobile)(?:[A-Z][A-Za-z0-9]*)?\\s*:\\s*)${quote}${escaped}${suffix}\\2`, 'g'),
       (full, prefix, quoteMark, query = '') => `${prefix}${quoteMark}${to}${query}${quoteMark}`);
@@ -281,7 +306,7 @@ function hasPlatformPngReference(text, resourcePath) {
     const bare = !resourcePath.startsWith('assets/');
     const exactQuoted = new RegExp(`(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1`);
     const url = new RegExp(`\\burl\\s*\\(\\s*(["']?)${escaped}(?:[?#][^)'"\\s]*)?\\1\\s*\\)`, 'i');
-    const objectKey = new RegExp(`(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1\\s*:`);
+    const objectKey = new RegExp(`(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1\\s*:\\s*Object\\.freeze\\s*\\(`);
     const namedProperty = new RegExp(`\\b(?:portrait|background|src|href|path|file|url|image|media|asset|cover|icon|photo|desktop|mobile)(?:[A-Z][A-Za-z0-9]*)?\\s*:\\s*(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1`);
     const newUrl = new RegExp(`\\bnew\\s+URL\\s*\\(\\s*(["'\\x60])${escaped}(?:[?#][^"'\\x60]*)?\\1`);
     if (url.test(text) || (!bare && exactQuoted.test(text)) ||
