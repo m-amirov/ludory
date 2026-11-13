@@ -211,7 +211,34 @@ function rewriteCssImageReferences(text, filePath, imagePathMap) {
     });
 }
 
-function rewritePlatformImageReferences(root, replacements, imagePathMap) {
+function replacePlatformResourceToken(text, from, to) {
+  const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const boundary = from.startsWith('assets/')
+    ? '(^|[^A-Za-z0-9._/-])(?:(?:\\.\\.?/)*)'
+    : '(^|[^A-Za-z0-9._-])';
+  return text.replace(new RegExp(`${boundary}${escaped}(?=$|[^A-Za-z0-9._-])`, 'g'),
+    full => full.replace(from, to));
+}
+
+function rewritePlatformDynamicImageReferences(text, filePath, imageDirectories) {
+  const ownerDirectory = path.posix.dirname(filePath);
+  let rewritten = text;
+  for (const directory of imageDirectories) {
+    const relative = path.posix.relative(ownerDirectory, directory);
+    const prefixes = new Set([directory, `./${directory}`]);
+    if (relative && relative !== '.') prefixes.add(relative);
+    if (relative && !relative.startsWith('./')) prefixes.add(`./${relative}`);
+    for (const prefix of prefixes) {
+      const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(`(^|[^A-Za-z0-9._/-])${escaped}/(\\$\\{[^}]*\\})\\.png(?=$|[^A-Za-z0-9._-])`, 'g');
+      rewritten = rewritten.replace(pattern, (full, boundary, expression) =>
+        `${boundary}${prefix}/${expression}.webp`);
+    }
+  }
+  return rewritten;
+}
+
+function rewritePlatformImageReferences(root, replacements, imagePathMap, imageDirectories) {
   for (const file of scanDerivedFiles(root)) {
     if (!isTextResource(file.path)) continue;
     const filename = path.join(root, file.path);
@@ -220,7 +247,8 @@ function rewritePlatformImageReferences(root, replacements, imagePathMap) {
     if (path.posix.extname(file.path).toLowerCase() === '.css') {
       text = rewriteCssImageReferences(text, file.path, imagePathMap);
     }
-    for (const [from, to] of replacements) text = text.replaceAll(from, to);
+    text = rewritePlatformDynamicImageReferences(text, file.path, imageDirectories);
+    for (const [from, to] of replacements) text = replacePlatformResourceToken(text, from, to);
     if (text !== original) fs.writeFileSync(filename, text);
   }
 }
@@ -229,14 +257,10 @@ async function materializePlatformWebp(project) {
   const pngs = project.files.filter(file => file.path.startsWith('assets/') &&
     path.posix.extname(file.path).toLowerCase() === '.png');
   const targetPaths = new Set(project.files.map(file => file.path));
-  const basenameCounts = new Map();
-  for (const file of pngs) {
-    const basename = path.posix.basename(file.path);
-    basenameCounts.set(basename, (basenameCounts.get(basename) ?? 0) + 1);
-  }
   const derivations = [];
   const replacements = [];
   const imagePathMap = new Map();
+  const imageDirectories = new Set(pngs.map(file => path.posix.dirname(file.path)));
   for (const source of pngs) {
     const derivedPath = source.path.replace(/\.png$/i, '.webp');
     if (targetPaths.has(derivedPath)) throw new Error(`F5B_PLATFORM_WEBP_COLLISION: ${derivedPath}`);
@@ -252,12 +276,8 @@ async function materializePlatformWebp(project) {
       width: metadata.width, height: metadata.height, quality: platformWebpQuality });
     imagePathMap.set(source.path, derivedPath);
     replacements.push([source.path, derivedPath]);
-    const basename = path.posix.basename(source.path);
-    if (basenameCounts.get(basename) === 1) {
-      replacements.push([basename, path.posix.basename(derivedPath)]);
-    }
   }
-  rewritePlatformImageReferences(project.root, replacements, imagePathMap);
+  rewritePlatformImageReferences(project.root, replacements, imagePathMap, imageDirectories);
   for (const source of pngs) fs.unlinkSync(path.join(project.root, source.path));
   const files = scanDerivedFiles(project.root);
   if (files.some(file => file.path.startsWith('assets/') &&
@@ -266,9 +286,12 @@ async function materializePlatformWebp(project) {
   }
   for (const source of pngs) {
     const basename = path.posix.basename(source.path);
+    const textFiles = files.filter(file => isTextResource(file.path));
     if (files.some(file => file.path.endsWith(`/${basename}`) || file.path === basename) ||
-        files.filter(file => isTextResource(file.path)).some(file =>
-          fs.readFileSync(path.join(project.root, file.path), 'utf8').includes(basename))) {
+        textFiles.some(file => {
+          const text = fs.readFileSync(path.join(project.root, file.path), 'utf8');
+          return replacePlatformResourceToken(text, basename, '__stale_png_reference__') !== text;
+        })) {
       throw new Error(`F5B_PLATFORM_PNG_REFERENCE_RETAINED: ${basename}`);
     }
   }

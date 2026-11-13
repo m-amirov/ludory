@@ -247,17 +247,29 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
     background: { r: 210, g: 80, b: 30, alpha: 1 } } }).png().toBuffer();
   const second = await sharp({ create: { width: 5, height: 4, channels: 4,
     background: { r: 30, g: 80, b: 210, alpha: 1 } } }).png().toBuffer();
+  const dynamic = await sharp({ create: { width: 5, height: 4, channels: 4,
+    background: { r: 120, g: 40, b: 180, alpha: 1 } } }).png().toBuffer();
   fs.mkdirSync(path.join(project, 'assets', 'first'), { recursive: true });
   fs.mkdirSync(path.join(project, 'assets', 'second'), { recursive: true });
+  fs.mkdirSync(path.join(project, 'assets', 'portraits'), { recursive: true });
   fs.writeFileSync(path.join(project, 'assets', 'first', 'portrait.png'), first);
   fs.writeFileSync(path.join(project, 'assets', 'second', 'portrait.png'), second);
+  fs.writeFileSync(path.join(project, 'assets', 'portraits', 'alice.png'), dynamic);
+  fs.writeFileSync(path.join(project, 'assets', 'portrait.png.svg'),
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>\n');
   fs.writeFileSync(path.join(project, 'assets', 'theme.css'),
-    '.first{background-image:url(first/portrait.png)}.second{background-image:url(second/portrait.png)}\n');
+    '.first{background-image:url(first/portrait.png)}.second{background-image:url(second/portrait.png)}' +
+    '.svg{background-image:url(portrait.png.svg)}\n');
   const proofFile = path.join(project, 'narrative-assets.json');
   const proof = JSON.parse(fs.readFileSync(proofFile, 'utf8'));
   proof.assets.first_portrait = { path: 'assets/first/portrait.png', sha256: sha(first) };
   proof.assets.second_portrait = { path: 'assets/second/portrait.png', sha256: sha(second) };
+  proof.assets.dynamic_portrait = { path: 'assets/portraits/alice.png', sha256: sha(dynamic) };
   fs.writeFileSync(proofFile, `${JSON.stringify(proof, null, 2)}\n`);
+  const storyFile = path.join(project, 'src/story.js');
+  fs.appendFileSync(storyFile,
+    "\nexport const dynamicPortrait = new URL(`./assets/portraits/${'alice'}.png`, import.meta.url);\n");
+  refreshStoryProof(project);
   const plan = planNarrativePlatformExport(project);
   assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
   const paths = destinations(root);
@@ -267,7 +279,11 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   const css = Buffer.from(entries['assets/theme.css']).toString('utf8');
   assert.match(css, /url\(first\/portrait\.webp\)/);
   assert.match(css, /url\(second\/portrait\.webp\)/);
-  assert.doesNotMatch(css, /portrait\.png/);
+  assert.match(css, /url\(portrait\.png\.svg\)/);
+  assert.doesNotMatch(css, /url\((?:first|second)\/portrait\.png\)/);
+  const main = Buffer.from(entries['src/main.js']).toString('utf8');
+  assert.match(main, /\.\.?\/assets\/portraits\/\$\{[^}]+\}\.webp/);
+  assert.doesNotMatch(main, /\.\.?\/assets\/portraits\/\$\{[^}]+\}\.png/);
 
   const tampered = { ...entries };
   tampered['assets/first/portrait.webp'] = await sharp({ create: { width: 5, height: 4, channels: 4,
