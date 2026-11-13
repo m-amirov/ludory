@@ -111,6 +111,16 @@ function localDependency(specifier, owner, known) {
   }
 }
 
+const narrativeProofId = /^[a-z][a-z0-9_-]{0,63}$/;
+const narrativeProofExtension = /\.(?:svg|png|webp|jpg|jpeg)$/i;
+
+function validNarrativeProofPath(filename) {
+  if (typeof filename !== 'string' || !filename.startsWith('assets/') || !narrativeProofExtension.test(filename)) return false;
+  const parts = filename.split('/');
+  return parts.length >= 2 && parts.every(part => part && part !== '.' && part !== '..' &&
+    !privateName(part) && !/[. ]$/.test(part) && /^[a-z0-9][a-z0-9._-]*$/i.test(part));
+}
+
 function validateDependencies(files, read, { requireNarrativeProof = false } = {}) {
   const known = new Set(files);
   if (requireNarrativeProof && !known.has('narrative-assets.json')) {
@@ -128,13 +138,27 @@ function validateDependencies(files, read, { requireNarrativeProof = false } = {
         throw new Error('PREVIEW_ASSET_MANIFEST_INVALID');
       }
       const provedPaths = new Set();
-      for (const [id, asset] of Object.entries(data.assets)) {
-        if (!/^[a-z][a-z0-9_-]{0,63}$/.test(id) || typeof asset?.path !== 'string' ||
-            !/^assets\/[a-z0-9_-]+\.(?:svg|png|webp|jpg|jpeg)$/.test(asset.path) ||
-            !/^[a-f0-9]{64}$/.test(asset.sha256)) throw new Error('PREVIEW_ASSET_MANIFEST_INVALID');
-        localDependency(asset.path, 'index.html', known);
-        if (sha256(read(asset.path)) !== asset.sha256) throw new Error('PREVIEW_ASSET_PROOF_MISMATCH');
-        provedPaths.add(asset.path);
+      const prove = (id, asset, pathKey = 'path') => {
+        const filename = asset?.[pathKey];
+        if (!narrativeProofId.test(id) || !validNarrativeProofPath(filename) ||
+            !/^[a-f0-9]{64}$/.test(asset?.sha256)) throw new Error('PREVIEW_ASSET_MANIFEST_INVALID');
+        if (provedPaths.has(filename)) throw new Error('PREVIEW_ASSET_MANIFEST_INVALID');
+        localDependency(filename, 'index.html', known);
+        if (sha256(read(filename)) !== asset.sha256) throw new Error('PREVIEW_ASSET_PROOF_MISMATCH');
+        provedPaths.add(filename);
+      };
+      for (const [id, asset] of Object.entries(data.assets)) prove(id, asset);
+      if (data.mobileAssets !== undefined) {
+        if (!data.mobileAssets || typeof data.mobileAssets !== 'object' || Array.isArray(data.mobileAssets)) {
+          throw new Error('PREVIEW_ASSET_MANIFEST_INVALID');
+        }
+        for (const [id, asset] of Object.entries(data.mobileAssets)) prove(id, asset, 'portraitPath');
+      }
+      if (data.brandingAssets !== undefined) {
+        if (!data.brandingAssets || typeof data.brandingAssets !== 'object' || Array.isArray(data.brandingAssets)) {
+          throw new Error('PREVIEW_ASSET_MANIFEST_INVALID');
+        }
+        for (const [id, asset] of Object.entries(data.brandingAssets)) prove(id, asset);
       }
       if (requireNarrativeProof) {
         // The presentation contract only accepts local raster paths under assets/.
