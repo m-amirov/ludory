@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
+import sharp from 'sharp';
 import { canonicalPhysicalDirectory } from '@ludory/core';
 import { verifyStudioOrigin, assertComponentTrust, hostTrustDigest } from '@ludory/studio-trust';
 import { readRegular } from './profile-state.mjs';
@@ -97,6 +98,7 @@ export function materializeNarrativePlatformSource(plan) {
 }
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
+const platformWebpQuality = 95;
 const mediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2', '.ttf', '.css']);
 const targetSpecs = Object.freeze({
   yandex: { target: 'yandex-games', template: 'yandex-runtime' },
@@ -169,6 +171,100 @@ function scanDerivedFiles(root, relative = '') {
     } else throw new Error(`F5B_DERIVED_SPECIAL_FILE: ${local}`);
   }
   return found;
+}
+
+const textResourceExtensions = new Set(['.css', '.html', '.js', '.json', '.mjs', '.svg']);
+
+function isTextResource(filename) {
+  return textResourceExtensions.has(path.posix.extname(filename).toLowerCase());
+}
+
+function assertPlatformWebpSource(file, root) {
+  const filename = path.join(root, file.path);
+  const stat = fs.lstatSync(filename);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error(`F5B_PLATFORM_IMAGE_UNSAFE: ${file.path}`);
+  const bytes = fs.readFileSync(filename);
+  if (bytes.length !== file.size || sha(bytes) !== file.sha256) {
+    throw new Error(`F5B_PLATFORM_IMAGE_SOURCE_CHANGED: ${file.path}`);
+  }
+  return bytes;
+}
+
+function rewritePlatformImageReferences(root, replacements) {
+  for (const file of scanDerivedFiles(root)) {
+    if (!isTextResource(file.path)) continue;
+    const filename = path.join(root, file.path);
+    let text = fs.readFileSync(filename, 'utf8');
+    const original = text;
+    for (const [from, to] of replacements) text = text.replaceAll(from, to);
+    if (text !== original) fs.writeFileSync(filename, text);
+  }
+}
+
+async function materializePlatformWebp(project) {
+  const pngs = project.files.filter(file => file.path.startsWith('assets/') &&
+    path.posix.extname(file.path).toLowerCase() === '.png');
+  const targetPaths = new Set(project.files.map(file => file.path));
+  const basenameCounts = new Map();
+  for (const file of pngs) {
+    const basename = path.posix.basename(file.path);
+    basenameCounts.set(basename, (basenameCounts.get(basename) ?? 0) + 1);
+  }
+  const derivations = [];
+  const replacements = [];
+  for (const source of pngs) {
+    const derivedPath = source.path.replace(/\.png$/i, '.webp');
+    if (targetPaths.has(derivedPath)) throw new Error(`F5B_PLATFORM_WEBP_COLLISION: ${derivedPath}`);
+    const sourceBytes = assertPlatformWebpSource(source, project.root);
+    const metadata = await sharp(sourceBytes, { failOn: 'error', limitInputPixels: 64 * 1024 * 1024 }).metadata();
+    const derivedBytes = await sharp(sourceBytes, { failOn: 'error', limitInputPixels: 64 * 1024 * 1024 })
+      .webp({ quality: platformWebpQuality, effort: 6 }).toBuffer();
+    const output = path.join(project.root, derivedPath);
+    fs.mkdirSync(path.dirname(output), { recursive: true });
+    fs.writeFileSync(output, derivedBytes, { flag: 'wx' });
+    derivations.push({ sourcePath: source.path, derivedPath, sourceSha256: source.sha256,
+      sourceSize: source.size, derivedSha256: sha(derivedBytes), derivedSize: derivedBytes.length,
+      width: metadata.width, height: metadata.height, quality: platformWebpQuality });
+    replacements.push([source.path, derivedPath]);
+    const basename = path.posix.basename(source.path);
+    if (basenameCounts.get(basename) === 1) {
+      replacements.push([basename, path.posix.basename(derivedPath)]);
+    }
+  }
+  rewritePlatformImageReferences(project.root, replacements);
+  for (const source of pngs) fs.unlinkSync(path.join(project.root, source.path));
+  const files = scanDerivedFiles(project.root);
+  if (files.some(file => file.path.startsWith('assets/') &&
+      path.posix.extname(file.path).toLowerCase() === '.png')) {
+    throw new Error('F5B_PLATFORM_PNG_RETAINED');
+  }
+  for (const source of pngs) {
+    const basename = path.posix.basename(source.path);
+    if (files.some(file => file.path.endsWith(`/${basename}`) || file.path === basename) ||
+        files.filter(file => isTextResource(file.path)).some(file =>
+          fs.readFileSync(path.join(project.root, file.path), 'utf8').includes(basename))) {
+      throw new Error(`F5B_PLATFORM_PNG_REFERENCE_RETAINED: ${basename}`);
+    }
+  }
+  return { files, sha256: sha(Buffer.from(JSON.stringify(files))), assetDerivations: derivations };
+}
+
+async function materializeNarrativePlatformPlatformExport(plan) {
+  const derived = materializeNarrativePlatformProjects(plan);
+  if (derived.status !== 'DERIVED_LOCAL') return derived;
+  try {
+    for (const project of Object.values(derived.projects)) {
+      const optimized = await materializePlatformWebp(project);
+      project.files = optimized.files;
+      project.sha256 = optimized.sha256;
+      project.assetDerivations = optimized.assetDerivations;
+    }
+    return derived;
+  } catch (error) {
+    derived.cleanup();
+    return { ...blocked(plan?.project ?? null, error.message || 'F5B_PLATFORM_WEBP_FAILED'),
+      releaseReady: false, publicationAllowed: false };
+  }
 }
 
 function ownedCleanup(directory) {
@@ -255,7 +351,8 @@ export function materializeNarrativePlatformProjects(plan) {
         throw new Error(`F5B_TARGET_ORIGIN_${origin.code}`);
       }
       const files = scanDerivedFiles(root);
-      projects[key] = { root, target: spec.target, files, sha256: sha(Buffer.from(JSON.stringify(files))) };
+      projects[key] = { root, target: spec.target, files, sha256: sha(Buffer.from(JSON.stringify(files))),
+        assetDerivations: [] };
     }
     return { mode, status: 'DERIVED_LOCAL', sourceDigest: pin.sourceDigest, projects,
       cleanup, releaseReady: false, publicationAllowed: false };
@@ -364,15 +461,55 @@ function readReceipt(filename) {
   return JSON.parse(readRegularBytes(filename, 1024 * 1024).toString('utf8'));
 }
 
+function assertPlatformWebpDerivations(sourcePlan, assetDerivations, derivedFiles, archiveFiles) {
+  const sourcePngs = sourcePlan.files.filter(file => file.path.startsWith('assets/') &&
+    path.posix.extname(file.path).toLowerCase() === '.png');
+  if (!Array.isArray(assetDerivations) || assetDerivations.length !== sourcePngs.length) {
+    throw new Error('F5B_PLATFORM_WEBP_DERIVATION_LIST_INVALID');
+  }
+  const sources = new Map(sourcePngs.map(file => [file.path, file]));
+  const derived = new Map(derivedFiles.map(file => [file.path, file]));
+  const seenSources = new Set();
+  const seenDerived = new Set();
+  for (const item of assetDerivations) {
+    if (!exact(item, ['sourcePath', 'derivedPath', 'sourceSha256', 'sourceSize',
+      'derivedSha256', 'derivedSize', 'width', 'height', 'quality']) ||
+        typeof item.sourcePath !== 'string' || typeof item.derivedPath !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(item.sourceSha256) || !Number.isSafeInteger(item.sourceSize) ||
+        !/^[a-f0-9]{64}$/.test(item.derivedSha256) || !Number.isSafeInteger(item.derivedSize) ||
+        !Number.isSafeInteger(item.width) || item.width < 1 || !Number.isSafeInteger(item.height) || item.height < 1 ||
+        item.quality !== platformWebpQuality || seenSources.has(item.sourcePath) || seenDerived.has(item.derivedPath)) {
+      throw new Error('F5B_PLATFORM_WEBP_DERIVATION_INVALID');
+    }
+    const source = sources.get(item.sourcePath);
+    const outputPath = item.sourcePath.replace(/\.png$/i, '.webp');
+    const output = derived.get(item.derivedPath);
+    const archived = new Map(archiveFiles.map(file => [file.path, file])).get(item.derivedPath);
+    if (!source || item.derivedPath !== outputPath || !output || !archived ||
+        item.sourceSha256 !== source.sha256 || item.sourceSize !== source.size ||
+        item.derivedSha256 !== output.sha256 || item.derivedSize !== output.size ||
+        archived.sha256 !== output.sha256 || archived.size !== output.size ||
+        path.posix.extname(item.derivedPath).toLowerCase() !== '.webp') {
+      throw new Error('F5B_PLATFORM_WEBP_DERIVATION_MISMATCH');
+    }
+    seenSources.add(item.sourcePath);
+    seenDerived.add(item.derivedPath);
+  }
+  if (seenSources.size !== sources.size || seenDerived.size !== assetDerivations.length ||
+      derivedFiles.some(file => file.path.startsWith('assets/') &&
+        path.posix.extname(file.path).toLowerCase() === '.png')) {
+      throw new Error('F5B_PLATFORM_WEBP_SOURCE_RETAINED');
+  }
+}
+
 /** Re-check stored ZIP/member bytes against a live host-trusted F5b1 plan. */
 export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
   let rederived;
+  let sourcePinned;
   let result;
   try {
     const issued = sourcePlan && typeof sourcePlan === 'object' ? issuedPlans.get(sourcePlan) : null;
     if (!issued || shape(sourcePlan) !== issued.shape) throw new Error('F5B_TRUSTED_SOURCE_PLAN_REQUIRED');
-    rederived = materializeNarrativePlatformProjects(sourcePlan);
-    if (rederived.status !== 'DERIVED_LOCAL') throw new Error(rederived.reasonCode || 'F5B_SOURCE_REDERIVATION_FAILED');
     const linked = readReceipt(paths.exportReceipt);
     if (!exact(linked, ['schemaVersion', 'sourceDigest', 'sourceFiles', 'candidates']) ||
         linked.schemaVersion !== 1 || !Array.isArray(linked.candidates) || linked.candidates.length !== 2) {
@@ -386,13 +523,27 @@ export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
         JSON.stringify(linked.sourceFiles) !== JSON.stringify(sourcePlan.files)) {
       throw new Error('F5B_SOURCE_BINDING_MISMATCH');
     }
+    const optimized = linked.candidates.some(candidate => Array.isArray(candidate.assetDerivations) &&
+      candidate.assetDerivations.length > 0);
+    if (sourcePlan.files.some(file => file.path.startsWith('assets/') &&
+        path.posix.extname(file.path).toLowerCase() === '.png') && !optimized) {
+      throw new Error('F5B_PLATFORM_WEBP_REQUIRED');
+    }
+    if (!optimized) {
+      rederived = materializeNarrativePlatformProjects(sourcePlan);
+      if (rederived.status !== 'DERIVED_LOCAL') throw new Error(rederived.reasonCode || 'F5B_SOURCE_REDERIVATION_FAILED');
+    } else {
+      sourcePinned = materializeNarrativePlatformSource(sourcePlan);
+      if (sourcePinned.status !== 'SOURCE_PINNED') throw new Error(sourcePinned.reasonCode || 'F5B_SOURCE_REPIN_FAILED');
+    }
     for (const [index, key] of ['yandex', 'vk'].entries()) {
       const candidate = linked.candidates[index];
       const target = targetSpecs[key].target;
       const archivePath = path.resolve(paths[`${key}Zip`]);
       const receipt = readReceipt(paths[`${key}BuildReceipt`]);
       const archived = key === 'yandex' ? inspectYandexArchive(archivePath) : inspectVkArchive(archivePath);
-      if (!exact(candidate, ['target', 'derivedProjectSha256', 'derivedFiles', 'archivePath', 'archiveSha256', 'files']) ||
+      if (!exact(candidate, ['target', 'derivedProjectSha256', 'derivedFiles', 'assetDerivations',
+        'archivePath', 'archiveSha256', 'files']) ||
           !exact(receipt, ['archivePath', 'sha256', 'files']) ||
           candidate.target !== target || candidate.archivePath !== archivePath ||
           receipt.archivePath !== archivePath || candidate.archiveSha256 !== archived.sha256 ||
@@ -403,10 +554,15 @@ export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
       if (sha(Buffer.from(JSON.stringify(candidate.derivedFiles))) !== candidate.derivedProjectSha256) {
         throw new Error('F5B_DERIVED_HASH_MISMATCH');
       }
-      if (candidate.derivedProjectSha256 !== rederived.projects[key].sha256) {
+      if (!optimized && candidate.derivedProjectSha256 !== rederived.projects[key].sha256) {
         throw new Error('F5B_DERIVED_SOURCE_BINDING_MISMATCH');
       }
-      sameFiles(candidate.derivedFiles, rederived.projects[key].files);
+      if (optimized) {
+        assertPlatformWebpDerivations(sourcePlan, candidate.assetDerivations,
+          candidate.derivedFiles, archived.files);
+      } else {
+        sameFiles(candidate.derivedFiles, rederived.projects[key].files);
+      }
       const derived = new Map(candidate.derivedFiles.map(file => [file.path, file]));
       for (const file of archived.files) {
         const original = derived.get(file.path);
@@ -424,13 +580,16 @@ export function verifyNarrativePlatformCandidates(paths = {}, sourcePlan) {
     try { rederived?.cleanup?.(); }
     catch (error) { result = { mode, status: 'BLOCKED', reasonCode: error.message,
       releaseReady: false, publicationAllowed: false }; }
+    try { sourcePinned?.cleanup?.(); }
+    catch (error) { result = { mode, status: 'BLOCKED', reasonCode: error.message,
+      releaseReady: false, publicationAllowed: false }; }
   }
   return result;
 }
 
 /** Create two exclusive target ZIPs and external receipts from one authenticated F5b1 plan. */
 export async function buildNarrativePlatformCandidates(plan, paths = {}) {
-  const derived = materializeNarrativePlatformProjects(plan);
+  const derived = await materializeNarrativePlatformPlatformExport(plan);
   if (derived.status !== 'DERIVED_LOCAL') return { ...derived, partialOutputs: [],
     releaseReady: false, publicationAllowed: false };
   const partialOutputs = [];
@@ -458,10 +617,12 @@ export async function buildNarrativePlatformCandidates(plan, paths = {}) {
       sourceDigest: derived.sourceDigest, sourceFiles: plan.files,
       candidates: [
         { target: 'yandex-games', derivedProjectSha256: derived.projects.yandex.sha256,
-          derivedFiles: derived.projects.yandex.files, archivePath: outputs.yandexZip,
+          derivedFiles: derived.projects.yandex.files, assetDerivations: derived.projects.yandex.assetDerivations,
+          archivePath: outputs.yandexZip,
           archiveSha256: yandex.sha256, files: yandex.files },
         { target: 'vk-games', derivedProjectSha256: derived.projects.vk.sha256,
-          derivedFiles: derived.projects.vk.files, archivePath: outputs.vkZip,
+          derivedFiles: derived.projects.vk.files, assetDerivations: derived.projects.vk.assetDerivations,
+          archivePath: outputs.vkZip,
           archiveSha256: vk.sha256, files: vk.files },
       ],
     }, partialOutputs, outputs._parentPins.exportReceipt);
