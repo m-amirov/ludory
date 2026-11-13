@@ -231,13 +231,16 @@ test('F5b2 rebases identical module-relative URLs according to each source modul
     "export const dynamicTheme = new URL(`./${'theme.css'}`, import.meta.url);\n");
   fs.writeFileSync(path.join(directories[0], 'plain.js'),
     "export const plainTheme = new URL(`./theme.css`, import.meta.url);\n");
+  fs.writeFileSync(path.join(project, 'src', 'ui', 'parent.js'),
+    "export const nestedTheme = new URL(`./${'a/theme.css'}`, import.meta.url);\n");
   fs.appendFileSync(path.join(project, 'src', 'story.js'), `\nimport { themeA } from './ui/a/theme.js';
 import { themeB } from './ui/b/theme.js';
 import { queriedTheme, queriedFont } from './ui/a/query.js';
 import { dynamicTheme } from './ui/a/dynamic.js';
 import { plainTheme } from './ui/a/plain.js';
+import { nestedTheme } from './ui/parent.js';
 export const dynamicFont = new URL(\`../assets/fonts/\${'Manrope[wght].ttf'}\`, import.meta.url);
-export const moduleThemes = [themeA.href, themeB.href, queriedTheme.href, queriedFont.href, dynamicTheme.href, plainTheme.href, dynamicFont.href];\n`);
+export const moduleThemes = [themeA.href, themeB.href, queriedTheme.href, queriedFont.href, dynamicTheme.href, plainTheme.href, nestedTheme.href, dynamicFont.href];\n`);
   refreshStoryProof(project);
 
   const plan = planNarrativePlatformExport(project);
@@ -254,6 +257,8 @@ export const moduleThemes = [themeA.href, themeB.href, queriedTheme.href, querie
       assert.match(js, /`\.\.\/assets\/ui\/a\/\$\{["']theme\.css["']\}`/);
       assert.match(js, /new URL\("\.\.\/assets\/ui\/a\/theme\.css", import\.meta\.url\)/);
       assert.match(js, /`\.\.\/assets\/fonts\/\$\{["']Manrope\[wght\]\.ttf["']\}`/);
+      assert.match(js, /`\.\.\/assets\/ui\/\$\{["']a\/theme\.css["']\}`/);
+      assert.doesNotMatch(js, /`\.\.\/assets\/ui\/a\/\$\{["']a\/theme\.css["']\}`/);
       assert.equal(js.match(/\.\.\/assets\/ui\/a\/theme\.css/g)?.length, 3);
       assert.equal(js.match(/\.\.\/assets\/ui\/b\/theme\.css/g)?.length, 1);
     }

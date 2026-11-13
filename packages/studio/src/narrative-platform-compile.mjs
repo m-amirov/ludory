@@ -199,7 +199,12 @@ function rewriteSourceModuleAssetUrls(source, owner, assetPathMap) {
       if (!sourceDirectory) return full;
       const mapping = [...mappings.entries()].find(([from]) => from.startsWith(`${sourceDirectory}/`));
       if (!mapping) return full;
-      const targetDirectory = path.posix.dirname(mapping[1]);
+      const sourceParts = sourceDirectory.split('/');
+      const mappedSourceParts = mapping[0].split('/');
+      const sourceSuffixLength = mappedSourceParts.length - sourceParts.length;
+      const targetParts = mapping[1].split('/');
+      if (sourceSuffixLength < 1 || targetParts.length <= sourceSuffixLength) return full;
+      const targetDirectory = targetParts.slice(0, -sourceSuffixLength).join('/');
       return full.replace(prefix, `${outputAssetSpecifier(targetDirectory)}/`);
     });
   return output;
