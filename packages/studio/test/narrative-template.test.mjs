@@ -136,6 +136,48 @@ test('narrative preview refuses missing asset proof and unproved visual files', 
   assert.equal(planPreviewBuild(dir).status, 'READY');
 });
 
+test('narrative preview validates mobile and branding proof as one raster evidence set', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-art-proof-union-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  assert.equal(applyCreatePlan(planCreate(dir, { id: 'art-proof-union', title: 'Art', lang: 'ru',
+    profile: 'narrative-game', template: 'narrative-interactive', targets: ['vk-games', 'yandex-games'] })).status, 'APPLIED');
+  const portrait = Buffer.from('portrait-proof');
+  const branding = Buffer.from('branding-proof');
+  const portraitPath = path.join(dir, 'assets/vis-mobile.png');
+  const brandingPath = path.join(dir, 'assets/branding/cover.webp');
+  fs.writeFileSync(portraitPath, portrait);
+  fs.mkdirSync(path.dirname(brandingPath), { recursive: true });
+  fs.writeFileSync(brandingPath, branding);
+  const proofPath = path.join(dir, 'narrative-assets.json');
+  const proof = JSON.parse(fs.readFileSync(proofPath, 'utf8'));
+  proof.mobileAssets = { 'mobile-intro': { portraitPath: 'assets/vis-mobile.png', sha256: hash(portrait) } };
+  proof.brandingAssets = { cover: { path: 'assets/branding/cover.webp', sha256: hash(branding) } };
+  fs.writeFileSync(proofPath, `${JSON.stringify(proof, null, 2)}\n`);
+  assert.equal(planPreviewBuild(dir).status, 'READY');
+
+  fs.appendFileSync(portraitPath, 'tamper');
+  assert.equal(planPreviewBuild(dir).reasonCode, 'PREVIEW_ASSET_PROOF_MISMATCH');
+  fs.writeFileSync(portraitPath, portrait);
+  fs.appendFileSync(brandingPath, 'tamper');
+  assert.equal(planPreviewBuild(dir).reasonCode, 'PREVIEW_ASSET_PROOF_MISMATCH');
+  fs.writeFileSync(brandingPath, branding);
+
+  const withoutBranding = structuredClone(proof);
+  delete withoutBranding.brandingAssets;
+  fs.writeFileSync(proofPath, `${JSON.stringify(withoutBranding, null, 2)}\n`);
+  assert.equal(planPreviewBuild(dir).reasonCode, 'PREVIEW_ASSET_PROOF_MISSING');
+
+  const unsafe = structuredClone(proof);
+  unsafe.brandingAssets.cover.path = 'assets/../cover.webp';
+  fs.writeFileSync(proofPath, `${JSON.stringify(unsafe, null, 2)}\n`);
+  assert.equal(planPreviewBuild(dir).reasonCode, 'PREVIEW_ASSET_MANIFEST_INVALID');
+
+  const duplicate = structuredClone(proof);
+  duplicate.brandingAssets.cover = { path: 'assets/lighthouse.svg', sha256: proof.assets.lighthouse.sha256 };
+  fs.writeFileSync(proofPath, `${JSON.stringify(duplicate, null, 2)}\n`);
+  assert.equal(planPreviewBuild(dir).reasonCode, 'PREVIEW_ASSET_MANIFEST_INVALID');
+});
+
 test('narrative preview accepts the 160 MiB source limit and blocks the first byte above it', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-preview-limit-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
