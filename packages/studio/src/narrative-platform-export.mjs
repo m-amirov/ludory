@@ -127,29 +127,32 @@ function exportAssetPath(sourcePath) {
 
 function rewriteCssDependencies(bytes, sourcePath, targetPath, assetPathMap) {
   const source = bytes.toString('utf8');
-  return Buffer.from(source.replace(/\burl\s*\(\s*(['"]?)([^)'"\s]+)\1\s*\)/gi,
-    (full, quote, specifier) => {
-      if (!specifier || specifier.startsWith('#') || /^(?:https?:|data:|blob:|\/\/)/i.test(specifier)) return full;
-      const split = specifier.match(/^([^?#]*)([?#].*)?$/);
-      const clean = split?.[1] ?? specifier;
-      const suffix = split?.[2] ?? '';
-      let decoded;
-      try { decoded = decodeURIComponent(clean); }
-      catch { throw new Error(`F5B_CSS_DEPENDENCY_UNSAFE: ${sourcePath} -> ${specifier}`); }
-      if (/%2f|%5c|(?:^|\/)%2e(?:%2e)?(?=\/|$)/i.test(clean) || decoded.includes('\\') || decoded.includes('\0') ||
-          /[\x00-\x1f\x7f]/.test(decoded) || decoded.startsWith('//')) {
-        throw new Error(`F5B_CSS_DEPENDENCY_UNSAFE: ${sourcePath} -> ${specifier}`);
-      }
-      const resolved = path.posix.normalize(decoded.startsWith('/')
-        ? decoded.slice(1) : path.posix.join(path.posix.dirname(sourcePath), decoded));
-      const exported = assetPathMap.get(resolved);
-      if (!exported) throw new Error(`F5B_CSS_DEPENDENCY_UNPACKAGED: ${sourcePath} -> ${resolved}`);
-      const relative = path.posix.relative(path.posix.dirname(targetPath), exported);
-      if (!relative || relative.startsWith('/') || relative === '..' || relative.startsWith('../')) {
-        return full.replace(specifier, `${relative || path.posix.basename(exported)}${suffix}`);
-      }
-      return full.replace(specifier, `${relative}${suffix}`);
-    }));
+  const rewrite = (full, quote, specifier) => {
+    if (!specifier || specifier.startsWith('#') || /^(?:https?:|data:|blob:|\/\/)/i.test(specifier)) return full;
+    const split = specifier.match(/^([^?#]*)([?#].*)?$/);
+    const clean = split?.[1] ?? specifier;
+    const suffix = split?.[2] ?? '';
+    let decoded;
+    try { decoded = decodeURIComponent(clean); }
+    catch { throw new Error(`F5B_CSS_DEPENDENCY_UNSAFE: ${sourcePath} -> ${specifier}`); }
+    if (/%2f|%5c|(?:^|\/)%2e(?:%2e)?(?=\/|$)/i.test(clean) || decoded.includes('\\') || decoded.includes('\0') ||
+        /[\x00-\x1f\x7f]/.test(decoded) || decoded.startsWith('//')) {
+      throw new Error(`F5B_CSS_DEPENDENCY_UNSAFE: ${sourcePath} -> ${specifier}`);
+    }
+    const resolved = path.posix.normalize(decoded.startsWith('/')
+      ? decoded.slice(1) : path.posix.join(path.posix.dirname(sourcePath), decoded));
+    const exported = assetPathMap.get(resolved);
+    if (!exported) throw new Error(`F5B_CSS_DEPENDENCY_UNPACKAGED: ${sourcePath} -> ${resolved}`);
+    const relative = path.posix.relative(path.posix.dirname(targetPath), exported);
+    if (!relative || relative.startsWith('/') || relative === '..' || relative.startsWith('../')) {
+      return full.replace(specifier, `${relative || path.posix.basename(exported)}${suffix}`);
+    }
+    return full.replace(specifier, `${relative}${suffix}`);
+  };
+  const rewritten = source
+    .replace(/\burl\s*\(\s*(['"]?)([^)'"\s]+)\1\s*\)/gi, rewrite)
+    .replace(/@import\s+(['"])([^'"\r\n]+)\1/gi, rewrite);
+  return Buffer.from(rewritten);
 }
 
 function scanDerivedFiles(root, relative = '') {

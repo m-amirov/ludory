@@ -216,15 +216,24 @@ test('F5b2 rebases identical module-relative URLs according to each source modul
   const { project } = fixture(t);
   const directories = ['a', 'b'].map(name => path.join(project, 'src', 'ui', name));
   for (const directory of directories) fs.mkdirSync(directory, { recursive: true });
+  fs.mkdirSync(path.join(project, 'assets', 'fonts'), { recursive: true });
+  fs.writeFileSync(path.join(project, 'assets', 'fonts', 'Manrope[wght].ttf'), 'manrope-query-font');
   fs.writeFileSync(path.join(directories[0], 'theme.css'), 'body { color: red; }\n');
   fs.writeFileSync(path.join(directories[1], 'theme.css'), 'body { color: blue; }\n');
   fs.writeFileSync(path.join(directories[0], 'theme.js'),
     "export const themeA = new URL('./theme.css', import.meta.url);\n");
   fs.writeFileSync(path.join(directories[1], 'theme.js'),
     "export const themeB = new URL('./theme.css', import.meta.url);\n");
+  fs.writeFileSync(path.join(directories[0], 'query.js'),
+    "export const queriedTheme = new URL('./theme.css?v=1#theme', import.meta.url);\n" +
+    "export const queriedFont = new URL('../../../assets/fonts/Manrope%5Bwght%5D.ttf?v=1#font', import.meta.url);\n");
+  fs.writeFileSync(path.join(directories[0], 'dynamic.js'),
+    "export const dynamicTheme = new URL(`./${'theme.css'}`, import.meta.url);\n");
   fs.appendFileSync(path.join(project, 'src', 'story.js'), `\nimport { themeA } from './ui/a/theme.js';
 import { themeB } from './ui/b/theme.js';
-export const moduleThemes = [themeA.href, themeB.href];\n`);
+import { queriedTheme, queriedFont } from './ui/a/query.js';
+import { dynamicTheme } from './ui/a/dynamic.js';
+export const moduleThemes = [themeA.href, themeB.href, queriedTheme.href, queriedFont.href, dynamicTheme.href];\n`);
   refreshStoryProof(project);
 
   const plan = planNarrativePlatformExport(project);
@@ -236,7 +245,10 @@ export const moduleThemes = [themeA.href, themeB.href];\n`);
       const js = fs.readFileSync(path.join(item.root, 'src', 'main.js'), 'utf8');
       assert.match(js, /\.\.\/assets\/ui\/a\/theme\.css/);
       assert.match(js, /\.\.\/assets\/ui\/b\/theme\.css/);
-      assert.equal(js.match(/\.\.\/assets\/ui\/a\/theme\.css/g)?.length, 1);
+      assert.match(js, /\.\.\/assets\/ui\/a\/theme\.css\?v=1#theme/);
+      assert.match(js, /\.\.\/assets\/fonts\/Manrope-wght\.ttf\?v=1#font/);
+      assert.match(js, /`\.\.\/assets\/ui\/a\/\$\{["']theme\.css["']\}`/);
+      assert.equal(js.match(/\.\.\/assets\/ui\/a\/theme\.css/g)?.length, 2);
       assert.equal(js.match(/\.\.\/assets\/ui\/b\/theme\.css/g)?.length, 1);
     }
   } finally { derived.cleanup(); }
@@ -258,7 +270,9 @@ test('F5b2 resolves percent-encoded and root-relative CSS dependencies without w
   font-family: 'Cinematic Manrope';
   src: url('/assets/fonts/Manrope%5Bwght%5D.ttf');
 }
+@import './base.css';
 `);
+  fs.writeFileSync(path.join(ui, 'base.css'), '.theme-base { color: inherit; }\n');
   fs.writeFileSync(path.join(ui, 'theme.js'),
     "export const theme = new URL('./theme.css', import.meta.url);\n");
   fs.appendFileSync(path.join(project, 'src', 'story.js'), "\nimport './ui/theme.js';\n");
@@ -273,6 +287,7 @@ test('F5b2 resolves percent-encoded and root-relative CSS dependencies without w
       const css = fs.readFileSync(path.join(item.root, 'assets', 'ui', 'theme.css'), 'utf8');
       assert.match(css, /\.\.\/fonts\/CormorantGaramond-wght\.ttf/);
       assert.match(css, /\.\.\/fonts\/Manrope-wght\.ttf/);
+      assert.match(css, /@import ['"]base\.css['"]/);
       assert.doesNotMatch(css, /%5B|%5D|\/assets\/fonts/);
     }
   } finally { derived.cleanup(); }

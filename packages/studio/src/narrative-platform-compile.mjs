@@ -158,9 +158,19 @@ function normalizedSourcePath(value) {
 }
 
 function resolveSourceDependency(owner, specifier) {
-  const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(owner), specifier));
+  const split = specifier.match(/^([^?#]*)([?#].*)?$/);
+  const rawPath = split?.[1] ?? specifier;
+  const suffix = split?.[2] ?? '';
+  if (!rawPath || /^(?:[a-z][\w+.-]*:|\/\/)/i.test(rawPath)) return null;
+  let decoded;
+  try { decoded = decodeURIComponent(rawPath); }
+  catch { return null; }
+  if (/%2f|%5c/i.test(rawPath) || decoded.includes('\\') || decoded.includes('\0') ||
+      /[\x00-\x1f\x7f]/.test(decoded) || /^(?:[a-z][\w+.-]*:|\/\/)/i.test(decoded)) return null;
+  const resolved = path.posix.normalize(decoded.startsWith('/')
+    ? decoded.slice(1) : path.posix.join(path.posix.dirname(owner), decoded));
   if (resolved === '..' || resolved.startsWith('../') || resolved.startsWith('/')) return null;
-  return resolved;
+  return { path: resolved, suffix };
 }
 
 function outputAssetSpecifier(target) {
@@ -176,12 +186,13 @@ function rewriteSourceModuleAssetUrls(source, owner, assetPathMap) {
   let output = source.replace(/new\s+URL\s*\(\s*(['"])([^'"\n]+)\1\s*,\s*import\.meta\.url\s*\)/g,
     (full, quote, specifier) => {
       const resolved = resolveSourceDependency(owner, specifier);
-      const target = mappings.get(resolved);
-      return target ? full.replace(specifier, outputAssetSpecifier(target)) : full;
+      const target = mappings.get(resolved?.path);
+      return target ? full.replace(specifier, `${outputAssetSpecifier(target)}${resolved.suffix}`) : full;
     });
   output = output.replace(/new\s+URL\s*\(\s*`([^`$]*)\$\{([^}]*)\}`\s*,\s*import\.meta\.url\s*\)/g,
     (full, prefix, expression) => {
-      const sourceDirectory = resolveSourceDependency(owner, prefix);
+      const resolved = resolveSourceDependency(owner, prefix);
+      const sourceDirectory = resolved?.path?.replace(/\/+$/, '');
       if (!sourceDirectory) return full;
       const mapping = [...mappings.entries()].find(([from]) => from.startsWith(`${sourceDirectory}/`));
       if (!mapping) return full;
