@@ -270,7 +270,8 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   fs.writeFileSync(proofFile, `${JSON.stringify(proof, null, 2)}\n`);
   const storyFile = path.join(project, 'src/story.js');
   fs.appendFileSync(storyFile,
-    "\nexport const dynamicPortrait = new URL(`./assets/portraits/${'alice'}.png`, import.meta.url);\n");
+    "\nexport const dynamicPortrait = new URL(`./assets/portraits/${'alice'}.png`, import.meta.url);\n" +
+    "export const rootRelativePortrait = '/assets/first/portrait.png';\n");
   refreshStoryProof(project);
   const plan = planNarrativePlatformExport(project);
   assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
@@ -289,6 +290,8 @@ test('F5b2 binds optimized output to source bytes and rewrites duplicate CSS ima
   const main = Buffer.from(entries['src/main.js']).toString('utf8');
   assert.match(main, /\.\.?\/assets\/portraits\/\$\{[^}]+\}\.webp/);
   assert.doesNotMatch(main, /\.\.?\/assets\/portraits\/\$\{[^}]+\}\.png/);
+  assert.match(main, /['\"]\/assets\/first\/portrait\.webp['\"]/);
+  assert.doesNotMatch(main, /['\"]\/assets\/first\/portrait\.png['\"]/);
 
   const tampered = { ...entries };
   tampered['assets/first/portrait.webp'] = await sharp({ create: { width: 5, height: 4, channels: 4,

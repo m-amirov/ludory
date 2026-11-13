@@ -235,7 +235,7 @@ function rewriteSvgImageReferences(text, filePath, imagePathMap) {
 function replacePlatformResourceToken(text, from, to) {
   const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const boundary = from.startsWith('assets/')
-    ? '(^|[^A-Za-z0-9._/-])(?:(?:\\.\\.?/)*)'
+    ? '(^|[^A-Za-z0-9._/-])(?:/|(?:\\.\\.?/)*)'
     : '(^|[^A-Za-z0-9._-])';
   return text.replace(new RegExp(`${boundary}${escaped}(?=$|[^A-Za-z0-9._-])`, 'g'),
     full => full.replace(from, to));
