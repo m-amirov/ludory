@@ -13,6 +13,8 @@ function fixture(t) {
   fs.writeFileSync(path.join(root, 'index.html'), '<h1>Fresh game</h1>');
   fs.mkdirSync(path.join(root, 'assets'));
   fs.writeFileSync(path.join(root, 'assets', 'image.svg'), '<svg/>');
+  fs.writeFileSync(path.join(root, 'assets', 'CormorantGaramond[wght].ttf'), 'cormorant-ttf');
+  fs.writeFileSync(path.join(root, 'assets', 'Manrope[wght].ttf'), 'manrope-ttf');
   fs.writeFileSync(path.join(root, '.env'), 'secret-value');
   return root;
 }
@@ -50,6 +52,21 @@ test('preview serves only built files with safe headers, HEAD and a stable diges
   assert.equal(head.status, 200);
   assert.equal(head.text, '');
   assert.equal((await request(server.port, '/assets/image.svg', 'POST')).status, 405);
+});
+
+test('preview serves original TTF files with the font/ttf MIME type', async t => {
+  const root = fixture(t);
+  const server = await startPreviewServer({ root, port: 0 });
+  t.after(async () => server.close());
+  for (const [filename, body] of [
+    ['CormorantGaramond[wght].ttf', 'cormorant-ttf'],
+    ['Manrope[wght].ttf', 'manrope-ttf'],
+  ]) {
+    const response = await request(server.port, `/assets/${encodeURIComponent(filename)}`);
+    assert.equal(response.status, 200, filename);
+    assert.equal(response.headers['content-type'], 'font/ttf', filename);
+    assert.equal(response.text, body, filename);
+  }
 });
 
 test('traversal, encoded paths, hidden files, directories and symlinks cannot be served', async t => {

@@ -212,6 +212,82 @@ body { font-family: 'Cinematic Manrope'; }
   } finally { derived.cleanup(); }
 });
 
+test('F5b2 rebases identical module-relative URLs according to each source module', t => {
+  const { project } = fixture(t);
+  const directories = ['a', 'b'].map(name => path.join(project, 'src', 'ui', name));
+  for (const directory of directories) fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directories[0], 'theme.css'), 'body { color: red; }\n');
+  fs.writeFileSync(path.join(directories[1], 'theme.css'), 'body { color: blue; }\n');
+  fs.writeFileSync(path.join(directories[0], 'theme.js'),
+    "export const themeA = new URL('./theme.css', import.meta.url);\n");
+  fs.writeFileSync(path.join(directories[1], 'theme.js'),
+    "export const themeB = new URL('./theme.css', import.meta.url);\n");
+  fs.appendFileSync(path.join(project, 'src', 'story.js'), `\nimport { themeA } from './ui/a/theme.js';
+import { themeB } from './ui/b/theme.js';
+export const moduleThemes = [themeA.href, themeB.href];\n`);
+  refreshStoryProof(project);
+
+  const plan = planNarrativePlatformExport(project);
+  assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
+  const derived = materializeNarrativePlatformProjects(plan);
+  assert.equal(derived.status, 'DERIVED_LOCAL', derived.reasonCode);
+  try {
+    for (const item of Object.values(derived.projects)) {
+      const js = fs.readFileSync(path.join(item.root, 'src', 'main.js'), 'utf8');
+      assert.match(js, /\.\.\/assets\/ui\/a\/theme\.css/);
+      assert.match(js, /\.\.\/assets\/ui\/b\/theme\.css/);
+      assert.equal(js.match(/\.\.\/assets\/ui\/a\/theme\.css/g)?.length, 1);
+      assert.equal(js.match(/\.\.\/assets\/ui\/b\/theme\.css/g)?.length, 1);
+    }
+  } finally { derived.cleanup(); }
+});
+
+test('F5b2 resolves percent-encoded and root-relative CSS dependencies without weakening traversal checks', t => {
+  const { project } = fixture(t);
+  const ui = path.join(project, 'src', 'ui');
+  const fonts = path.join(project, 'assets', 'fonts');
+  fs.mkdirSync(ui, { recursive: true });
+  fs.mkdirSync(fonts, { recursive: true });
+  fs.writeFileSync(path.join(fonts, 'CormorantGaramond[wght].ttf'), 'cormorant');
+  fs.writeFileSync(path.join(fonts, 'Manrope[wght].ttf'), 'manrope');
+  fs.writeFileSync(path.join(ui, 'theme.css'), `@font-face {
+  font-family: 'Cinematic Cormorant';
+  src: url('../../assets/fonts/CormorantGaramond%5Bwght%5D.ttf');
+}
+@font-face {
+  font-family: 'Cinematic Manrope';
+  src: url('/assets/fonts/Manrope%5Bwght%5D.ttf');
+}
+`);
+  fs.writeFileSync(path.join(ui, 'theme.js'),
+    "export const theme = new URL('./theme.css', import.meta.url);\n");
+  fs.appendFileSync(path.join(project, 'src', 'story.js'), "\nimport './ui/theme.js';\n");
+  refreshStoryProof(project);
+
+  const plan = planNarrativePlatformExport(project);
+  assert.equal(plan.status, 'READY_TO_DERIVE', plan.reasonCode);
+  const derived = materializeNarrativePlatformProjects(plan);
+  assert.equal(derived.status, 'DERIVED_LOCAL', derived.reasonCode);
+  try {
+    for (const item of Object.values(derived.projects)) {
+      const css = fs.readFileSync(path.join(item.root, 'assets', 'ui', 'theme.css'), 'utf8');
+      assert.match(css, /\.\.\/fonts\/CormorantGaramond-wght\.ttf/);
+      assert.match(css, /\.\.\/fonts\/Manrope-wght\.ttf/);
+      assert.doesNotMatch(css, /%5B|%5D|\/assets\/fonts/);
+    }
+  } finally { derived.cleanup(); }
+
+  fs.writeFileSync(path.join(project, 'assets', 'escape.ttf'), 'escape');
+  fs.writeFileSync(path.join(ui, 'theme.css'), 'body { background: url(/assets/%2e%2e/assets/escape.ttf); }\n');
+  refreshStoryProof(project);
+  const unsafePlan = planNarrativePlatformExport(project);
+  assert.equal(unsafePlan.status, 'READY_TO_DERIVE', unsafePlan.reasonCode);
+  const unsafe = materializeNarrativePlatformProjects(unsafePlan);
+  assert.equal(unsafe.status, 'BLOCKED');
+  assert.match(unsafe.reasonCode, /F5B_CSS_DEPENDENCY_UNPACKAGED|F5B_CSS_DEPENDENCY_UNSAFE/);
+  unsafe.cleanup?.();
+});
+
 test('F5b2 derived manifests preserve all authored title locales', t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-f5b2-titles-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

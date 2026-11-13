@@ -133,7 +133,15 @@ function rewriteCssDependencies(bytes, sourcePath, targetPath, assetPathMap) {
       const split = specifier.match(/^([^?#]*)([?#].*)?$/);
       const clean = split?.[1] ?? specifier;
       const suffix = split?.[2] ?? '';
-      const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(sourcePath), clean));
+      let decoded;
+      try { decoded = decodeURIComponent(clean); }
+      catch { throw new Error(`F5B_CSS_DEPENDENCY_UNSAFE: ${sourcePath} -> ${specifier}`); }
+      if (/%2f|%5c|(?:^|\/)%2e(?:%2e)?(?=\/|$)/i.test(clean) || decoded.includes('\\') || decoded.includes('\0') ||
+          /[\x00-\x1f\x7f]/.test(decoded) || decoded.startsWith('//')) {
+        throw new Error(`F5B_CSS_DEPENDENCY_UNSAFE: ${sourcePath} -> ${specifier}`);
+      }
+      const resolved = path.posix.normalize(decoded.startsWith('/')
+        ? decoded.slice(1) : path.posix.join(path.posix.dirname(sourcePath), decoded));
       const exported = assetPathMap.get(resolved);
       if (!exported) throw new Error(`F5B_CSS_DEPENDENCY_UNPACKAGED: ${sourcePath} -> ${resolved}`);
       const relative = path.posix.relative(path.posix.dirname(targetPath), exported);

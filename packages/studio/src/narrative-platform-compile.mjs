@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { buildSync, transformSync } from 'esbuild';
@@ -170,46 +171,46 @@ function outputAssetSpecifier(target) {
   return relative;
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function rebaseBundledAssetUrls(compiled, { root, inputs, assetPathMap } = {}) {
-  if (!(assetPathMap instanceof Map) || !assetPathMap.size) return compiled;
-  let output = compiled.toString('utf8');
-  const mappings = [...assetPathMap.entries()].map(([source, target]) => [
-    normalizedSourcePath(source), normalizedSourcePath(target),
-  ]);
-  for (const input of inputs) {
-    const owner = normalizedSourcePath(input);
-    if (owner === '<stdin>' || owner === 'src/f5b2-platform-entry.js' ||
-        !/\.(?:js|mjs)$/i.test(owner)) continue;
-    const source = regular(root, owner).toString('utf8');
-    for (const match of source.matchAll(/new\s+URL\s*\(\s*(['"])([^'"\n]+)\1\s*,\s*import\.meta\.url\s*\)/g)) {
-      const resolved = resolveSourceDependency(owner, match[2]);
-      const target = mappings.find(([from]) => from === resolved)?.[1];
-      if (!target) continue;
-      const replacement = outputAssetSpecifier(target);
-      const expression = new RegExp(`(new\\s+URL\\s*\\(\\s*)(['"])${escapeRegExp(match[2])}\\2(\\s*,\\s*import\\.meta\\.url\\s*\\))`, 'g');
-      output = output.replace(expression, (_full, prefix, quote, suffix) =>
-        `${prefix}${quote}${replacement}${quote}${suffix}`);
-    }
-    for (const match of source.matchAll(/new\s+URL\s*\(\s*`([^`$]*)\$\{([^}]*)\}`\s*,\s*import\.meta\.url\s*\)/g)) {
-      const sourceDirectory = resolveSourceDependency(owner, match[1]);
-      if (!sourceDirectory) continue;
-      const mapping = mappings.find(([from]) => from.startsWith(`${sourceDirectory}/`));
-      if (!mapping) continue;
+function rewriteSourceModuleAssetUrls(source, owner, assetPathMap) {
+  const mappings = assetPathMap instanceof Map ? assetPathMap : new Map();
+  let output = source.replace(/new\s+URL\s*\(\s*(['"])([^'"\n]+)\1\s*,\s*import\.meta\.url\s*\)/g,
+    (full, quote, specifier) => {
+      const resolved = resolveSourceDependency(owner, specifier);
+      const target = mappings.get(resolved);
+      return target ? full.replace(specifier, outputAssetSpecifier(target)) : full;
+    });
+  output = output.replace(/new\s+URL\s*\(\s*`([^`$]*)\$\{([^}]*)\}`\s*,\s*import\.meta\.url\s*\)/g,
+    (full, prefix, expression) => {
+      const sourceDirectory = resolveSourceDependency(owner, prefix);
+      if (!sourceDirectory) return full;
+      const mapping = [...mappings.entries()].find(([from]) => from.startsWith(`${sourceDirectory}/`));
+      if (!mapping) return full;
       const sourceSuffix = mapping[0].slice(sourceDirectory.length + 1);
       const targetDirectory = mapping[1].slice(0, -(sourceSuffix.length + 1));
-      const replacement = `${outputAssetSpecifier(targetDirectory)}/`;
-      const expression = new RegExp(
-        '(new\\s+URL\\s*\\(\\s*)`' + escapeRegExp(match[1]) +
-        '(\\$\\{[^`]*\\})`(\\s*,\\s*import\\.meta\\.url\\s*\\))', 'g');
-      output = output.replace(expression, (_full, prefix, expressionBody, suffix) =>
-        `${prefix}\`${replacement}${expressionBody}\`${suffix}`);
+      return full.replace(prefix, `${outputAssetSpecifier(targetDirectory)}/`);
+    });
+  return output;
+}
+
+function stagedCompileRoot(root, inputs, assetPathMap) {
+  const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-f5b2-compile-'));
+  try {
+    for (const name of inputs) {
+      if (name === '<stdin>' || name === 'src/f5b2-platform-entry.js') continue;
+      const relative = normalizedSourcePath(name);
+      const destination = path.join(staging, ...relative.split('/'));
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      const bytes = regular(root, relative);
+      const transformed = /\.(?:js|mjs)$/i.test(relative)
+        ? Buffer.from(rewriteSourceModuleAssetUrls(bytes.toString('utf8'), relative, assetPathMap))
+        : bytes;
+      fs.writeFileSync(destination, transformed);
     }
+    return staging;
+  } catch (error) {
+    fs.rmSync(staging, { recursive: true, force: true });
+    throw error;
   }
-  return Buffer.from(output);
 }
 
 /** Compile exact pinned author JS into a single SDK entry, excluding other executable ZIP members. */
@@ -224,15 +225,16 @@ export function compileNarrativePlatformEntrypoint({ sourceRoot, target, assetPa
   // editable; an altered launcher is blocked rather than silently rebuilt.
   const templateEntry = loadCatalog().templates.get('narrative-interactive').assets.get('src/main.js').bytes;
   if (!entry.equals(templateEntry)) throw new Error('F5B_AUTHOR_ENTRY_CONTRACT_UNVERIFIED');
-  // Build with a canonical root so all resolved authored JS can be audited.
-  const built = buildSync({
-    stdin: { contents: bootstraps[target], resolveDir: path.join(root, 'src'), sourcefile: 'f5b2-platform-entry.js', loader: 'js' },
+  const build = buildRoot => buildSync({
+    stdin: { contents: bootstraps[target], resolveDir: path.join(buildRoot, 'src'), sourcefile: 'f5b2-platform-entry.js', loader: 'js' },
     bundle: true, platform: 'browser', target: 'es2022', format: 'esm', write: false,
     external: target === 'yandex-games' ? [SDK[target]] : [SDK[target], '../assets/vk-bridge.js'],
-    absWorkingDir: root, metafile: true, minify: false, logLevel: 'silent',
+    absWorkingDir: buildRoot, metafile: true, minify: false, logLevel: 'silent',
   });
+  let built = build(root);
   if (built.warnings.length) throw new Error(`F5B_AUTHOR_ENTRY_EXPORT_REQUIRED: ${built.warnings[0].text}`);
-  for (const name of Object.keys(built.metafile.inputs)) {
+  const originalInputs = Object.keys(built.metafile.inputs);
+  for (const name of originalInputs) {
     // esbuild records its virtual stdin as the declared sourcefile under resolveDir.
     if (name === '<stdin>' || name === 'src/f5b2-platform-entry.js') continue;
     const full = path.resolve(root, name);
@@ -252,15 +254,26 @@ export function compileNarrativePlatformEntrypoint({ sourceRoot, target, assetPa
     }
   }
   if (built.outputFiles.length !== 1) throw new Error('F5B_UNEXPECTED_BUNDLE_OUTPUT');
-  const compiled = rebaseBundledAssetUrls(Buffer.from(built.outputFiles[0].contents), {
-    root, inputs: Object.keys(built.metafile.inputs), assetPathMap,
-  });
-  const imports = Object.values(built.metafile.outputs).flatMap(output => output.imports)
-    .filter(item => item.external).map(item => item.path).sort();
-  const allowed = (target === 'yandex-games' ? [SDK[target]] : [SDK[target], '../assets/vk-bridge.js']).sort();
-  if (JSON.stringify(imports) !== JSON.stringify(allowed)) {
-    throw new Error('F5B_FOREIGN_OR_DYNAMIC_AUTHOR_IMPORT');
+  let staging;
+  try {
+    if (assetPathMap instanceof Map && assetPathMap.size) {
+      staging = stagedCompileRoot(root, originalInputs, assetPathMap);
+      built = build(staging);
+      if (built.warnings.length) throw new Error(`F5B_AUTHOR_ENTRY_EXPORT_REQUIRED: ${built.warnings[0].text}`);
+      if (JSON.stringify(Object.keys(built.metafile.inputs).sort()) !== JSON.stringify([...originalInputs].sort())) {
+        throw new Error('F5B_AUTHOR_ENTRY_EXPORT_GRAPH_CHANGED');
+      }
+    }
+    const compiled = Buffer.from(built.outputFiles[0].contents);
+    const imports = Object.values(built.metafile.outputs).flatMap(output => output.imports)
+      .filter(item => item.external).map(item => item.path).sort();
+    const allowed = (target === 'yandex-games' ? [SDK[target]] : [SDK[target], '../assets/vk-bridge.js']).sort();
+    if (JSON.stringify(imports) !== JSON.stringify(allowed)) {
+      throw new Error('F5B_FOREIGN_OR_DYNAMIC_AUTHOR_IMPORT');
+    }
+    return { entryBytes: compiled, htmlBytes: originalHtml(root, target),
+      authorEntrySha256: digest(entry), authorStorySha256: digest(story) };
+  } finally {
+    if (staging) fs.rmSync(staging, { recursive: true, force: true });
   }
-  return { entryBytes: compiled, htmlBytes: originalHtml(root, target),
-    authorEntrySha256: digest(entry), authorStorySha256: digest(story) };
 }
