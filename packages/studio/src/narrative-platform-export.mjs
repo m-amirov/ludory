@@ -259,7 +259,7 @@ function rewritePlatformDynamicImageReferences(text, filePath, imageDirectories)
   return rewritten;
 }
 
-function rewritePlatformImageReferences(root, replacements, imagePathMap, imageDirectories) {
+function rewritePlatformImageReferences(root, replacements, imagePathMap, imageDirectories, basenameReplacements) {
   for (const file of scanDerivedFiles(root)) {
     if (!isTextResource(file.path)) continue;
     const filename = path.join(root, file.path);
@@ -273,6 +273,7 @@ function rewritePlatformImageReferences(root, replacements, imagePathMap, imageD
     }
     text = rewritePlatformDynamicImageReferences(text, file.path, imageDirectories);
     for (const [from, to] of replacements) text = replacePlatformResourceToken(text, from, to);
+    for (const [from, to] of basenameReplacements) text = replacePlatformResourceToken(text, from, to);
     if (text !== original) fs.writeFileSync(filename, text);
   }
 }
@@ -285,6 +286,14 @@ async function materializePlatformWebp(project) {
   const replacements = [];
   const imagePathMap = new Map();
   const imageDirectories = new Set(pngs.map(file => path.posix.dirname(file.path)));
+  const basenameCounts = new Map();
+  for (const source of pngs) {
+    const basename = path.posix.basename(source.path);
+    basenameCounts.set(basename, (basenameCounts.get(basename) ?? 0) + 1);
+  }
+  const basenameReplacements = new Map([...basenameCounts]
+    .filter(([, count]) => count === 1)
+    .map(([basename]) => [basename, basename.replace(/\.png$/i, '.webp')]));
   for (const source of pngs) {
     const derivedPath = source.path.replace(/\.png$/i, '.webp');
     if (targetPaths.has(derivedPath)) throw new Error(`F5B_PLATFORM_WEBP_COLLISION: ${derivedPath}`);
@@ -301,7 +310,7 @@ async function materializePlatformWebp(project) {
     imagePathMap.set(source.path, derivedPath);
     replacements.push([source.path, derivedPath]);
   }
-  rewritePlatformImageReferences(project.root, replacements, imagePathMap, imageDirectories);
+  rewritePlatformImageReferences(project.root, replacements, imagePathMap, imageDirectories, basenameReplacements);
   for (const source of pngs) fs.unlinkSync(path.join(project.root, source.path));
   const files = scanDerivedFiles(project.root);
   if (files.some(file => file.path.startsWith('assets/') &&
