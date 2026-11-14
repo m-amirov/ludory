@@ -9,3 +9,4 @@ export { prepareQaReviewPacket } from './qa-review-handoff.mjs';
 export { planYandexFieldTests } from './plan.mjs';
 export { prepareDraftProbe, verifyServedCandidate, finalizeDraftObservation, draftFailureReport, validateDraftUrl, validateGameBase } from './draft-probe.mjs';
 export { ReleaseInputError } from './errors.mjs';
+export { SOURCE_FONT_NOTICE_PAIRS, validateSourceFontNoticePairing } from './font-notices.mjs';

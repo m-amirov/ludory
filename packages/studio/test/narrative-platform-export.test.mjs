@@ -10,6 +10,7 @@ import { unzipSync, zipSync } from 'fflate';
 import { planCreate, applyCreatePlan } from '../src/scaffold.mjs';
 import { planPreviewBuild } from '../src/preview-build.mjs';
 import { planNarrativePlatformExport, materializeNarrativePlatformSource,
+  materializeNarrativePlatformProjects,
   buildNarrativePlatformCandidates, verifyNarrativePlatformCandidates } from '@ludory/studio/narrative-platform-export';
 import { inspectYandexArchive, inspectVkArchive } from '@ludory/release';
 import { F5B3_BROWSER_CASES, F5B3_ADVERSE_CASES, F5B3_STORY_PATH,
@@ -37,6 +38,63 @@ function newProject(t, { template = 'narrative-interactive', profile = 'narrativ
   assert.equal(applyCreatePlan(plan).status, 'APPLIED');
   return { root, project };
 }
+
+function addFontFiles(project, { notices = 'both' } = {}) {
+  const fonts = path.join(project, 'assets', 'fonts');
+  fs.mkdirSync(fonts, { recursive: true });
+  fs.writeFileSync(path.join(fonts, 'CormorantGaramond[wght].ttf'), Buffer.from('Cormorant font bytes'));
+  fs.writeFileSync(path.join(fonts, 'Manrope[wght].ttf'), Buffer.from('Manrope font bytes'));
+  if (notices === 'both' || notices === 'cormorant') {
+    fs.writeFileSync(path.join(fonts, 'OFL-CormorantGaramond.txt'), Buffer.from('Cormorant OFL notice'));
+  }
+  if (notices === 'both' || notices === 'manrope') {
+    fs.writeFileSync(path.join(fonts, 'OFL-Manrope.txt'), Buffer.from('Manrope OFL notice'));
+  }
+}
+
+test('F6E exports only the exact paired OFL notices and rejects an unpaired font', t => {
+  const { project } = newProject(t);
+  addFontFiles(project);
+  const plan = planNarrativePlatformExport(project);
+  assert.equal(plan.status, 'READY_TO_DERIVE');
+  const derived = materializeNarrativePlatformProjects(plan);
+  assert.equal(derived.status, 'DERIVED_LOCAL', derived.reasonCode);
+  for (const target of ['yandex', 'vk']) {
+    assert.deepEqual(fs.readFileSync(path.join(derived.projects[target].root,
+      'assets/fonts/OFL-CormorantGaramond.txt')), Buffer.from('Cormorant OFL notice'));
+    assert.deepEqual(fs.readFileSync(path.join(derived.projects[target].root,
+      'assets/fonts/OFL-Manrope.txt')), Buffer.from('Manrope OFL notice'));
+  }
+  derived.cleanup();
+
+  const missing = newProject(t);
+  addFontFiles(missing.project, { notices: 'cormorant' });
+  const missingPlan = planNarrativePlatformExport(missing.project);
+  assert.equal(missingPlan.status, 'READY_TO_DERIVE');
+  const rejected = materializeNarrativePlatformProjects(missingPlan);
+  assert.equal(rejected.status, 'BLOCKED');
+  assert.match(rejected.reasonCode, /F6E_FONT_NOTICE_PAIRING/);
+});
+
+test('F6E refuses a notice changed after the source plan and keeps arbitrary txt excluded', t => {
+  const { project } = newProject(t);
+  addFontFiles(project);
+  const plan = planNarrativePlatformExport(project);
+  fs.appendFileSync(path.join(project, 'assets/fonts/OFL-Manrope.txt'), '\nchanged');
+  const stale = materializeNarrativePlatformProjects(plan);
+  assert.equal(stale.status, 'BLOCKED');
+  assert.match(stale.reasonCode, /F5B_SOURCE_CHANGED|PREVIEW_SOURCE_CHANGED|STALE/);
+
+  const arbitrary = newProject(t);
+  fs.mkdirSync(path.join(arbitrary.project, 'assets', 'docs'), { recursive: true });
+  fs.writeFileSync(path.join(arbitrary.project, 'assets/docs/README.txt'), 'not a license notice');
+  const arbitraryPlan = planNarrativePlatformExport(arbitrary.project);
+  assert.equal(arbitraryPlan.status, 'READY_TO_DERIVE');
+  assert.equal(arbitraryPlan.files.some(file => file.path === 'assets/docs/README.txt'), false);
+  const derived = materializeNarrativePlatformProjects(arbitraryPlan);
+  assert.equal(derived.status, 'DERIVED_LOCAL');
+  derived.cleanup();
+});
 
 test('F5b1 pins one trusted narrative source for both declared SDK targets without writing source or ZIP', t => {
   const { project } = newProject(t);

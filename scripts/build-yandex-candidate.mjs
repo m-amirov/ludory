@@ -6,6 +6,7 @@ import { zipSync } from 'fflate';
 import { parse as parseHtml } from 'parse5';
 import { defineGame } from '@ludory/core';
 import { verifyStudioOrigin } from '@ludory/studio-trust';
+import { FONT_NOTICE_NAMES, validateFontNoticePairing } from '../packages/release/src/font-notices.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const required = ['assets/ludory-yandex.js', 'index.html', 'ludory.project.json', 'src/main.js'];
@@ -115,7 +116,8 @@ function collectAssets(root, subdir, found) {
     }
     if (!stat.isFile()) throw new Error(`Non-regular Yandex candidate asset: ${relative}`);
     if (relative === 'assets/ludory-yandex.js') continue;
-    if (name.toLowerCase() === 'sdk.js' || !mediaExtensions.has(path.extname(name).toLowerCase())) {
+    if (name.toLowerCase() === 'sdk.js' ||
+        (!mediaExtensions.has(path.extname(name).toLowerCase()) && !FONT_NOTICE_NAMES.has(relative))) {
       throw new Error(`Unsupported or copied sdk.js asset in Yandex candidate: ${relative}`);
     }
     found.push(relative);
@@ -242,6 +244,7 @@ export async function buildYandexCandidate({ projectDir, outputZip } = {}) {
   const assets = [];
   collectAssets(root, 'assets', assets);
   const names = [...required, ...assets].sort();
+  validateFontNoticePairing(names, 'Yandex');
   const casefold = names.map(name => name.toLowerCase());
   if (new Set(casefold).size !== names.length) throw new Error('Case-ambiguous duplicate Yandex candidate asset names');
   let total = 0;

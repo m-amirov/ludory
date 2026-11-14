@@ -7,6 +7,7 @@ import { parse as parseHtml } from 'parse5';
 import { buildSync } from 'esbuild';
 import { defineGame } from '@ludory/core';
 import { verifyStudioOrigin } from '@ludory/studio-trust';
+import { FONT_NOTICE_NAMES, validateFontNoticePairing } from '../packages/release/src/font-notices.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const required = [
@@ -194,7 +195,7 @@ function collectMedia(root, directory, found) {
     } else if (!stat.isFile()) {
       throw new Error(`Non-regular VK candidate asset: ${relative}`);
     } else if (!managed.includes(relative)) {
-      if (!media.has(path.posix.extname(relative).toLowerCase())) {
+      if (!media.has(path.posix.extname(relative).toLowerCase()) && !FONT_NOTICE_NAMES.has(relative)) {
         throw new Error(`Unsupported VK candidate asset: ${relative}`);
       }
       found.push(relative);
@@ -282,6 +283,7 @@ export async function buildVkCandidate({ projectDir, outputZip } = {}) {
   const assets = [];
   collectMedia(root, 'assets', assets);
   const names = [...required, ...assets].sort();
+  validateFontNoticePairing(names, 'VK');
   if (names.length > maxArchiveFiles) throw new Error('VK candidate exceeds the 10000-file archive limit');
   const folded = new Set(names.map(name => name.toLowerCase()));
   if (folded.size !== names.length) {

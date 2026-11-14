@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "checkedCommit": "592dd9232b34a94d81157411d4bd6bba71a3b67a",
+  "packageLockSha256": "caef6afb9103f72dac44c00e7702db4777193c1fd8348e271d2552fee740961e",
+  "npmCiExitCode": 0,
+  "npmAuditExitCode": 0,
+  "npmAudit": {
+    "auditReportVersion": 2,
+    "vulnerabilities": {},
+    "metadata": {
+      "vulnerabilities": { "info": 0, "low": 0, "moderate": 0, "high": 0, "critical": 0, "total": 0 },
+      "dependencies": { "prod": 34, "dev": 51, "optional": 54, "peer": 0, "peerOptional": 0, "total": 112 }
+    }
+  },
+  "vendoredWebHelper": {
+    "auditPackages": [
+      "@mixmark-io/domino@2.2.0",
+      "playwright-core@1.62.0",
+      "tiktoken@1.0.22",
+      "turndown@7.2.0",
+      "turndown-plugin-gfm@1.0.2",
+      "zod@4.6.6"
+    ],
+    "npmAuditExitCode": 0,
+    "vulnerabilities": { "total": 0 },
+    "artifactSha256": "c126dd6b268cb9a9e6923215a1082de70b6b607ad9f31ab75415278dd683b4a7",
+    "runtimeTreeSha256": "3da4d490af2996bb7a04625fe8fa3f76b1fbb0dd72e93fc4533b6e05ee157d20",
+    "runtimeTreeFiles": 2217,
+    "runtimeTreeBytes": 88160302,
+    "byteReproducible": false,
+    "noticeIntegrity": "PASS"
+  },
+  "interpretation": "Zero advisories are observed for these snapshots; the prebuilt vendored helper remains supply-chain/provenance BLOCKED because byteReproducible is false."
+}

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "fe1b821554a71e37bcaa5520d7dadb4cf98482eb",
+  "ludoryCommit": "592dd9232b34a94d81157411d4bd6bba71a3b67a",
+  "sourceWorktreeRole": "host-bound QA checkout at the exact game commit",
+  "verification": {
+    "status": "LOCAL_ARCHIVES_VERIFIED",
+    "releaseReady": false,
+    "publicationAllowed": false,
+    "noticePolicy": "ONLY_EXACT_FONT_NOTICE_PATHS_ALLOWED"
+  },
+  "archives": {
+    "yandex": {
+      "sha256": "ed271d4f89a1eda9033a69a93686831c974914c17325776b88ba38b0407f2b2a",
+      "bytes": 31681477,
+      "expandedBytes": 31669021,
+      "memberCount": 82
+    },
+    "vk": {
+      "sha256": "8a9cfa9240d21dee8607db930feb4cd79e4cddf0d4094e397f04886b63fceba7",
+      "bytes": 31694277,
+      "expandedBytes": 31681471,
+      "memberCount": 85
+    }
+  },
+  "fontNotices": [
+    { "path": "assets/fonts/OFL-CormorantGaramond.txt", "sha256": "b2306305139223cbc000c2b9feffaa741687056066c227ba34de31c98eda0814", "bytes": 4480 },
+    { "path": "assets/fonts/OFL-Manrope.txt", "sha256": "4b8929f05a122b7abb9059501dc7dc4df86f8c97d5a1769d60d82cf2d2795dde", "bytes": 4480 }
+  ],
+  "forbiddenGameZipMembers": ["lighthouse.svg", "shoreline.svg", "vendored Web Helper"],
+  "sourceMediaIntegrity": {
+    "checkedFiles": 75,
+    "changedFiles": 0,
+    "scope": "PNG, WebP, TTF and C2PA-named files in the trusted source checkout"
+  },
+  "oldHashesAreSuperseded": true
+}

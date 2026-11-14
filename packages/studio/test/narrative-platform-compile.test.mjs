@@ -20,6 +20,15 @@ function refreshStoryProof(project) {
   fs.writeFileSync(filename, `${JSON.stringify(proof, null, 2)}\n`);
 }
 
+function copyFontNotice(project, filename) {
+  const fixtureNotice = {
+    'OFL-CormorantGaramond.txt': 'fixture notice for the paired Cormorant test font\n',
+    'OFL-Manrope.txt': 'fixture notice for the paired Manrope test font\n',
+  }[filename];
+  assert.ok(fixtureNotice, `unknown fixture notice ${filename}`);
+  fs.writeFileSync(path.join(project, 'assets', 'fonts', filename), fixtureNotice);
+}
+
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ludory-f5b2-compile-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -176,6 +185,8 @@ test('F5b2 packages an authored CSS skin and local TTF dependencies for both tar
   const manrope = Buffer.from('original-manrope-ttf-bytes');
   fs.writeFileSync(path.join(fonts, 'CormorantGaramond[wght].ttf'), cormorant);
   fs.writeFileSync(path.join(fonts, 'Manrope[wght].ttf'), manrope);
+  copyFontNotice(project, 'OFL-CormorantGaramond.txt');
+  copyFontNotice(project, 'OFL-Manrope.txt');
   fs.writeFileSync(path.join(ui, 'original-game.css'), `@font-face {
   font-family: 'Cinematic Cormorant';
   src: url('../../assets/fonts/CormorantGaramond[wght].ttf') format('truetype');
@@ -218,6 +229,7 @@ test('F5b2 rebases identical module-relative URLs according to each source modul
   for (const directory of directories) fs.mkdirSync(directory, { recursive: true });
   fs.mkdirSync(path.join(project, 'assets', 'fonts'), { recursive: true });
   fs.writeFileSync(path.join(project, 'assets', 'fonts', 'Manrope[wght].ttf'), 'manrope-query-font');
+  copyFontNotice(project, 'OFL-Manrope.txt');
   fs.writeFileSync(path.join(directories[0], 'theme.css'), 'body { color: red; }\n');
   fs.writeFileSync(path.join(directories[1], 'theme.css'), 'body { color: blue; }\n');
   fs.writeFileSync(path.join(directories[0], 'theme.js'),
@@ -287,6 +299,8 @@ test('F5b2 resolves percent-encoded and root-relative CSS dependencies without w
   fs.mkdirSync(fonts, { recursive: true });
   fs.writeFileSync(path.join(fonts, 'CormorantGaramond[wght].ttf'), 'cormorant');
   fs.writeFileSync(path.join(fonts, 'Manrope[wght].ttf'), 'manrope');
+  copyFontNotice(project, 'OFL-CormorantGaramond.txt');
+  copyFontNotice(project, 'OFL-Manrope.txt');
   fs.writeFileSync(path.join(ui, 'theme.css'), `@font-face {
   font-family: 'Cinematic Cormorant';
   src: url('../../assets/fonts/CormorantGaramond%5Bwght%5D.ttf');

@@ -73,6 +73,30 @@ test('rejects unsupported compression, zip64-style markers and copied sdk', t =>
   assert.throws(() => inspectYandexArchive(changed.filename), /ZIP64|directory|ZIP/i);
 });
 
+test('admits only the paired font notices and requires both notices with redistributed fonts', t => {
+  const paired = archive(t, {
+    ...fixture(),
+    'assets/fonts/CormorantGaramond-wght.ttf': 'font-a',
+    'assets/fonts/Manrope-wght.ttf': 'font-b',
+    'assets/fonts/OFL-CormorantGaramond.txt': 'notice-a',
+    'assets/fonts/OFL-Manrope.txt': 'notice-b',
+  });
+  const inspected = inspectYandexArchive(paired.filename);
+  assert.equal(inspected.files.some(file => file.path === 'assets/fonts/OFL-CormorantGaramond.txt'), true);
+  assert.equal(inspected.files.some(file => file.path === 'assets/fonts/OFL-Manrope.txt'), true);
+
+  const missing = archive(t, {
+    ...fixture(),
+    'assets/fonts/CormorantGaramond-wght.ttf': 'font-a',
+    'assets/fonts/Manrope-wght.ttf': 'font-b',
+    'assets/fonts/OFL-CormorantGaramond.txt': 'notice-a',
+  });
+  assert.throws(() => inspectYandexArchive(missing.filename), /FONT_NOTICE_PAIRING|notice/i);
+
+  const arbitrary = archive(t, { ...fixture(), 'assets/fonts/README.txt': 'not a notice' });
+  assert.throws(() => inspectYandexArchive(arbitrary.filename), /unexpected|contract|notice/i);
+});
+
 test('rejects mixed-platform manifest and symbolic archive rather than following it', t => {
   const { filename } = archive(t, { ...fixture(), 'ludory.project.json': JSON.stringify({
     schemaVersion: 1, id: 'zip-game', version: '0.1.0', title: { en: 'Game' }, engine: 'web',
