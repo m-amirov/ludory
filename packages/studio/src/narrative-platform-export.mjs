@@ -12,6 +12,7 @@ import { buildYandexCandidate } from '../../../scripts/build-yandex-candidate.mj
 import { buildVkCandidate } from '../../../scripts/build-vk-candidate.mjs';
 import { inspectYandexArchive, inspectVkArchive } from '@ludory/release';
 import { readRegularBytes } from '../../release/src/archive.mjs';
+import { SOURCE_FONT_NOTICE_PAIRS, validateSourceFontNoticePairing } from '../../release/src/font-notices.mjs';
 
 const mode = 'narrative-platform-export';
 const targets = Object.freeze(['yandex-games', 'vk-games']);
@@ -100,6 +101,7 @@ export function materializeNarrativePlatformSource(plan) {
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const platformWebpQuality = 95;
 const mediaExtensions = new Set(['.png', '.jpg', '.jpeg', '.webp', '.svg', '.ogg', '.mp3', '.wav', '.woff2', '.ttf', '.css']);
+const sourceFontNoticePaths = new Set(SOURCE_FONT_NOTICE_PAIRS.flatMap(pair => [pair.font, pair.notice]));
 const targetSpecs = Object.freeze({
   yandex: { target: 'yandex-games', template: 'yandex-runtime' },
   vk: { target: 'vk-games', template: 'vk-runtime' },
@@ -120,6 +122,9 @@ function exportAssetPath(sourcePath) {
     ['assets/fonts/CormorantGaramond[wght].ttf', 'assets/fonts/CormorantGaramond-wght.ttf'],
     ['assets/fonts/Manrope[wght].ttf', 'assets/fonts/Manrope-wght.ttf'],
   ]);
+  const noticeRenames = new Map(SOURCE_FONT_NOTICE_PAIRS.map(pair => [pair.notice,
+    pair.notice]));
+  if (noticeRenames.has(sourcePath)) return noticeRenames.get(sourcePath);
   if (fontRenames.has(sourcePath)) return fontRenames.get(sourcePath);
   if (sourcePath.startsWith('src/ui/') && path.posix.extname(sourcePath).toLowerCase() === '.css') {
     return `assets/ui/${sourcePath.slice('src/ui/'.length)}`;
@@ -497,6 +502,7 @@ export function materializeNarrativePlatformProjects(plan) {
     const seenMedia = new Set();
     const media = [];
     const assetPathMap = new Map();
+    validateSourceFontNoticePairing(pin.files.map(file => file.path), 'Ludory narrative source');
     for (const file of pin.files) {
       if (/^(?:images|media|audio|sounds|fonts)\//.test(file.path)) {
         throw new Error(`F5B_UNSUPPORTED_AUTHOR_MEDIA_ROOT: ${file.path}`);
@@ -513,7 +519,7 @@ export function materializeNarrativePlatformProjects(plan) {
       }
       if (!file.path.startsWith('assets/') || file.path === 'assets/ludory-narrative.js') continue;
       const targetPath = validateExportPath(exportAssetPath(file.path));
-      if (!mediaExtensions.has(extension)) {
+      if (!mediaExtensions.has(extension) && !sourceFontNoticePaths.has(file.path)) {
         throw new Error(`F5B_UNSUPPORTED_AUTHOR_MEDIA: ${file.path}`);
       }
       const folded = targetPath.toLowerCase();

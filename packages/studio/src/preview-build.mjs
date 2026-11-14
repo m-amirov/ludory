@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { verifyStudioOrigin } from '@ludory/studio-trust';
+import { SOURCE_FONT_NOTICE_PAIRS } from '../../release/src/font-notices.mjs';
 
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const publicRoots = new Set(['src', 'assets', 'media', 'images', 'audio', 'sounds', 'fonts']);
@@ -10,6 +11,7 @@ const publicExt = new Set([
   '.js', '.mjs', '.css', '.json', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.avif',
   '.gif', '.ico', '.ogg', '.mp3', '.wav', '.woff', '.woff2', '.ttf', '.webm', '.mp4',
 ]);
+const publicNoticePaths = new Set(SOURCE_FONT_NOTICE_PAIRS.map(pair => pair.notice));
 const maxFiles = 10_000;
 const maxFileSize = 25 * 1024 * 1024;
 const maxBytes = 160 * 1024 * 1024;
@@ -76,7 +78,7 @@ function listedFiles(project) {
       if (entry.isDirectory() && entry.name !== '__tests__') {
         descend(path.join(directory, entry.name), relative, depth + 1);
       } else if (entry.isFile() && !/(?:\.test|\.spec)\.m?js$/i.test(entry.name) &&
-                 publicExt.has(path.extname(entry.name).toLowerCase())) {
+                 (publicExt.has(path.extname(entry.name).toLowerCase()) || publicNoticePaths.has(relative))) {
         names.push(relative);
         if (++total > maxFiles) throw new Error('PREVIEW_SOURCE_TOO_LARGE');
       }

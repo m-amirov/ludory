@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { ReleaseInputError } from './errors.mjs';
+import { FONT_NOTICE_NAMES, validateFontNoticePairing } from './font-notices.mjs';
 
 export const SHA_256 = /^[a-f0-9]{64}$/;
 export const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -190,10 +191,13 @@ function inspectStoredArchive(archivePath, { required, target, platform, include
       fail('ARCHIVE_COPIED_SDK', `Copied platform SDK forbidden: ${name}`);
     }
     if (!required.includes(name) &&
-        (!name.startsWith('assets/') || !MEDIA.has(path.posix.extname(name).toLowerCase()))) {
+        (!name.startsWith('assets/') ||
+          (!MEDIA.has(path.posix.extname(name).toLowerCase()) && !FONT_NOTICE_NAMES.has(name)))) {
       fail('ARCHIVE_UNEXPECTED', `Unexpected file outside ${platform} candidate contract: ${name}`);
     }
   }
+  try { validateFontNoticePairing(fileContents.keys(), platform); }
+  catch (error) { fail('ARCHIVE_FONT_NOTICE_PAIRING', error.message); }
   let manifest;
   try { manifest = JSON.parse(fileContents.get('ludory.project.json').toString('utf8')); }
   catch { fail('ARCHIVE_MANIFEST', `${platform} project manifest is not JSON`); }
