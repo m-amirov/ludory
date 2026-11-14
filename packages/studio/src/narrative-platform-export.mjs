@@ -10,9 +10,8 @@ import { planCreate, applyCreatePlan } from './scaffold.mjs';
 import { compileNarrativePlatformEntrypoint } from './narrative-platform-compile.mjs';
 import { buildYandexCandidate } from '../../../scripts/build-yandex-candidate.mjs';
 import { buildVkCandidate } from '../../../scripts/build-vk-candidate.mjs';
-import { inspectYandexArchive, inspectVkArchive } from '@ludory/release';
+import { inspectYandexArchive, inspectVkArchive, SOURCE_FONT_NOTICE_PAIRS, validateSourceFontNoticePairing } from '@ludory/release';
 import { readRegularBytes } from '../../release/src/archive.mjs';
-import { SOURCE_FONT_NOTICE_PAIRS, validateSourceFontNoticePairing } from '../../release/src/font-notices.mjs';
 
 const mode = 'narrative-platform-export';
 const targets = Object.freeze(['yandex-games', 'vk-games']);

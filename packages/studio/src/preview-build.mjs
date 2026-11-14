@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { verifyStudioOrigin } from '@ludory/studio-trust';
-import { SOURCE_FONT_NOTICE_PAIRS } from '../../release/src/font-notices.mjs';
+import { SOURCE_FONT_NOTICE_PAIRS } from '@ludory/release';
 
 const sha256 = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const publicRoots = new Set(['src', 'assets', 'media', 'images', 'audio', 'sounds', 'fonts']);
